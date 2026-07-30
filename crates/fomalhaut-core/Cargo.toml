@@ -5,6 +5,12 @@ version = "0.1.0"
 license.workspace = true
 
 [dependencies]
+greetd_ipc = { version = "0.10.3", features = ["tokio-codec"] }
+tokio = { version = "1.53.1", features = ["net"] }
+zeroize = "1.9.0"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt"] }

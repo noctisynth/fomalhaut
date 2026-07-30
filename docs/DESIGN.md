@@ -321,7 +321,10 @@ Cancelling ─────────────────────► Id
   `PostAuthMessageResponse { response: None }` 确认，并继续读取下一条响应。
 - 不假设第一个 secret prompt 一定是密码。
 - 认证成功和 session 启动成功是两个不同阶段。
-- 在退出、页面失联或不可恢复错误时尽力发送 `CancelSession`。
+- 在正常退出、页面失联或 host 可控的错误路径中，必须显式等待 `cancel()` 完成并发送
+  `CancelSession`。
+- Rust `Drop` 不执行异步 IPC、不阻塞 runtime，也不派生无法等待的后台取消任务；析构只
+  清理敏感内存并关闭 transport。连接关闭是异常退出时的最后兜底。
 - greetd 连接断开后不盲目重放 PAM 回答。
 
 ## 7. 前端协议
@@ -554,7 +557,8 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 - secret 类型必须提供安全的 `Debug` 实现。
 - WebView 无法启动或主题加载失败时显示最小故障页面并保留可诊断日志。
 - 无法连接 `GREETD_SOCK` 时明确退出，避免呈现一个永远无法登录的假界面。
-- panic hook 和正常退出路径都应尽力取消活动认证 session。
+- 正常退出路径应显式等待活动认证 session 取消；panic/abort 等无法等待异步 IPC 的路径
+  通过关闭 transport 触发连接级清理，不在 panic hook 中启动后台异步任务。
 
 ## 14. 测试策略
 

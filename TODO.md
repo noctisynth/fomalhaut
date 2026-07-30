@@ -20,34 +20,34 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### Core 状态机
 
-- [ ] 定义 `GreeterState`、`GreeterEvent`、`PromptKind`、`PromptId` 和结构化错误。
-- [ ] 定义不泄漏内容并在 drop 时清零的 `Secret` 类型。
-- [ ] 定义 transport 抽象，使 core 可以连接真实 Unix socket 或测试 stub。
-- [ ] 使用 `greetd_ipc` 实现 Unix socket transport。
-- [ ] 实现 `create_session`。
-- [ ] 实现 secret 和 visible prompt 处理。
-- [ ] 使用 `PostAuthMessageResponse { response: None }` 自动确认 info/error PAM 消息。
-- [ ] 实现带 `PromptId` 校验的 `respond`。
-- [ ] 实现 `cancel`。
-- [ ] 实现只允许在认证成功后调用的 `start_session`。
-- [ ] 保证同一时刻只有一个 greetd 请求等待响应。
-- [ ] 处理连接断开、greetd error 和不可恢复协议错误。
-- [ ] 在退出和 drop 路径尽力取消活动 session。
+- [x] 定义 `GreeterState`、`GreeterEvent`、`PromptKind`、`PromptId` 和结构化错误。
+- [x] 定义不泄漏内容并在 drop 时清零的 `Secret` 类型。
+- [x] 定义 transport 抽象，使 core 可以连接真实 Unix socket 或测试 stub。
+- [x] 使用 `greetd_ipc` 实现 Unix socket transport。
+- [x] 实现 `create_session`。
+- [x] 实现 secret 和 visible prompt 处理。
+- [x] 使用 `PostAuthMessageResponse { response: None }` 自动确认 info/error PAM 消息。
+- [x] 实现带 `PromptId` 校验的 `respond`。
+- [x] 实现 `cancel`。
+- [x] 实现只允许在认证成功后调用的 `start_session`。
+- [x] 保证同一时刻只有一个 greetd 请求等待响应。
+- [x] 处理连接断开、greetd error 和不可恢复协议错误。
+- [x] 正常退出显式等待取消；Drop 清理敏感内存并关闭 transport，不执行异步 IPC。
 
 ### Core 测试
 
-- [ ] 覆盖所有合法状态转换。
-- [ ] 覆盖非法、重复和乱序操作。
-- [ ] 测试过期及重复 `PromptId`。
-- [ ] 测试用户名 + 密码流程。
-- [ ] 测试多轮 MFA 流程。
-- [ ] 测试 visible、secret、info 和 error 的混合流程。
-- [ ] 测试认证失败后重新认证。
-- [ ] 测试无密码账户。
-- [ ] 测试 session 启动成功和失败。
-- [ ] 测试 socket 断开及主动取消。
-- [ ] 验证日志、`Debug` 和错误中不包含 secret。
-- [ ] 集成或编写 greetd stub 测试后端。
+- [x] 覆盖所有合法状态转换。
+- [x] 覆盖非法、重复和乱序操作。
+- [x] 测试过期及重复 `PromptId`。
+- [x] 测试用户名 + 密码流程。
+- [x] 测试多轮 MFA 流程。
+- [x] 测试 visible、secret、info 和 error 的混合流程。
+- [x] 测试认证失败后重新认证。
+- [x] 测试无密码账户。
+- [x] 测试 session 启动成功和失败。
+- [x] 测试 socket 断开及主动取消。
+- [x] 验证日志、`Debug` 和错误中不包含 secret。
+- [x] 集成或编写 greetd stub 测试后端。
 
 ## P0：前端协议和可信 session
 
