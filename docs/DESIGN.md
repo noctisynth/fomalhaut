@@ -93,6 +93,15 @@ Fomalhaut 使用虚拟 Cargo workspace，统一采用以下项目基线：
 本地开发和 CI 都使用该滚动 channel；不保留旧工具链兼容性 job。stable 更新导致的编译、
 lint 或行为变化应作为正常维护工作及时修复，而不是通过固定旧版本规避。
 
+依赖同样采用滚动最新策略：
+
+- 新增依赖时，`cargo add` 默认选择执行时可用的最新稳定版本。
+- 不使用 `*` 等无上界约束；manifest 保存 Cargo 生成的语义化版本要求。
+- 提交 `Cargo.lock`，保证任一提交可以复现其已验证的依赖集合。
+- 持续更新 lockfile，并主动升级不在当前版本要求范围内的新主版本。
+- 依赖升级必须通过格式、Clippy、测试和文档构建；如果升级需要改变技术方案，仍须先更新
+  本文和 `TODO.md`。
+
 ```text
 fomalhaut/
 ├── Cargo.toml
@@ -177,6 +186,34 @@ core 不负责：
 - 执行 session ID 到可信 `SessionCommand` 的映射。
 - 应用电源操作、主题路径和持久化策略。
 - 管理进程退出码、日志和恢复页面。
+
+### 4.5 Monorepo 版本与发布
+
+Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包版本和发布：
+
+- Semifold 使用 Rust workspace resolver。
+- changeset 存放在仓库根目录的 `.changes/`。
+- 每个 crate 在自己的 `Cargo.toml` 中保存字面量 SemVer，不使用
+  `version.workspace = true`。
+- 四个初始 crate 分别从 `0.1.0` 开始，之后可以独立升级。
+- 当前所有 crate 使用 `alpha` release channel；在项目明确进入下一发布阶段前保持该通道。
+- 影响一个或多个可发布包的变更应通过 `smif commit` 创建 changeset。
+- 本地和 Agent 环境禁止执行 `smif version` 与 `smif publish`。
+- 版本更新和发布只能由 GitHub Actions 中的 `semifold ci` 执行；该流程根据 changeset
+  更新各包版本、包间依赖并发布已经完成版本变更的包。
+- Semifold 配置必须通过 `smif init`、`smif config` 等 CLI 维护，不手工模拟其输出。
+- Semifold 的 base branch 为 `main`，release branch 为 `release`。
+- `semifold-status.yaml` 在面向 `main` 的 pull request 上报告 changeset 状态。
+- `semifold-ci.yaml` 在推送到 `main` 后运行 `semifold ci`，由 Semifold 编排 version 或
+  publish 阶段。生成的 workflow 可以使用 CLI 的长命令名 `semifold`，本地文档统一使用
+  短命令名 `smif`。
+
+本地允许的 Semifold 操作限于 changeset 创建、只读状态查询和配置维护，例如
+`smif commit`、`smif status`、`smif config sync` 和 `smif config channel`。本地验证不得
+以 dry-run 为理由调用 `smif version` 或 `smif publish`。
+
+初始化迁移时，经用户明确授权，可以把 Cargo 自动生成的共享版本继承手工转换为独立的
+`version = "0.1.0"`。初始化完成后，正常版本变更必须交给 Semifold，不再手工修改版本号。
 
 ## 5. Core API
 
@@ -587,9 +624,11 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 ## 16. 兼容性与版本策略
 
 - Rust crate 遵循语义化版本。
+- 各 crate 独立维护版本，由 Semifold changeset 决定版本提升级别。
 - 所有 crate 使用 Rust 2024 Edition，并跟随最新 Rust stable，不承诺固定 MSRV。
 - Cargo manifest 不设置 `rust-version`；CI 不维护旧 Rust 版本兼容性矩阵。
 - Rust stable 或依赖升级引起的必要技术变动，仍须先更新本文和 `TODO.md` 再实施。
+- 第三方依赖跟随最新稳定版本，但通过 manifest 语义化约束和已提交 lockfile 保持构建可复现。
 - 前端协议单独维护整数主版本。
 - 同一 host 至少支持其当前协议版本。
 - 破坏性前端协议变更必须增加主版本。

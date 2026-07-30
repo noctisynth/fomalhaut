@@ -1,0 +1,48 @@
+[branches]
+base = "main"
+release = "release"
+
+[tags]
+chore = "Chores"
+feat = "New Features"
+fix = "Bug Fixes"
+perf = "Performance Improvements"
+refactor = "Refactors"
+
+[packages.fomalhaut]
+path = "crates/fomalhaut"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-core]
+path = "crates/fomalhaut-core"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-session]
+path = "crates/fomalhaut-session"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-web]
+path = "crates/fomalhaut-web"
+resolver = "rust"
+channel = "alpha"
+
+[resolver.rust.pre-check]
+url = "https://crates.io/api/v1/crates/{{ package.name }}/{{ package.version }}"
+
+[resolver.rust.pre-check.extra-headers]
+User-Agent = "Semifold 0.3.0-beta.1"
+
+[[resolver.rust.publish]]
+command = "cargo"
+args = ["publish"]
+
+[[resolver.rust.post-version]]
+command = "cargo"
+args = [
+    "generate-lockfile",
+    "--offline",
+]
+dry_run = true

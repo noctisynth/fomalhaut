@@ -30,6 +30,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 除初始化虚拟 workspace 时已经批准的根 manifest 外，不要手工编辑 Cargo manifest。
 依赖和 crate 变更应使用 `cargo add`、`cargo remove`、`cargo new` 或 `cargo init` 完成。
 
+各 crate 独立维护版本。影响可发布 crate 的变更应使用 `smif commit` 创建 changeset，
+不要手工修改 package version，也不要在本地执行 `smif version` 或 `smif publish`。
+版本更新和发布仅由 GitHub Actions 中的 Semifold CI 执行。
+
 ## 提交
 
 - 保持每个提交的目的单一。

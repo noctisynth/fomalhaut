@@ -65,6 +65,11 @@
   停止并向用户确认。不得退回到手动编辑 `Cargo.toml`。
 - 执行 Cargo CLI 后必须检查实际产生的 manifest 和工作区变更，确认它们与任务授权及
   `docs/DESIGN.md` 一致。
+- 包版本是上述规则的特例：正常版本变更只能由 GitHub Actions 中的 Semifold CI 根据
+  changeset 修改，不得使用 Cargo CLI、手工编辑或在本地执行版本命令。初始化独立版本时
+  已经由用户单独授权的手工迁移不构成后续修改版本号的先例。
+- GitHub Actions 中的 Semifold CI 同时更新的包间依赖版本属于发布事务的一部分，可以由
+  Semifold 写入 manifest；其他第三方依赖仍必须使用 Cargo CLI 管理。
 
 ### 4.1 `cargo add` 的网络权限
 
@@ -80,6 +85,21 @@
 - 不得申请不带目标 package 的宽泛 `cargo add` prefix rule。
 - 不得因为网络审批未通过、网络不可用或 `cargo add` 失败而手动编辑 `Cargo.toml`。
   此时必须停止并向用户说明阻塞。
+
+### 4.2 Semifold 版本与发布
+
+- 仓库使用 Semifold，CLI 命令为 `smif`。
+- 影响一个或多个可发布 crate 的变更应使用 `smif commit` 创建 changeset；纯文档、CI、
+  仓库管理和不影响发布包的变更可以不创建 changeset。
+- 不得手工编写 changeset 来绕过 Semifold CLI。
+- 不得手工修改 package version。
+- 本地和 Agent 环境严禁执行 `smif version` 与 `smif publish`，包括带 `--dry-run` 的
+  调用。版本更新和发布由 GitHub Actions 中的 `semifold ci` 独占执行。
+- 本地只允许使用 changeset、状态查询和配置维护命令，例如 `smif commit`、
+  `smif status`、`smif config sync` 和 `smif config channel`。
+- Semifold 配置和 package 列表应通过 `smif init`、`smif config sync` 等 CLI 维护。
+- 如果 Semifold 命令失败、发现的 package 与 workspace 不一致或版本结果不明确，应停止
+  并向用户确认，不得手工模拟 Semifold 的输出。
 
 ## 5. 任务完成与交付说明
 

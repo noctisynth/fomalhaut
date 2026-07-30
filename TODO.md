@@ -12,6 +12,9 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 创建 `fomalhaut-core`、`fomalhaut-session`、`fomalhaut-web` 和 `fomalhaut`
       四个 crate。
 - [x] 配置 Rust 2024 Edition、滚动 stable 工具链、rustfmt、Clippy 和测试命令。
+- [x] 将四个 crate 设置为独立的 `0.1.0` 版本并初始化 Semifold Rust resolver。
+- [x] 将全部包的 Semifold release channel 设置为 `alpha`，并限制 version/publish 只能
+      由 GitHub Actions 执行。
 - [x] 添加基础 CI：格式检查、Clippy、单元测试和文档构建。
 - [x] 编写贡献说明和基础 README。
 
@@ -182,7 +185,7 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 测试主题缺失、损坏和协议版本不匹配。
 - [ ] 测试多显示器和高 DPI 的基本行为。
 - [ ] 测试非 ASCII 用户名、prompt 和 session 名称。
-- [ ] 建立依赖和 Rust stable 滚动更新策略。
+- [x] 建立依赖和 Rust stable 滚动更新策略。
 
 ## P2：打包与首个发行版
 
@@ -192,6 +195,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 提供 shell completions 和 man page（如 CLI 稳定）。
 - [ ] 准备 Arch、Nix 或其他首批目标发行版的打包方案。
 - [ ] 编写升级和前端协议兼容说明。
+- [x] 使用 Semifold 生成的 status 与 CI workflow，由 GitHub Actions 独占 version 和
+      publish。
 - [ ] 完成许可证、第三方依赖和资源归属检查。
 - [ ] 发布前执行完整安全检查和端到端测试。
 

@@ -20,6 +20,7 @@ Fomalhaut（北落师门）是一个基于 greetd、使用本地 WebView 渲染�
 ## 开发
 
 项目使用 Rust 2024 Edition，并跟随最新 Rust stable 滚动更新，不维护固定 MSRV。
+第三方依赖也持续跟随最新稳定版本，并通过提交的 `Cargo.lock` 保持单个提交可复现。
 
 ```sh
 cargo fmt --all --check
@@ -27,6 +28,16 @@ cargo clippy --workspace --all-targets -- -D warnings -D clippy::unwrap_used
 cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
+
+Monorepo 的 changeset、独立包版本和发布由 Semifold 管理：
+
+```sh
+smif status
+smif commit
+```
+
+所有包当前使用 `alpha` release channel。`smif version` 和 `smif publish` 不得在本地
+执行；版本更新和发布由 GitHub Actions 中的 Semifold CI 独占处理。
 
 开始贡献前请阅读 [`AGENTS.md`](AGENTS.md) 和 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
