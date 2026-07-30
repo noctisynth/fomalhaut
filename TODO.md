@@ -7,13 +7,13 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### 仓库和 workspace
 
-- [ ] 初始化 Git 仓库并确定许可证。
-- [ ] 创建 Rust workspace。
-- [ ] 创建 `fomalhaut-core`、`fomalhaut-session`、`fomalhaut-web` 和 `fomalhaut`
+- [x] 初始化 Git 仓库并添加 `AGPL-3.0-only` 许可证。
+- [x] 创建使用 resolver 3 和 `crates/*` 成员模式的虚拟 Rust workspace。
+- [x] 创建 `fomalhaut-core`、`fomalhaut-session`、`fomalhaut-web` 和 `fomalhaut`
       四个 crate。
-- [ ] 配置统一的 Rust edition、最低 Rust 版本、rustfmt、Clippy 和测试命令。
-- [ ] 添加基础 CI：格式检查、Clippy、单元测试和文档构建。
-- [ ] 编写贡献说明和基础 README。
+- [x] 配置 Rust 2024 Edition、滚动 stable 工具链、rustfmt、Clippy 和测试命令。
+- [x] 添加基础 CI：格式检查、Clippy、单元测试和文档构建。
+- [x] 编写贡献说明和基础 README。
 
 ### Core 状态机
 
@@ -182,11 +182,11 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 测试主题缺失、损坏和协议版本不匹配。
 - [ ] 测试多显示器和高 DPI 的基本行为。
 - [ ] 测试非 ASCII 用户名、prompt 和 session 名称。
-- [ ] 建立依赖更新和最低版本测试策略。
+- [ ] 建立依赖和 Rust stable 滚动更新策略。
 
 ## P2：打包与首个发行版
 
-- [ ] 确定最低 Rust、greetd、WebKit 和 Cage 版本。
+- [ ] 确定 greetd、WebKit 和 Cage 的最低版本；Rust 继续跟随 stable。
 - [ ] 提供 systemd-tmpfiles 配置（如果需要状态或日志目录）。
 - [ ] 提供示例 greetd 配置和安装说明。
 - [ ] 提供 shell completions 和 man page（如 CLI 稳定）。

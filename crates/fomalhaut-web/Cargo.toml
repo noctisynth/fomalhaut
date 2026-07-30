@@ -1,0 +1,10 @@
+[package]
+name = "fomalhaut-web"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -76,6 +76,23 @@ Fomalhaut 是本机登录界面，不是 Web 服务器。正式运行时应通�
 
 ## 4. 建议的 workspace 结构
 
+Fomalhaut 使用虚拟 Cargo workspace，统一采用以下项目基线：
+
+- 许可证：GNU Affero General Public License v3.0（SPDX：`AGPL-3.0-only`）。
+- Rust Edition：2024。
+- Rust 工具链：跟随最新 stable 滚动更新，不声明或维护固定 MSRV。
+- Cargo feature resolver：版本 3。
+- Workspace 成员：通过 `crates/*` 自动包含 `crates/` 下的所有 crate。
+
+根 `Cargo.toml` 只包含 workspace 定义、共享 package 元数据和 workspace 级 lint，
+不包含根 package。由于 Cargo CLI 不能创建虚拟 workspace，项目初始化时允许手工创建一次
+根 manifest；各成员 crate 仍必须使用 `cargo new` 创建，依赖仍必须通过 `cargo add` 和
+`cargo remove` 管理。
+
+仓库通过 `rust-toolchain.toml` 选择 `stable` channel，并安装 rustfmt 和 Clippy 组件。
+本地开发和 CI 都使用该滚动 channel；不保留旧工具链兼容性 job。stable 更新导致的编译、
+lint 或行为变化应作为正常维护工作及时修复，而不是通过固定旧版本规避。
+
 ```text
 fomalhaut/
 ├── Cargo.toml
@@ -570,6 +587,9 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 ## 16. 兼容性与版本策略
 
 - Rust crate 遵循语义化版本。
+- 所有 crate 使用 Rust 2024 Edition，并跟随最新 Rust stable，不承诺固定 MSRV。
+- Cargo manifest 不设置 `rust-version`；CI 不维护旧 Rust 版本兼容性矩阵。
+- Rust stable 或依赖升级引起的必要技术变动，仍须先更新本文和 `TODO.md` 再实施。
 - 前端协议单独维护整数主版本。
 - 同一 host 至少支持其当前协议版本。
 - 破坏性前端协议变更必须增加主版本。
@@ -588,6 +608,6 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 - 多显示器策略由 compositor 还是 Fomalhaut host 管理。
 - 用户发现使用 NSS、AccountsService，还是作为可选 provider。
 - session desktop entry 解析采用现有 crate 还是小型自有解析层。
-- 最低 Rust、WebKitGTK、Cage 和 greetd 版本。
+- WebKitGTK、Cage 和 greetd 的最低兼容版本；Rust 工具链继续跟随 stable。
 
 这些决策不得削弱本文定义的 core/UI 分离和前端权限边界。
