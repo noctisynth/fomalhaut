@@ -12,9 +12,10 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 创建 `fomalhaut-core`、`fomalhaut-session`、`fomalhaut-web` 和 `fomalhaut`
       四个 crate。
 - [x] 配置 Rust 2024 Edition、滚动 stable 工具链、rustfmt、Clippy 和测试命令。
-- [x] 将四个 crate 设置为独立的 `0.1.0` 版本并初始化 Semifold Rust resolver。
+- [x] 将四个 crate 设置为独立的 `0.1.0-alpha` 版本并初始化 Semifold Rust resolver。
 - [x] 将全部包的 Semifold release channel 设置为 `alpha`，并限制 version/publish 只能
       由 GitHub Actions 执行。
+- [x] 统一使用英文编写 Semifold changeset。
 - [x] 添加基础 CI：格式检查、Clippy、单元测试和文档构建。
 - [x] 编写贡献说明和基础 README。
 

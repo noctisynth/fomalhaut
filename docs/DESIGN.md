@@ -195,9 +195,10 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 - changeset 存放在仓库根目录的 `.changes/`。
 - 每个 crate 在自己的 `Cargo.toml` 中保存字面量 SemVer，不使用
   `version.workspace = true`。
-- 四个初始 crate 分别从 `0.1.0` 开始，之后可以独立升级。
+- 四个初始 crate 分别从 `0.1.0-alpha` 开始，之后可以独立升级。
 - 当前所有 crate 使用 `alpha` release channel；在项目明确进入下一发布阶段前保持该通道。
 - 影响一个或多个可发布包的变更应通过 `smif commit` 创建 changeset。
+- changeset 的名称、分类和摘要必须使用英文，确保发布记录面向统一的国际化读者。
 - 本地和 Agent 环境禁止执行 `smif version` 与 `smif publish`。
 - 版本更新和发布只能由 GitHub Actions 中的 `semifold ci` 执行；该流程根据 changeset
   更新各包版本、包间依赖并发布已经完成版本变更的包。
@@ -213,7 +214,8 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 以 dry-run 为理由调用 `smif version` 或 `smif publish`。
 
 初始化迁移时，经用户明确授权，可以把 Cargo 自动生成的共享版本继承手工转换为独立的
-`version = "0.1.0"`。初始化完成后，正常版本变更必须交给 Semifold，不再手工修改版本号。
+`version = "0.1.0-alpha"`。初始化完成后，正常版本变更必须交给 Semifold，不再手工修改
+版本号。
 
 ## 5. Core API
 

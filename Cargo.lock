@@ -21,11 +21,11 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "fomalhaut"
-version = "0.1.0"
+version = "0.1.0-alpha"
 
 [[package]]
 name = "fomalhaut-core"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "greetd_ipc",
  "tokio",
@@ -34,11 +34,11 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-session"
-version = "0.1.0"
+version = "0.1.0-alpha"
 
 [[package]]
 name = "fomalhaut-web"
-version = "0.1.0"
+version = "0.1.0-alpha"
 
 [[package]]
 name = "greetd_ipc"
