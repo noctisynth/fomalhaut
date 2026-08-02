@@ -43,6 +43,5 @@ args = ["publish"]
 command = "cargo"
 args = [
     "generate-lockfile",
-    "--offline",
 ]
 dry_run = true

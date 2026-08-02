@@ -13,10 +13,15 @@ env:
 jobs:
   quality:
     name: Format, lint, test, and document
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends libwebkitgtk-6.0-dev
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
