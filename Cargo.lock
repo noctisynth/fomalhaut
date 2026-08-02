@@ -102,6 +102,7 @@ name = "fomalhaut"
 version = "0.1.0-alpha"
 dependencies = [
  "fomalhaut-core",
+ "fomalhaut-session",
  "fomalhaut-web",
  "greetd_ipc",
  "gtk4",

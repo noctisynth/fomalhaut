@@ -41,6 +41,7 @@ impl Drop for ScrubbedRequest {
 }
 
 /// Command and environment selected by a trusted host.
+#[derive(Clone)]
 pub struct SessionCommand {
     command: Vec<String>,
     environment: Vec<String>,

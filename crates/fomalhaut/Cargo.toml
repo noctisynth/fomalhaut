@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 fomalhaut-core = { version = "0.1.0-alpha", path = "../fomalhaut-core" }
+fomalhaut-session = { version = "0.1.0-alpha", path = "../fomalhaut-session" }
 fomalhaut-web = { version = "0.1.0-alpha", path = "../fomalhaut-web" }
 gtk4 = "0.11.4"
 tokio = { version = "1.53.1", features = ["net", "rt"] }

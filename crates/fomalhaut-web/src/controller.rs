@@ -4,7 +4,7 @@ use std::{collections::VecDeque, error::Error, fmt};
 
 use fomalhaut_core::{
     CoreError, GreeterClient, GreeterEvent, GreeterState, MessageLevel as CoreMessageLevel,
-    PromptId as CorePromptId, PromptKind as CorePromptKind, Transport,
+    PromptId as CorePromptId, PromptKind as CorePromptKind, SessionCommand, Transport,
 };
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
         AuthMessage, AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
         FrontendRequest, MAX_AUTH_MESSAGES, MessageLevel, Prompt, PromptId, PromptKind,
         ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope, ResponseResult,
-        StateChangedData, StateSnapshot,
+        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot,
     },
 };
 
@@ -22,6 +22,7 @@ use crate::{
 pub struct ControllerBatch {
     response: ResponseEnvelope,
     events: Vec<EventEnvelope>,
+    session_started: bool,
 }
 
 impl ControllerBatch {
@@ -29,6 +30,12 @@ impl ControllerBatch {
     #[must_use]
     pub fn into_parts(self) -> (ResponseEnvelope, Vec<EventEnvelope>) {
         (self.response, self.events)
+    }
+
+    /// Returns whether this transaction successfully started the trusted user session.
+    #[must_use]
+    pub const fn session_started(&self) -> bool {
+        self.session_started
     }
 
     /// Serializes the batch into one reply and ordered JavaScript event calls.
@@ -65,6 +72,20 @@ impl fmt::Display for ControllerError {
 
 impl Error for ControllerError {}
 
+/// Frontend-safe metadata paired with a command resolved entirely by the trusted host.
+pub struct TrustedSession {
+    summary: SessionSummary,
+    command: SessionCommand,
+}
+
+impl TrustedSession {
+    /// Pairs public metadata with its trusted launch command.
+    #[must_use]
+    pub const fn new(summary: SessionSummary, command: SessionCommand) -> Self {
+        Self { summary, command }
+    }
+}
+
 /// Serial authentication controller over an arbitrary core transport.
 pub struct HostController<T> {
     client: GreeterClient<T>,
@@ -72,6 +93,8 @@ pub struct HostController<T> {
     prompt: Option<Prompt>,
     core_prompt: Option<CorePromptId>,
     messages: VecDeque<AuthMessage>,
+    sessions: Vec<TrustedSession>,
+    selected_session: Option<usize>,
     sequences: EventSequence,
 }
 
@@ -79,13 +102,22 @@ impl<T> HostController<T> {
     /// Wraps a connected core client and initializes its public state.
     #[must_use]
     pub fn new(client: GreeterClient<T>) -> Self {
+        Self::with_sessions(client, Vec::new())
+    }
+
+    /// Wraps a connected core client with a host-resolved trusted session catalog.
+    #[must_use]
+    pub fn with_sessions(client: GreeterClient<T>, sessions: Vec<TrustedSession>) -> Self {
         let authentication = map_state(client.state());
+        let selected_session = (!sessions.is_empty()).then_some(0);
         Self {
             client,
             authentication,
             prompt: None,
             core_prompt: None,
             messages: VecDeque::new(),
+            sessions,
+            selected_session,
             sequences: EventSequence::default(),
         }
     }
@@ -96,8 +128,13 @@ impl<T> HostController<T> {
             self.authentication,
             self.prompt.clone(),
             self.messages.iter().cloned().collect(),
-            Vec::new(),
-            None,
+            self.sessions
+                .iter()
+                .map(|session| session.summary.clone())
+                .collect(),
+            self.selected_session
+                .and_then(|index| self.sessions.get(index))
+                .map(|session| session.summary.id().to_owned()),
             Capabilities::disabled(),
         )
         .map_err(|_| ControllerError::new("the controller public state is invalid"))
@@ -116,20 +153,67 @@ impl<T: Transport> HostController<T> {
             return Ok(ControllerBatch {
                 response: ResponseEnvelope::success(id, ResponseResult::State(snapshot)),
                 events: Vec::new(),
+                session_started: self.client.state() == GreeterState::Started,
             });
         }
 
         let previous_state = self.authentication;
-        let operation = self.execute(request).await;
-        let detail_events = match self.drain_core_events().await {
+        let mut operation = self.execute(request).await;
+        let mut detail_events = match operation.as_mut() {
+            Ok(events) => std::mem::take(events),
+            Err(_) => Vec::new(),
+        };
+        let core_events = match self.drain_core_events().await {
             Ok(events) => events,
             Err(error) => {
                 self.cancel_after_internal_failure().await;
                 return Err(error);
             }
         };
+        detail_events.extend(core_events);
+
+        if operation.is_ok()
+            && self.client.state() == GreeterState::Authenticated
+            && !self.sessions.is_empty()
+        {
+            let Some(selected) = self.selected_session else {
+                return Err(ControllerError::new(
+                    "the non-empty session catalog has no selected session",
+                ));
+            };
+            let command = self
+                .sessions
+                .get(selected)
+                .ok_or_else(|| {
+                    ControllerError::new("the selected session index is outside the catalog")
+                })?
+                .command
+                .clone();
+            if let Err(error) = self.client.start_session(command).await {
+                operation = Err(protocol_error(error));
+            }
+            let session_events = match self.drain_core_events().await {
+                Ok(events) => events,
+                Err(error) => {
+                    self.cancel_after_internal_failure().await;
+                    return Err(error);
+                }
+            };
+            detail_events.extend(session_events);
+        }
+
         self.authentication = map_state(self.client.state());
 
+        self.finish_batch(id, previous_state, operation, detail_events)
+    }
+
+    fn finish_batch(
+        &mut self,
+        id: crate::protocol::RequestId,
+        previous_state: AuthState,
+        operation: Result<Vec<Event>, ProtocolErrorBody>,
+        detail_events: Vec<Event>,
+    ) -> Result<ControllerBatch, ControllerError> {
         let mut events = Vec::with_capacity(detail_events.len().saturating_add(1));
         if previous_state != self.authentication {
             events.push(Event::StateChanged(StateChangedData::new(
@@ -140,10 +224,14 @@ impl<T: Transport> HostController<T> {
         let events = self.envelope_events(events)?;
 
         let response = match operation {
-            Ok(()) => ResponseEnvelope::success(id, ResponseResult::Empty(EmptyResult {})),
+            Ok(_) => ResponseEnvelope::success(id, ResponseResult::Empty(EmptyResult {})),
             Err(error) => ResponseEnvelope::error(id, error),
         };
-        Ok(ControllerBatch { response, events })
+        Ok(ControllerBatch {
+            response,
+            events,
+            session_started: self.client.state() == GreeterState::Started,
+        })
     }
 
     /// Cancels an active greetd session after a page or host lifecycle boundary.
@@ -164,7 +252,7 @@ impl<T: Transport> HostController<T> {
         Ok(())
     }
 
-    async fn execute(&mut self, request: FrontendRequest) -> Result<(), ProtocolErrorBody> {
+    async fn execute(&mut self, request: FrontendRequest) -> Result<Vec<Event>, ProtocolErrorBody> {
         match request {
             FrontendRequest::AuthBegin(params) => {
                 if matches!(
@@ -178,7 +266,8 @@ impl<T: Transport> HostController<T> {
                 self.client
                     .create_session(params.username().to_owned())
                     .await
-                    .map_err(protocol_error)
+                    .map_err(protocol_error)?;
+                Ok(Vec::new())
             }
             FrontendRequest::AuthRespond(params) => {
                 let (prompt_id, response) = params.into_parts();
@@ -191,21 +280,54 @@ impl<T: Transport> HostController<T> {
                 self.client
                     .respond(core_prompt, response.into_core_secret())
                     .await
-                    .map_err(protocol_error)
+                    .map_err(protocol_error)?;
+                Ok(Vec::new())
             }
-            FrontendRequest::AuthCancel(_) => self.client.cancel().await.map_err(protocol_error),
-            FrontendRequest::SessionSelect(_) => Err(ProtocolErrorBody::new(
-                ProtocolErrorCode::MethodDisabled,
-                "session selection is not available",
-                false,
-            )),
+            FrontendRequest::AuthCancel(_) => {
+                self.client.cancel().await.map_err(protocol_error)?;
+                Ok(Vec::new())
+            }
+            FrontendRequest::SessionSelect(params) => self.select_session(params.session_id()),
             FrontendRequest::PowerRequest(_) => Err(ProtocolErrorBody::new(
                 ProtocolErrorCode::MethodDisabled,
                 "power operations are disabled",
                 false,
             )),
-            FrontendRequest::StateGet(_) => Ok(()),
+            FrontendRequest::StateGet(_) => Ok(Vec::new()),
         }
+    }
+
+    fn select_session(&mut self, session_id: &str) -> Result<Vec<Event>, ProtocolErrorBody> {
+        if !matches!(
+            self.client.state(),
+            GreeterState::Idle
+                | GreeterState::Authenticating
+                | GreeterState::WaitingForPrompt
+                | GreeterState::Authenticated
+                | GreeterState::Failed
+        ) {
+            return Err(ProtocolErrorBody::new(
+                ProtocolErrorCode::InvalidState,
+                "session selection is invalid in the current authentication state",
+                false,
+            ));
+        }
+        let Some(index) = self
+            .sessions
+            .iter()
+            .position(|session| session.summary.id() == session_id)
+        else {
+            return Err(session_not_found_error());
+        };
+        self.selected_session = Some(index);
+        let event = SessionSelectedData::new(session_id.to_owned()).map_err(|_| {
+            ProtocolErrorBody::new(
+                ProtocolErrorCode::Internal,
+                "the selected session could not be represented",
+                false,
+            )
+        })?;
+        Ok(vec![Event::SessionSelected(event)])
     }
 
     async fn drain_core_events(&mut self) -> Result<Vec<Event>, ControllerError> {
@@ -354,6 +476,14 @@ fn stale_prompt_error() -> ProtocolErrorBody {
     )
 }
 
+fn session_not_found_error() -> ProtocolErrorBody {
+    ProtocolErrorBody::new(
+        ProtocolErrorCode::SessionNotFound,
+        "selected session is absent from the trusted catalog",
+        false,
+    )
+}
+
 trait ZeroizeControllerEvent {
     fn zeroize_for_controller(&mut self);
 }
@@ -383,9 +513,9 @@ mod tests {
     use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
     use serde_json::Value;
 
-    use super::{HostController, Transport};
-    use crate::protocol::{ProtocolErrorCode, decode_request};
-    use fomalhaut_core::{GreeterClient, TransportError};
+    use super::{HostController, Transport, TrustedSession};
+    use crate::protocol::{ProtocolErrorCode, SessionKind, SessionSummary, decode_request};
+    use fomalhaut_core::{GreeterClient, SessionCommand, TransportError};
 
     struct ScriptedTransport {
         responses: VecDeque<Result<Response, TransportError>>,
@@ -421,6 +551,17 @@ mod tests {
 
     fn json<T: serde::Serialize>(value: T) -> Value {
         serde_json::to_value(value).expect("controller output is serializable")
+    }
+
+    fn trusted_session(id: &str, name: &str, kind: SessionKind) -> TrustedSession {
+        let summary = SessionSummary::new(id.to_owned(), name.to_owned(), kind)
+            .expect("trusted session fixture is frontend-safe");
+        let command = SessionCommand::new(
+            vec![format!("/usr/bin/{name}")],
+            vec!["XDG_SESSION_TYPE=wayland".to_owned()],
+        )
+        .expect("trusted session fixture has a command");
+        TrustedSession::new(summary, command)
     }
 
     #[tokio::test]
@@ -541,22 +682,138 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unimplemented_trusted_operations_remain_disabled() {
+    async fn unknown_session_is_rejected_and_power_remains_disabled() {
         let client = GreeterClient::with_transport(ScriptedTransport::new([]));
         let mut controller = HostController::new(client);
 
-        for fixture in [
-            r#"{"protocol":1,"id":11,"method":"session.select","params":{"sessionId":"wayland:sway"}}"#,
-            r#"{"protocol":1,"id":12,"method":"power.request","params":{"action":"reboot"}}"#,
-        ] {
-            let batch = controller
-                .handle(request(fixture))
-                .await
-                .expect("disabled operation returns a protocol response");
-            let (response, events) = batch.into_parts();
-            assert_eq!(json(response)["error"]["code"], "method_disabled");
-            assert!(events.is_empty());
-        }
+        let select = controller
+            .handle(request(
+                r#"{"protocol":1,"id":11,"method":"session.select","params":{"sessionId":"wayland:sway"}}"#,
+            ))
+            .await
+            .expect("unknown selection returns a protocol response");
+        let (response, events) = select.into_parts();
+        assert_eq!(json(response)["error"]["code"], "session_not_found");
+        assert!(events.is_empty());
+
+        let power = controller
+            .handle(request(
+                r#"{"protocol":1,"id":12,"method":"power.request","params":{"action":"reboot"}}"#,
+            ))
+            .await
+            .expect("disabled power operation returns a protocol response");
+        let (response, events) = power.into_parts();
+        assert_eq!(json(response)["error"]["code"], "method_disabled");
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn trusted_selection_is_public_and_authentication_starts_it() {
+        let transport = ScriptedTransport::new([
+            Response::AuthMessage {
+                auth_message_type: AuthMessageType::Secret,
+                auth_message: "Password:".to_owned(),
+            },
+            Response::Success,
+            Response::Success,
+        ]);
+        let client = GreeterClient::with_transport(transport);
+        let sessions = vec![
+            trusted_session("wayland:first", "first", SessionKind::Wayland),
+            trusted_session("wayland:second", "second", SessionKind::Wayland),
+        ];
+        let mut controller = HostController::with_sessions(client, sessions);
+
+        let state = controller
+            .handle(request(
+                r#"{"protocol":1,"id":20,"method":"state.get","params":{}}"#,
+            ))
+            .await
+            .expect("trusted catalog snapshot is valid");
+        let (response, _) = state.into_parts();
+        let response = json(response);
+        assert_eq!(
+            response["result"]["sessions"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(response["result"]["selectedSessionId"], "wayland:first");
+
+        let selected = controller
+            .handle(request(
+                r#"{"protocol":1,"id":21,"method":"session.select","params":{"sessionId":"wayland:second"}}"#,
+            ))
+            .await
+            .expect("known trusted session can be selected");
+        let (response, events) = selected.into_parts();
+        assert_eq!(json(response)["ok"], true);
+        assert_eq!(json(events)[0]["event"], "session.selected");
+
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":22,"method":"auth.begin","params":{"username":"alice"}}"#,
+            ))
+            .await
+            .expect("authentication prompt is available");
+        let started = controller
+            .handle(request(
+                r#"{"protocol":1,"id":23,"method":"auth.respond","params":{"promptId":1,"response":"correct"}}"#,
+            ))
+            .await
+            .expect("trusted session starts after authentication");
+        assert!(started.session_started());
+        let (response, events) = started.into_parts();
+        assert_eq!(json(response)["ok"], true);
+        let events = json(events);
+        assert_eq!(events[0]["data"]["state"], "started");
+        assert!(events.as_array().is_some_and(|events| {
+            events
+                .iter()
+                .any(|event| event["event"] == "auth.succeeded")
+                && events
+                    .iter()
+                    .any(|event| event["event"] == "session.started")
+        }));
+
+        let after_start = controller
+            .handle(request(
+                r#"{"protocol":1,"id":24,"method":"session.select","params":{"sessionId":"wayland:first"}}"#,
+            ))
+            .await
+            .expect("selection after start returns a protocol response");
+        let (response, events) = after_start.into_parts();
+        assert_eq!(json(response)["error"]["code"], "invalid_state");
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn trusted_session_start_failure_is_sanitized() {
+        let transport = ScriptedTransport::new([
+            Response::Success,
+            Response::Error {
+                error_type: ErrorType::Error,
+                description: "private session failure".to_owned(),
+            },
+        ]);
+        let client = GreeterClient::with_transport(transport);
+        let sessions = vec![trusted_session(
+            "wayland:first",
+            "first",
+            SessionKind::Wayland,
+        )];
+        let mut controller = HostController::with_sessions(client, sessions);
+
+        let failed = controller
+            .handle(request(
+                r#"{"protocol":1,"id":25,"method":"auth.begin","params":{"username":"alice"}}"#,
+            ))
+            .await
+            .expect("session start failure remains protocol-safe");
+        assert!(!failed.session_started());
+        let (response, events) = failed.into_parts();
+        let response = json(response);
+        assert_eq!(response["error"]["code"], "internal");
+        assert!(!response.to_string().contains("private session failure"));
+        assert_eq!(json(events)[0]["data"]["state"], "failed");
     }
 
     #[tokio::test]

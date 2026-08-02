@@ -115,14 +115,19 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 从 `GREETD_SOCK` 建立 core 连接。
 - [x] 把 core event 转换成公开状态和有序前端事件。
 - [x] 把 `state.get`、`auth.begin`、`auth.respond` 和 `auth.cancel` 转换成经过状态检查的 core
-      调用，继续禁用 session 与 power 请求。
-- [ ] 实现 session 选择并在认证成功后启动可信 session。
+      调用，并继续禁用 power 请求。
+- [x] 使用不受环境变量影响的默认目录发现 session，拒绝空 catalog 和目录级错误。
+- [x] 将 catalog 转换为 controller 内部的公开摘要与可信 `SessionCommand`，默认选择稳定
+      顺序中的第一项。
+- [x] 实现只接受 catalog 内不透明 ID 的 `session.select`，并发出有序选择事件。
+- [x] 实现 session 选择并在认证成功后启动可信 session。
 - [x] 页面刷新或 bridge 断开时取消活动认证。
 - [x] 处理 WebView renderer 崩溃。
 - [x] 正常关闭时显式取消活动认证并等待 controller worker 退出。
 - [x] 使用 greetd stub 覆盖 bridge/controller 的密码、失败、过期 prompt、取消与刷新流程。
-- [ ] 登录成功后正确退出 Fomalhaut。
+- [x] 登录成功后正确退出 Fomalhaut。
 - [ ] 确保 Fomalhaut 退出后 Cage 能退出并让 greetd 接管用户 session。
+- [ ] 使用真实 DM 环境完成 Cage 退出与 greetd 接管的端到端验证。
 
 ### 配置
 

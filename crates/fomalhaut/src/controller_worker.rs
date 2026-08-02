@@ -10,7 +10,10 @@ use std::{
 };
 
 use fomalhaut_core::GreeterClient;
-use fomalhaut_web::{controller::HostController, protocol::RequestEnvelope};
+use fomalhaut_web::{
+    controller::{HostController, TrustedSession},
+    protocol::RequestEnvelope,
+};
 
 const CHANNEL_CAPACITY: usize = 8;
 
@@ -18,6 +21,7 @@ pub struct WorkerBatch {
     pub epoch: u64,
     pub response: String,
     pub event_scripts: Vec<String>,
+    pub session_started: bool,
 }
 
 pub enum WorkerOutput {
@@ -62,12 +66,15 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
-    pub fn spawn(socket_path: PathBuf) -> Result<(Self, Receiver<WorkerOutput>), WorkerSpawnError> {
+    pub fn spawn(
+        socket_path: PathBuf,
+        sessions: Vec<TrustedSession>,
+    ) -> Result<(Self, Receiver<WorkerOutput>), WorkerSpawnError> {
         let (command_sender, command_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         let (output_sender, output_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         let thread = thread::Builder::new()
             .name("fomalhaut-auth-controller".to_owned())
-            .spawn(move || run_worker(socket_path, command_receiver, output_sender))
+            .spawn(move || run_worker(socket_path, sessions, command_receiver, output_sender))
             .map_err(WorkerSpawnError)?;
 
         Ok((
@@ -114,6 +121,7 @@ impl Drop for WorkerHandle {
 
 fn run_worker(
     socket_path: PathBuf,
+    sessions: Vec<TrustedSession>,
     commands: Receiver<WorkerCommand>,
     outputs: SyncSender<WorkerOutput>,
 ) {
@@ -138,7 +146,7 @@ fn run_worker(
             return;
         }
     };
-    let mut controller = HostController::new(client);
+    let mut controller = HostController::with_sessions(client, sessions);
     if outputs.send(WorkerOutput::Ready).is_err() {
         let _ = runtime.block_on(controller.cancel_for_lifecycle());
         return;
@@ -157,6 +165,7 @@ fn run_worker(
                         break;
                     }
                 };
+                let session_started = batch.session_started();
                 let (response, event_scripts) = match batch.into_bridge_parts() {
                     Ok(parts) => parts,
                     Err(_) => {
@@ -172,6 +181,7 @@ fn run_worker(
                         epoch,
                         response,
                         event_scripts,
+                        session_started,
                     }))
                     .is_err()
                 {
@@ -215,7 +225,11 @@ mod tests {
     };
 
     use super::{WorkerHandle, WorkerOutput};
-    use fomalhaut_web::protocol::decode_request;
+    use fomalhaut_core::SessionCommand;
+    use fomalhaut_web::{
+        controller::TrustedSession,
+        protocol::{SessionKind, SessionSummary, decode_request},
+    };
     use greetd_ipc::{AuthMessageType, Request, Response, codec::TokioCodec};
 
     static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -308,7 +322,8 @@ mod tests {
             });
         });
 
-        let (worker, outputs) = WorkerHandle::spawn(path.clone()).expect("worker thread starts");
+        let (worker, outputs) =
+            WorkerHandle::spawn(path.clone(), Vec::new()).expect("worker thread starts");
         assert!(matches!(
             outputs
                 .recv_timeout(Duration::from_secs(2))
@@ -379,5 +394,127 @@ mod tests {
         worker.shutdown();
         server.join().expect("stub server completes");
         std::fs::remove_file(path).expect("worker test socket is removable");
+    }
+
+    #[test]
+    fn unix_worker_starts_only_the_host_resolved_session() {
+        let path = socket_path();
+        let listener = std::os::unix::net::UnixListener::bind(&path)
+            .expect("unique session-start socket can be bound");
+        listener
+            .set_nonblocking(true)
+            .expect("session-start listener can be made nonblocking");
+        let server = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build()
+                .expect("session-start server runtime can be created");
+            runtime.block_on(async move {
+                let listener = tokio::net::UnixListener::from_std(listener)
+                    .expect("session-start listener enters its runtime");
+                let (mut stream, _) = listener.accept().await.expect("worker connects to stub");
+
+                let create = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads create request");
+                assert!(matches!(
+                    create,
+                    Request::CreateSession { username } if username == "alice"
+                ));
+                Response::AuthMessage {
+                    auth_message_type: AuthMessageType::Secret,
+                    auth_message: "Password:".to_owned(),
+                }
+                .write_to(&mut stream)
+                .await
+                .expect("stub writes password prompt");
+
+                let respond = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads password response");
+                assert!(matches!(
+                    respond,
+                    Request::PostAuthMessageResponse { response } if response.as_deref() == Some("correct")
+                ));
+                Response::Success
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub accepts authentication");
+
+                let start = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads trusted session start");
+                assert!(matches!(
+                    start,
+                    Request::StartSession { cmd, env }
+                        if cmd == ["/usr/bin/fomalhaut-test-session", "--safe"]
+                            && env == ["XDG_SESSION_TYPE=wayland"]
+                ));
+                Response::Success
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub starts trusted session");
+            });
+        });
+
+        let summary = SessionSummary::new(
+            "wayland:fomalhaut-test".to_owned(),
+            "Fomalhaut Test".to_owned(),
+            SessionKind::Wayland,
+        )
+        .expect("session summary fixture is frontend-safe");
+        let command = SessionCommand::new(
+            vec![
+                "/usr/bin/fomalhaut-test-session".to_owned(),
+                "--safe".to_owned(),
+            ],
+            vec!["XDG_SESSION_TYPE=wayland".to_owned()],
+        )
+        .expect("session command fixture is non-empty");
+        let sessions = vec![TrustedSession::new(summary, command)];
+        let (worker, outputs) =
+            WorkerHandle::spawn(path.clone(), sessions).expect("session-start worker starts");
+        assert!(matches!(
+            outputs
+                .recv_timeout(Duration::from_secs(2))
+                .expect("session-start worker reports readiness"),
+            WorkerOutput::Ready
+        ));
+
+        let begin = decode_request(
+            br#"{"protocol":1,"id":1,"method":"auth.begin","params":{"username":"alice"}}"#,
+        )
+        .expect("begin request fixture is valid");
+        worker.submit(11, begin).expect("begin request is queued");
+        assert!(matches!(
+            outputs
+                .recv_timeout(Duration::from_secs(2))
+                .expect("worker returns password prompt"),
+            WorkerOutput::Batch(_)
+        ));
+
+        let respond = decode_request(
+            br#"{"protocol":1,"id":2,"method":"auth.respond","params":{"promptId":1,"response":"correct"}}"#,
+        )
+        .expect("response request fixture is valid");
+        worker.submit(11, respond).expect("response is queued");
+        let WorkerOutput::Batch(started) = outputs
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns session-start terminal batch")
+        else {
+            panic!("worker must return a session-start batch");
+        };
+        assert!(started.session_started);
+        assert!(
+            started
+                .event_scripts
+                .iter()
+                .any(|event| event.contains("session.started"))
+        );
+        assert!(!started.response.contains("fomalhaut-test-session"));
+
+        worker.shutdown();
+        server.join().expect("session-start stub server completes");
+        std::fs::remove_file(path).expect("session-start socket is removable");
     }
 }

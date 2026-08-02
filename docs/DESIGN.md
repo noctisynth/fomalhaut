@@ -253,11 +253,39 @@ bridge 在 GTK 主线程完成消息总长度检查和严格协议解码，再�
 controller 保存的当前 core `PromptId` 比较，实际调用 core 时传回原 core ID，不允许前端
 构造 core ID。
 
+可信 session 接入继续保持相同的 crate 边界：
+
+- `fomalhaut` 在启动 worker 前运行 `fomalhaut-session` discovery，并把 catalog 中每个条目
+  转换为一组前端安全的 `SessionSummary` 和 Rust 内部 `SessionCommand`。主题只能看到摘要；
+  命令、参数、环境变量和 desktop entry 路径不进入 JSON 或 GTK/WebKit 对象。
+- 在配置层完成前，host 使用固定且不受进程环境影响的默认目录：按优先级读取
+  `/usr/local/share/wayland-sessions`、`/usr/share/wayland-sessions`、
+  `/usr/local/share/xsessions` 和 `/usr/share/xsessions`；相对 `TryExec` 只在
+  `/usr/local/bin` 与 `/usr/bin` 中解析。不存在的目录继续忽略，目录级 I/O 错误、协议上限
+  无法容纳 catalog 或没有任何可用 session 都是启动失败。后续配置层替换这组显式输入，
+  不通过 `XDG_DATA_DIRS` 隐式改变可信搜索范围。
+- controller 持有已经由 host 解析的可信 session 集合，并默认选择 catalog 稳定顺序中的
+  第一项。`session.select` 只在该集合内按不透明 ID 切换选择，成功后发出
+  `session.selected`；未知 ID 返回 `session_not_found`。选择可以在认证开始前或认证进行中
+  调整，但 session 已开始、正在启动/取消或连接断开时拒绝改变。
+- 前端协议不增加 `session.start`。任一认证请求使 core 进入 `Authenticated` 后，controller
+  必须在同一个串行事务内立即使用当前选择的可信 `SessionCommand` 调用 `start_session`，
+  排空 `Authenticated` 与 `SessionStarted` 事件后才把批次交回 GTK。这样不存在由不可信
+  页面在认证成功后替换命令或延迟启动的窗口。
+- worker 输出显式携带“session 已启动”终态，不通过检查 JSON 文本推断。GTK 先完成当前
+  reply 和有序事件的投递，再以成功状态关闭 worker 和 application；此时 core 已处于
+  `Started`，shutdown 不再发送 `CancelSession`。Fomalhaut 的零退出使作为父进程的 Cage
+  随之退出，greetd 在 `StartSession` 成功后接管用户 session。Cage/greetd 的完整交接仍需
+  在真实 DM 环境做端到端验证，Unix socket stub 只验证 IPC 与宿主退出信号。
+
 当前纵向切片已使用内存 transport 和真实 Unix socket stub 验证密码 prompt、认证成功、认证
 失败、过期 prompt、显式 `auth.cancel`、页面取消、关闭取消、transport 断开脱敏、事件顺序
 及 session/power 禁用状态。Wayland 实例也已通过只保持连接的 stub 验证页面 `state.get`
 确实经过 WebKit bridge、有界通道和真实 controller；缺少或无法连接 `GREETD_SOCK` 均返回
-非零状态。
+非零状态。可信 session 切片进一步验证了默认选择、未知 ID 拒绝、选择事件、启动失败脱敏，
+以及 Unix socket 上发送的 `StartSession` argv/env 与 host 解析结果完全一致；worker 仅在收到
+greetd `Success` 后输出 session-started 终态。真实 Cage 退出与 greetd 接管不由 stub 结果
+替代，继续作为系统端到端验证项。
 
 ### 4.6 Monorepo 版本与发布
 

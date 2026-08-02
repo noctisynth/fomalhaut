@@ -11,10 +11,17 @@ use std::{
     time::Duration,
 };
 
+use fomalhaut_session::{
+    DiscoveryConfig, SessionDirectory, SessionKind as CatalogSessionKind, discover,
+};
 use fomalhaut_web::{
     assets::{PROTOTYPE_CSP, PROTOTYPE_HEADERS, resolve_builtin_asset},
     bridge::response_json,
-    protocol::{ProtocolErrorBody, ProtocolErrorCode, RequestId, ResponseEnvelope, decode_request},
+    controller::TrustedSession,
+    protocol::{
+        MAX_SESSIONS, ProtocolErrorBody, ProtocolErrorCode, RequestId, ResponseEnvelope,
+        SessionKind as WebSessionKind, SessionSummary, decode_request,
+    },
 };
 use gtk4 as gtk;
 use webkit6::{
@@ -33,6 +40,16 @@ const PROTOTYPE_URI: &str = "fomalhaut://theme/";
 const NOT_FOUND_BODY: &[u8] = b"The requested prototype resource does not exist.\n";
 const METHOD_NOT_ALLOWED_BODY: &[u8] = b"The prototype resource scheme only accepts GET.\n";
 const CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const DEFAULT_EXECUTABLE_DIRS: [&str; 2] = ["/usr/local/bin", "/usr/bin"];
+const DEFAULT_SESSION_DIRS: [(&str, CatalogSessionKind); 4] = [
+    (
+        "/usr/local/share/wayland-sessions",
+        CatalogSessionKind::Wayland,
+    ),
+    ("/usr/share/wayland-sessions", CatalogSessionKind::Wayland),
+    ("/usr/local/share/xsessions", CatalogSessionKind::X11),
+    ("/usr/share/xsessions", CatalogSessionKind::X11),
+];
 
 struct PendingReply {
     epoch: u64,
@@ -75,7 +92,9 @@ fn build_window(
     failed: Rc<Cell<bool>>,
 ) -> Result<gtk::ApplicationWindow, HostError> {
     let socket_path = greetd_socket_path()?;
-    let (worker, outputs) = WorkerHandle::spawn(socket_path).map_err(|_| HostError::WorkerSpawn)?;
+    let sessions = discover_trusted_sessions()?;
+    let (worker, outputs) =
+        WorkerHandle::spawn(socket_path, sessions).map_err(|_| HostError::WorkerSpawn)?;
     let worker = Rc::new(worker);
     let page_epoch = Rc::new(Cell::new(0));
     let pending_reply = Rc::new(RefCell::new(None));
@@ -142,6 +161,44 @@ fn build_window(
 
     web_view.load_uri(PROTOTYPE_URI);
     Ok(window)
+}
+
+fn discover_trusted_sessions() -> Result<Vec<TrustedSession>, HostError> {
+    let directories = DEFAULT_SESSION_DIRS
+        .iter()
+        .map(|(path, kind)| SessionDirectory::new(path, *kind))
+        .collect();
+    let executable_paths = DEFAULT_EXECUTABLE_DIRS.iter().map(PathBuf::from).collect();
+    let config = DiscoveryConfig::new(directories).with_executable_search_paths(executable_paths);
+    let report = discover(&config).map_err(|_| HostError::SessionDiscovery)?;
+    if report.catalog().is_empty() {
+        return Err(HostError::NoSessions);
+    }
+    if report.catalog().len() > MAX_SESSIONS {
+        return Err(HostError::InvalidSessionCatalog);
+    }
+
+    report
+        .catalog()
+        .sessions()
+        .map(|session| {
+            let kind = match session.kind() {
+                CatalogSessionKind::Wayland => WebSessionKind::Wayland,
+                CatalogSessionKind::X11 => WebSessionKind::X11,
+            };
+            let summary = SessionSummary::new(
+                session.id().as_str().to_owned(),
+                session.name().to_owned(),
+                kind,
+            )
+            .map_err(|_| HostError::InvalidSessionCatalog)?;
+            let command = report
+                .catalog()
+                .command(session.id())
+                .map_err(|_| HostError::InvalidSessionCatalog)?;
+            Ok(TrustedSession::new(summary, command))
+        })
+        .collect()
 }
 
 fn greetd_socket_path() -> Result<PathBuf, HostError> {
@@ -387,6 +444,13 @@ fn connect_worker_outputs(
                 Ok(WorkerOutput::Batch(batch)) => {
                     if batch.epoch != page_epoch.get() {
                         eprintln!("Fomalhaut discarded output from a stale page context");
+                        if batch.session_started {
+                            worker.shutdown();
+                            if let Some(application) = application.upgrade() {
+                                application.quit();
+                            }
+                            return glib::ControlFlow::Break;
+                        }
                         continue;
                     }
                     let Some(pending) = pending_reply.borrow_mut().take() else {
@@ -422,6 +486,14 @@ fn connect_worker_outputs(
                                 },
                             );
                         }
+                    }
+                    if batch.session_started {
+                        eprintln!("Fomalhaut trusted user session started; host is exiting");
+                        worker.shutdown();
+                        if let Some(application) = application.upgrade() {
+                            application.quit();
+                        }
+                        return glib::ControlFlow::Break;
                     }
                 }
                 Ok(WorkerOutput::Fatal(message)) => {
@@ -577,6 +649,9 @@ enum HostError {
     MissingGreetdSocket,
     InvalidGreetdSocket,
     WorkerSpawn,
+    SessionDiscovery,
+    NoSessions,
+    InvalidSessionCatalog,
     MissingSecurityManager,
     BridgeRegistration,
 }
@@ -587,6 +662,11 @@ impl fmt::Display for HostError {
             Self::MissingGreetdSocket => "GREETD_SOCK is not set",
             Self::InvalidGreetdSocket => "GREETD_SOCK must be a non-empty absolute path",
             Self::WorkerSpawn => "the authentication worker could not be started",
+            Self::SessionDiscovery => "the trusted session catalog could not be discovered",
+            Self::NoSessions => "the trusted session catalog is empty",
+            Self::InvalidSessionCatalog => {
+                "the trusted session catalog exceeds frontend safety limits"
+            }
             Self::MissingSecurityManager => "WebKit did not provide a security manager",
             Self::BridgeRegistration => "the JavaScript message handler could not be registered",
         })
