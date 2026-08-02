@@ -122,11 +122,11 @@ fomalhaut/
 │   │   └── src/
 │   │       ├── assets.rs
 │   │       ├── bridge.rs
-│   │       ├── protocol.rs
-│   │       └── webview.rs
+│   │       └── protocol/
 │   └── fomalhaut/
 │       └── src/
 │           ├── config.rs
+│           ├── gtk_host.rs
 │           ├── main.rs
 │           └── policy.rs
 ├── protocol/
@@ -522,22 +522,72 @@ entrypoint = "index.html"
 
 ## 9. WebView 运行环境
 
-首选方向是 Linux 原生 WebKit 方案：
+应用宿主固定使用 GTK4 + WebKitGTK 6.0，并通过 Rust `gtk4` 与 `webkit6` 原生绑定直接调用。
+当前阶段只实现和维护该宿主，不并行实现 WPE WebKit。
 
-- GTK4 + WebKitGTK，或
-- WPE WebKit。
+原型启用 `webkit6` 的 `gtk_v4_18` Cargo feature，使 WebKit 绑定与 GTK 的可访问性接口保持
+一致；因此当前编译基线为 GTK 4.18 或更新版本。开发环境使用滚动最新版 GTK 4.22 和
+WebKitGTK 2.52，WebKitGTK 的最终最低兼容版本仍需发行版验证后确定。
 
-最终 crate 和绑定版本应通过原型验证后决定。选择标准包括：
+不使用 Tao、Wry 或 Tauri。它们提供的跨平台窗口与 WebView 抽象不是 Linux DM 的需求，且
+当前 Linux 路径会引入 GTK3/WebKitGTK 4.1 兼容层、额外事件循环集成，并限制对 WebKitGTK
+安全接口和进程生命周期的直接控制。Electron 或完整 Chromium 同样不采用，因为它们会增加
+包体、内存、进程管理复杂度和攻击面。
 
-- Wayland 原生运行能力。
-- 自定义资源 scheme。
-- 可拦截导航、新窗口和下载。
-- JavaScript 到 Rust 的受控消息通道。
-- renderer 进程隔离和 sandbox 支持。
-- 发行版可用性及打包成本。
-- 在 Cage 等 kiosk compositor 下的稳定性。
+crate 边界保持如下：
 
-Electron 或完整 Chromium 不作为首选，因为它们会增加包体、内存、进程管理复杂度和攻击面。
+- `fomalhaut-web` 保存与具体 WebView 工具包无关的协议、bridge/controller 和主题资源策略，
+  不依赖 GTK 或 WebKitGTK，使协议和业务逻辑仍可在无图形环境测试和被其他应用宿主复用。
+- `fomalhaut` 是当前唯一可执行宿主，直接依赖 `gtk4`、`webkit6` 和 `fomalhaut-web`，负责
+  GTK application/window、WebView 生命周期、原生信号与系统集成。
+- GTK 和 WebKit 对象只在创建它们的 GTK 主线程访问。WebView 回调不得阻塞等待 greetd；
+  后续 Core 集成通过有界消息通道把请求交给异步 controller，再把序列化后的结果投递回
+  GLib 主上下文。
+
+首个应用侧原型使用内置的最小页面，不读取管理员主题目录，也不连接真实 greetd。它必须
+验证以下宿主能力，验证通过后才能进入真实 greeter 集成：
+
+- 创建 GTK4 全屏窗口并嵌入 WebKitGTK 6.0 `WebView`。
+- 通过 `fomalhaut://theme/` 自定义 scheme 加载内置 HTML、CSS 和 JavaScript，不使用
+  `file://` 或本地 TCP server。
+- 在 WebKit `SecurityManager` 中只把 `fomalhaut` scheme 标记为 secure 和
+  display-isolated。对照验证表明，自定义 scheme 的外部脚本无需 CORS-enabled 即可执行；
+  此前的执行失败实际由 `nosniff` 兼容性问题导致。display-isolated 阻止其他 scheme 页面
+  展示这些资源，严格 CSP 禁止网络连接，Rust 侧精确 URI 白名单拒绝未知 host/path。为保持
+  最小权限，scheme 不标记为 CORS-enabled、local 或 no-access。
+- 使用 WebKit `UserContentManager` 建立 JavaScript 到 Rust 的单一消息入口，所有输入先由
+  前端协议 v1 解码；Rust 到 JavaScript 只投递序列化后的协议消息。
+- 仅允许 `fomalhaut:` 页面和资源；拒绝 HTTP(S)、`file:`、`data:`、外部导航、新窗口与
+  下载。WebView 设置默认关闭开发者工具、自动弹窗和非必要 Web 能力。
+- 页面响应设置由 Rust 白名单决定的固定 MIME、严格 CSP、`Cross-Origin-Opener-Policy:
+  same-origin` 和 `Cache-Control: no-store`。WebKitGTK 2.52 会在自定义 scheme 响应包含
+  `X-Content-Type-Options: nosniff` 时拒绝执行该响应中的外部 JavaScript，即使其 MIME 已
+  固定为 `application/javascript`；因此自定义 scheme 不发送 `nosniff`。这一兼容性例外
+  不允许根据主题输入猜测 MIME，也不改变精确 URI 白名单、CSP 或 WebView 能力限制。
+- WebKit 不把自定义 scheme 资源视为 CSP 的 `'self'`，因此 prototype CSP 仅为 script、style
+  和 image 显式允许 `fomalhaut:`；`default-src`、`connect-src`、`frame-src`、`object-src`、
+  `base-uri` 和 `form-action` 继续设为 `'none'`。该 scheme 的全部请求仍必须先通过 Rust
+  侧精确 URI 白名单，CSP 允许 scheme 不代表允许任意 host 或 path。
+- renderer 终止、页面刷新和窗口退出具有可观察且拒绝式的处理路径。
+
+原型阶段可以用静态状态响应验证双向 bridge，但不得伪装成可用登录流程。真实 Core、Session、
+配置和外部主题目录接入仍属于后续 Host 集成与主题资源任务。
+
+在 Arch Linux、WebKitGTK 2.52.5、GTK 4.22.4 与 Cage 0.3.1 上的原型验证得到以下运行边界：
+
+- WebKitWebProcess 由 WebKitGTK 通过 bubblewrap 启动；运行时观测到 `NoNewPrivs=1`、seccomp
+  filter 生效且无 effective capabilities。6.0 API 不暴露 4.1 API 中的 sandbox 开关，宿主
+  不尝试关闭 sandbox，也不为 renderer 增加额外文件系统路径。
+- 宿主进程和 WebKitNetworkProcess 的该次观测未启用 seccomp。renderer sandbox 不能代替
+  宿主侧协议校验和资源策略，NetworkProcess 也不能被视为无网络能力；正式模式继续依赖
+  CSP、精确导航/响应白名单、临时 NetworkSession 和关闭非必要 Web API 来拒绝网络入口。
+- Arch 运行时至少需要 `gtk4` 与 `webkitgtk-6.0`；Cage 是推荐的独立 kiosk compositor，
+  不是 Rust 二进制的链接依赖。当前包版本的安装体积分别约为 54.67 MiB、130.77 MiB 和
+  70.68 KiB，WebKitGTK 还依赖 bubblewrap、libseccomp、libsoup3、GStreamer 和图形栈。
+- 一次调试构建空闲快照中，宿主、NetworkProcess 与 WebProcess 的 RSS 分别约为 382 MiB、
+  157 MiB 和 402 MiB；RSS 会重复计算共享页，并显著受 debug 符号、GPU 驱动和主题影响，
+  因而这里只作为原型成本上界信号。发布构建的 PSS/峰值以及非 Arch 发行版的包名和可用
+  版本仍需单独测量，不能据此声明最低运行需求。
 
 ## 10. greetd 与 Wayland 启动
 
@@ -722,14 +772,13 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 
 以下内容在完成小型原型后再固化：
 
-- GTK4 + WebKitGTK 与 WPE WebKit 的最终选择。
-- JavaScript bridge 的具体承载机制。
 - 自定义 scheme 是否能在目标发行版上稳定提供所需 CSP 和 MIME 行为。
 - renderer sandbox 在不同发行版中的默认状态和配置方法。
 - 多显示器策略由 compositor 还是 Fomalhaut host 管理。
 - 用户发现使用 NSS、AccountsService，还是作为可选 provider。
 - session desktop entry 基本格式使用 `freedesktop-desktop-entry`，登录 session 的严格
   `Exec` 校验和安全策略由 `fomalhaut-session` 实现。
-- WebKitGTK、Cage 和 greetd 的最低兼容版本；Rust 工具链继续跟随 stable。
+- WebKitGTK、Cage 和 greetd 的最低兼容版本；Rust 工具链继续跟随 stable。当前开发依赖
+  跟随滚动最新稳定版本，最低兼容版本只能在发行版验证后声明。
 
 这些决策不得削弱本文定义的 core/UI 分离和前端权限边界。

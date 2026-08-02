@@ -1,3 +1,5 @@
-fn main() {
-    println!("Fomalhaut is not implemented yet.");
+mod gtk_host;
+
+fn main() -> gtk4::glib::ExitCode {
+    gtk_host::run()
 }

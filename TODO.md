@@ -84,17 +84,25 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ## P0：WebView 技术原型
 
-- [ ] 制作 GTK4 + WebKitGTK 最小原型。
-- [ ] 制作或评估 WPE WebKit 最小原型。
-- [ ] 验证 Wayland 和 Cage 下的启动。
-- [ ] 验证自定义资源 scheme。
-- [ ] 验证 JavaScript 到 Rust 的消息 bridge。
-- [ ] 验证 Rust 到 JavaScript 的事件投递。
+- [x] 选择原生 GTK4 + WebKitGTK 6.0 宿主，不使用 Tao、Wry、Tauri 或 WPE。
+- [x] 启用 `webkit6/gtk_v4_18` 并验证 GTK 4.18+ 编译基线。
+- [x] 在 `fomalhaut` 中直接使用 `gtk4`/`webkit6` 制作最小全屏原型。
+- [x] 验证 Wayland 和 Cage 下的启动。
+- [x] 通过 `fomalhaut://theme/` 自定义 scheme 加载带固定 MIME、安全 header 和仅允许
+      `fomalhaut:` 静态资源的 CSP。
+- [x] 记录并测试 WebKitGTK 2.52 自定义 scheme 与 `nosniff` 的外部脚本兼容性例外，保证
+      MIME 仍由 Rust 白名单固定且不按主题输入推测。
+- [x] 将自定义 scheme 仅注册为 secure 和 display-isolated，不启用 CORS/local/no-access，
+      并测试其精确资源白名单及 CSP 边界。
+- [x] 通过单一 WebKit script message handler 验证 JavaScript 到 Rust 的协议 v1 bridge。
+- [x] 验证 Rust 到 JavaScript 只投递序列化后的协议消息。
 - [ ] 验证导航、新窗口和下载拦截。
 - [ ] 验证默认禁止远程网络资源。
-- [ ] 调查并记录 renderer sandbox 行为。
-- [ ] 比较运行时依赖、内存、发行版可用性和打包成本。
-- [ ] 选择最终 WebView 后端并在设计文档中记录决策。
+- [x] 默认关闭开发者工具、自动弹窗和非必要 Web 能力。
+- [ ] 让 renderer 终止、页面刷新和窗口退出进入可观察的拒绝式处理路径。
+- [x] 调查并记录 renderer sandbox 行为。
+- [x] 记录 Arch Linux 上 GTK4/WebKitGTK/Cage 的运行时依赖、包体积和调试构建 RSS 快照。
+- [ ] 测量发布构建的 PSS/峰值，并记录非 Arch 发行版的包名、可用版本与打包成本。
 
 ## P1：首个可用 greeter
 

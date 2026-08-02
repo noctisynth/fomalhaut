@@ -5,6 +5,9 @@ version = "0.1.0-alpha"
 license.workspace = true
 
 [dependencies]
+fomalhaut-web = { version = "0.1.0-alpha", path = "../fomalhaut-web" }
+gtk4 = "0.11.4"
+webkit6 = { version = "0.6.1", features = ["gtk_v4_18"] }
 
 [lints]
 workspace = true
