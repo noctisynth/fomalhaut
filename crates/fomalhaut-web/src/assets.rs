@@ -1,11 +1,11 @@
 //! Embedded minimal theme used by the native WebKitGTK host.
 
 /// Content Security Policy applied to every embedded theme resource response.
-pub const EMBEDDED_THEME_CSP: &str = "default-src 'none'; script-src fomalhaut:; style-src fomalhaut:; img-src fomalhaut:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+pub const THEME_CSP: &str = "default-src 'none'; script-src fomalhaut:; style-src fomalhaut:; img-src fomalhaut:; font-src fomalhaut:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 /// Fixed security headers returned by the embedded theme resource scheme.
-pub const EMBEDDED_THEME_HEADERS: [(&str, &str); 3] = [
-    ("Content-Security-Policy", EMBEDDED_THEME_CSP),
+pub const THEME_HEADERS: [(&str, &str); 3] = [
+    ("Content-Security-Policy", THEME_CSP),
     ("Cross-Origin-Opener-Policy", "same-origin"),
     ("Cache-Control", "no-store"),
 ];
@@ -430,7 +430,7 @@ pub const fn resolve_builtin_asset(uri: &str) -> Option<BuiltinAsset> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EMBEDDED_THEME_CSP, EMBEDDED_THEME_HEADERS, resolve_builtin_asset};
+    use super::{THEME_CSP, THEME_HEADERS, resolve_builtin_asset};
 
     #[test]
     fn resolves_only_exact_allowlisted_uris() {
@@ -449,19 +449,20 @@ mod tests {
 
     #[test]
     fn embedded_theme_csp_has_no_network_or_inline_script_escape() {
-        assert!(EMBEDDED_THEME_CSP.contains("default-src 'none'"));
-        assert!(EMBEDDED_THEME_CSP.contains("connect-src 'none'"));
-        assert!(EMBEDDED_THEME_CSP.contains("script-src fomalhaut:"));
-        assert!(EMBEDDED_THEME_CSP.contains("style-src fomalhaut:"));
-        assert!(!EMBEDDED_THEME_CSP.contains("unsafe-inline"));
-        assert!(!EMBEDDED_THEME_CSP.contains("http:"));
-        assert!(!EMBEDDED_THEME_CSP.contains("https:"));
+        assert!(THEME_CSP.contains("default-src 'none'"));
+        assert!(THEME_CSP.contains("connect-src 'none'"));
+        assert!(THEME_CSP.contains("script-src fomalhaut:"));
+        assert!(THEME_CSP.contains("style-src fomalhaut:"));
+        assert!(THEME_CSP.contains("font-src fomalhaut:"));
+        assert!(!THEME_CSP.contains("unsafe-inline"));
+        assert!(!THEME_CSP.contains("http:"));
+        assert!(!THEME_CSP.contains("https:"));
     }
 
     #[test]
     fn embedded_theme_headers_avoid_webkit_custom_scheme_nosniff_incompatibility() {
         assert!(
-            EMBEDDED_THEME_HEADERS
+            THEME_HEADERS
                 .iter()
                 .all(|(name, _)| !name.eq_ignore_ascii_case("X-Content-Type-Options"))
         );

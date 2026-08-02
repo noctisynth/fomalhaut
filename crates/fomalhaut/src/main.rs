@@ -1,3 +1,4 @@
+mod config;
 mod controller_worker;
 mod gtk_host;
 

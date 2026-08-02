@@ -5,10 +5,12 @@ version = "0.1.0-alpha"
 license.workspace = true
 
 [dependencies]
+cap-std = "4.0.2"
 fomalhaut-core = { version = "0.1.0-alpha", path = "../fomalhaut-core" }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+toml = "1.1.4"
 zeroize = "1.9.0"
 
 [lints]

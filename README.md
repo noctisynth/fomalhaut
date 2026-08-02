@@ -6,7 +6,8 @@ Fomalhaut（北落师门）是一个基于 greetd、使用本地 WebView 渲染�
 协议连接用户自行提供的 HTML、CSS 和 JavaScript 前端。Fomalhaut 不实现 PAM，也不向前端
 开放 greetd socket、任意命令执行或远程登录服务。
 
-> Fomalhaut 目前处于初始化阶段，尚不能用于实际登录。
+> Fomalhaut 目前处于 alpha 阶段，真实 greetd/Cage/Wayland 登录链路已经验证；配置格式、外部
+> 主题接口和打包方式仍可能在首个稳定版本前演进。
 
 ## Workspace
 
@@ -15,7 +16,8 @@ Fomalhaut（北落师门）是一个基于 greetd、使用本地 WebView 渲染�
 - `fomalhaut-web`：WebView、主题资源和前端协议 bridge。
 - `fomalhaut`：组合各组件的最终 greeter 程序。
 
-详细技术方案见 [`docs/DESIGN.md`](docs/DESIGN.md)，实现进度见 [`TODO.md`](TODO.md)。
+详细技术方案见 [`docs/DESIGN.md`](docs/DESIGN.md)，外部主题与系统配置见
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)，实现进度见 [`TODO.md`](TODO.md)。
 
 ## 开发
 

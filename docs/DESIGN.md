@@ -552,15 +552,9 @@ v1 事件至少包含：
 ```toml
 [frontend]
 path = "/etc/fomalhaut/themes/my-theme"
-entrypoint = "index.html"
-
-[frontend.security]
-allow_network = false
-allow_navigation = false
-allow_devtools = false
 ```
 
-可选的主题清单：
+外部主题目录必须包含主题清单：
 
 ```toml
 [theme]
@@ -571,12 +565,38 @@ entrypoint = "index.html"
 
 主题加载规则：
 
-- 对入口文件做规范化路径检查。
-- 拒绝通过 `..`、符号链接或编码绕过访问主题根目录之外的文件。
-- 根据扩展名提供固定 MIME 类型。
+- 外部主题是管理员选择的受信任代码，而不是安全沙箱中的不可信内容。主题 JavaScript 能读取
+  用户在页面中输入的用户名、PAM 回答和其他认证信息，因此当前版本只适合安装来源可信、内容
+  已审查的主题。资源 capability、CSP 和导航限制用于缩小误配置与文件暴露面，不构成对恶意
+  主题代码的完整隔离；主题来源验证、签名或打包机制留待后续安全加固。
+- `/etc/fomalhaut/config.toml` 不存在时使用内嵌 minimal theme；文件存在但无法读取、解析或
+  通过语义验证时明确失败，不静默回退。配置指定外部主题时，缺失/损坏的 `theme.toml`、
+  不支持的 protocol 或无效入口同样是启动失败。运行中某个资源消失只返回脱敏的资源错误。
+- 外部主题根必须是绝对目录。host 使用 `cap-std` 打开一次目录 capability；主题清单和所有
+  资源只通过该句柄的相对路径 API 打开，并直接从打开的文件描述符读取。不得先
+  `canonicalize` 再按全局路径读取，避免检查与读取不同文件。
+- URI 只接受 `fomalhaut://theme/` 下由 ASCII 字母、数字、`-`、`_`、`.` 和 `/` 组成的路径；
+  每个 segment 必须非空且不是 `.`/`..`，拒绝反斜杠、百分号、query、fragment、绝对路径和
+  NUL。根 URI 映射到清单入口，其他 URI 映射到同名相对文件。
+- 配置的主题根路径本身可以是 symlink：打开后其目标目录成为 capability 根，支持管理员用
+  symlink 选择实际主题位置。根内相对 symlink 可以引用仍位于 capability 内的共享资源；
+  指向根外的绝对或相对 symlink 解析为不可用资源，不得把 `greeter` 可读的外部文件暴露给
+  `fomalhaut://theme/`。这是当前实现和回归测试覆盖的行为；对不同平台、复杂链接链和并发替换
+  的完整保证仍以 P2 的独立 `cap-std` 审计为准。
+- 安全测试必须区分 `Err` 与“拒绝后按不存在处理”的 `Ok(None)`：根外 symlink 返回后者也
+  表示内容未被读取。测试同时验证根内 symlink 可读和根外内容不会出现在响应中，避免把错误
+  分类误判为目录逃逸。
+- 从已打开文件句柄读取仍要验证普通文件并限制单资源最多 8 MiB。主题清单最多 16 KiB，系统
+  配置最多 64 KiB。
+- 根据小写扩展名提供固定 MIME 白名单，首阶段支持 HTML、CSS、JavaScript、JSON、SVG、
+  PNG、JPEG、GIF、WebP、ICO、WOFF 和 WOFF2；未知扩展名拒绝，不根据文件内容或主题输入
+  猜测 MIME。
 - 默认拒绝远程资源和非 Fomalhaut scheme。
 - 对 HTML 设置严格 Content Security Policy。
-- 主题加载失败时显示内置的最小故障页面。
+- 只允许清单入口作为顶层导航；其他 allowlist 资源只能作为子资源响应，主题不能导航到自己
+  的其他 HTML 页面来重建授权上下文。
+- 内置最小故障页面完成前，外部主题启动验证失败使宿主以非零状态退出；不得用内置登录主题
+  静默替代管理员明确配置但损坏的主题。
 
 内置故障页面只负责报告主题无法加载，不作为正式可定制主题，也不需要实现完整登录流程。
 
@@ -703,6 +723,11 @@ user = "greeter"
 认证及 `StartSession` 成功后，Fomalhaut 退出，kiosk compositor 随之退出，用户 session
 由 greetd 管理。Fomalhaut 必须作为专门的低权限 `greeter` 用户运行，不应以 root 运行。
 
+2026 年 8 月已在真实设备上由用户验证完整链路：greetd 以 `greeter` 用户通过 Cage 启动
+Fomalhaut，内嵌 minimal theme 完成 PAM 交互并选择已发现的 Wayland session；
+`StartSession` 成功后 Fomalhaut 与 Cage 正常退出，greetd 接管用户 session。该结果确认当前
+纵向链路可用，但不替代后续自动化 Cage 回归、X11、失败恢复和更多发行版验证。
+
 ## 11. 安全模型
 
 ### 11.1 信任关系
@@ -769,6 +794,37 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 
 1. 语法反序列化。
 2. 语义验证和路径规范化。
+
+首个配置纵向切片固定读取 `/etc/fomalhaut/config.toml`，不接受前端、主题或普通进程环境变量
+覆盖配置路径。文件缺失使用安全默认值；存在但不可读取或无效时退出。TOML 顶层和各 section
+均拒绝未知字段，语法层只反序列化原始值，语义层再验证绝对路径、空值、数量与跨字段约束。
+初始公开结构为：
+
+```toml
+[frontend]
+path = "/etc/fomalhaut/themes/my-theme"
+
+[sessions]
+wayland_dirs = ["/usr/local/share/wayland-sessions", "/usr/share/wayland-sessions"]
+x11_dirs = ["/usr/local/share/xsessions", "/usr/share/xsessions"]
+executable_search_paths = ["/usr/local/bin", "/usr/bin"]
+```
+
+- `frontend` 缺失时选择内嵌 minimal theme；存在时只包含绝对主题目录，入口和协议版本由目录
+  内必需的 `theme.toml` 决定，避免配置与清单出现两个互相冲突的入口来源。
+- `sessions` 缺失时沿用固定默认目录。section 存在时，每个缺失字段仍继承对应默认值；显式
+  空数组用于禁用该类目录。所有目录必须是无 NUL 的绝对路径，保持数组顺序作为优先级；
+  至少要发现一个最终可用 session，否则启动失败。
+- 首个切片不加入可配置网络、CSP、开发者工具或任意 header。安全策略仍是编译期拒绝式常量，
+  避免把主题配置扩展成降低宿主边界的权限开关。
+- 日志目标、记忆用户/session 和电源策略继续留作后续字段；在实现前未知字段会被拒绝，不能
+  提前依赖未承诺的配置键。
+
+配置与外部主题纵向切片已用自动化测试验证：配置缺失时安全回退、未知字段和相对路径拒绝、
+显式 session 优先级、64 KiB 上限、清单 protocol/入口校验、URI 语法、MIME 白名单、顶层导航
+限制、配置根 symlink、根内相对 symlink、根外 symlink 拒绝以及资源读取边界。完整 workspace
+测试同时继续覆盖真实 Unix socket greetd 流程；内嵌主题仍通过 Wayland/WebKitGTK 运行探针
+验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。
 
 无效安全配置应导致启动失败或回退到安全默认值，不能静默放宽限制。
 

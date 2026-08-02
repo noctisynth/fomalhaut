@@ -126,30 +126,31 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 正常关闭时显式取消活动认证并等待 controller worker 退出。
 - [x] 使用 greetd stub 覆盖 bridge/controller 的密码、失败、过期 prompt、取消与刷新流程。
 - [x] 登录成功后正确退出 Fomalhaut。
-- [ ] 确保 Fomalhaut 退出后 Cage 能退出并让 greetd 接管用户 session。
-- [ ] 使用真实 DM 环境完成 Cage 退出与 greetd 接管的端到端验证。
+- [x] 确保 Fomalhaut 退出后 Cage 能退出并让 greetd 接管用户 session。
+- [x] 使用真实 DM 环境完成 Cage 退出与 greetd 接管的端到端验证。
 
 ### 配置
 
-- [ ] 定义 `/etc/fomalhaut/config.toml` 的配置模型。
-- [ ] 分离 TOML 语法解析和语义验证。
-- [ ] 支持主题目录及入口配置。
-- [ ] 支持 session 目录和过滤策略。
+- [x] 定义拒绝未知字段、限制 64 KiB 的 `/etc/fomalhaut/config.toml` 配置模型。
+- [x] 分离 TOML 语法解析和绝对路径、空值及跨字段约束的语义验证。
+- [x] 支持外部主题目录配置；入口和协议版本由必需的 `theme.toml` 提供。
+- [x] 支持 Wayland/X11 session 目录及 `TryExec` 搜索目录配置，并保持安全默认值。
 - [ ] 支持日志级别和日志目标。
 - [ ] 支持是否记住上次用户和上次 session。
 - [ ] 对安全相关配置提供拒绝式默认值。
-- [ ] 为配置添加示例、schema 或完整字段文档。
+- [x] 为配置添加示例、schema 或完整字段文档。
 
 ### 主题资源加载
 
-- [ ] 实现 `fomalhaut://theme/` 或最终确定的本地资源 scheme。
-- [ ] 实现入口文件和静态资源加载。
-- [ ] 实现 MIME 类型映射。
-- [ ] 防止 `..` 目录穿越。
-- [ ] 防止 symlink escape。
-- [ ] 设置严格 CSP。
-- [ ] 默认禁止外部 URL、远程脚本和远程字体。
-- [ ] 实现主题清单及前端协议版本检查。
+- [x] 让现有 `fomalhaut://theme/` scheme 在内嵌主题与外部 capability 目录间统一调度。
+- [x] 实现清单入口文件和最大 8 MiB 的静态资源加载。
+- [x] 实现固定 MIME 类型白名单。
+- [x] 严格拒绝 `..`、`.`、空 segment、反斜杠、百分号、query 和 fragment。
+- [x] 使用目录 capability 和打开后的文件描述符读取资源；回归测试允许根内 symlink，并拒绝
+      已知的根外 symlink escape。
+- [x] 设置严格 CSP。
+- [x] 默认禁止外部 URL、远程脚本和远程字体。
+- [x] 实现最大 16 KiB、拒绝未知字段的主题清单及前端协议版本检查。
 - [ ] 实现内置最小故障页面。
 
 ### Minimal theme
@@ -168,11 +169,11 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### greetd/Cage 集成
 
-- [ ] 编写 greetd 配置示例。
-- [ ] 编写 Cage 启动示例。
-- [ ] 验证低权限 `greeter` 用户运行。
+- [x] 编写 greetd 配置示例。
+- [x] 编写 Cage 启动示例。
+- [x] 验证低权限 `greeter` 用户运行。
 - [ ] 验证 VT 切换和失败恢复。
-- [ ] 验证 Wayland session 登录。
+- [x] 验证 Wayland session 登录。
 - [ ] 验证至少一种 X11 session 登录方案。
 - [ ] 记录 compositor 和系统运行时依赖。
 
@@ -195,6 +196,10 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 禁用开发者工具、下载、弹窗、任意导航和不需要的 Web API。
 - [ ] 验证正式模式没有 TCP 监听端口。
 - [ ] 审计主题路径规范化和资源 scheme。
+- [ ] 独立审计 `cap-std` 目录 capability 的 symlink 与竞态保证，并保留根内允许、根外拒绝
+      的回归测试。
+- [ ] 为“外部主题必须由管理员信任并审查”的当前安全前提编写运维警告，并评估主题打包、
+      签名、来源验证或更强隔离机制；不得把 capability/CSP 描述为对恶意主题代码的完整沙箱。
 - [ ] 审计 desktop entry 到 `SessionCommand` 的转换。
 - [ ] 为电源操作建立枚举和管理员策略，不接受前端命令行。
 - [ ] 评估剪贴板、拖放、文件选择器和自定义 URL handler。

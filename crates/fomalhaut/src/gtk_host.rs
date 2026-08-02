@@ -11,17 +11,16 @@ use std::{
     time::Duration,
 };
 
-use fomalhaut_session::{
-    DiscoveryConfig, SessionDirectory, SessionKind as CatalogSessionKind, discover,
-};
+use fomalhaut_session::{DiscoveryConfig, SessionKind as CatalogSessionKind, discover};
 use fomalhaut_web::{
-    assets::{EMBEDDED_THEME_CSP, EMBEDDED_THEME_HEADERS, resolve_builtin_asset},
+    assets::{THEME_CSP, THEME_HEADERS},
     bridge::response_json,
     controller::TrustedSession,
     protocol::{
         MAX_SESSIONS, ProtocolErrorBody, ProtocolErrorCode, RequestId, ResponseEnvelope,
         SessionKind as WebSessionKind, SessionSummary, decode_request,
     },
+    theme::ThemeSource,
 };
 use gtk4 as gtk;
 use webkit6::{
@@ -32,24 +31,18 @@ use webkit6::{
 };
 use webkit6::{gio, glib, prelude::*};
 
-use crate::controller_worker::{SubmitError, WorkerHandle, WorkerOutput};
+use crate::{
+    config::AppConfig,
+    controller_worker::{SubmitError, WorkerHandle, WorkerOutput},
+};
 
 const APPLICATION_ID: &str = "org.fomalhautdm.Fomalhaut";
 const BRIDGE_NAME: &str = "fomalhaut";
 const BUILTIN_THEME_URI: &str = "fomalhaut://theme/";
-const NOT_FOUND_BODY: &[u8] = b"The requested embedded theme resource does not exist.\n";
-const METHOD_NOT_ALLOWED_BODY: &[u8] = b"The embedded theme resource scheme only accepts GET.\n";
+const NOT_FOUND_BODY: &[u8] = b"The requested theme resource does not exist.\n";
+const METHOD_NOT_ALLOWED_BODY: &[u8] = b"The theme resource scheme only accepts GET.\n";
+const RESOURCE_ERROR_BODY: &[u8] = b"The requested theme resource could not be loaded.\n";
 const CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const DEFAULT_EXECUTABLE_DIRS: [&str; 2] = ["/usr/local/bin", "/usr/bin"];
-const DEFAULT_SESSION_DIRS: [(&str, CatalogSessionKind); 4] = [
-    (
-        "/usr/local/share/wayland-sessions",
-        CatalogSessionKind::Wayland,
-    ),
-    ("/usr/share/wayland-sessions", CatalogSessionKind::Wayland),
-    ("/usr/local/share/xsessions", CatalogSessionKind::X11),
-    ("/usr/share/xsessions", CatalogSessionKind::X11),
-];
 
 struct PendingReply {
     epoch: u64,
@@ -91,8 +84,17 @@ fn build_window(
     application: &gtk::Application,
     failed: Rc<Cell<bool>>,
 ) -> Result<gtk::ApplicationWindow, HostError> {
+    let (theme_directory, discovery) = AppConfig::load()
+        .map_err(|_| HostError::Configuration)?
+        .into_parts();
+    let theme = Rc::new(match theme_directory {
+        Some(directory) => {
+            ThemeSource::external(directory).map_err(|_| HostError::ExternalTheme)?
+        }
+        None => ThemeSource::Embedded,
+    });
     let socket_path = greetd_socket_path()?;
-    let sessions = discover_trusted_sessions()?;
+    let sessions = discover_trusted_sessions(&discovery)?;
     let (worker, outputs) =
         WorkerHandle::spawn(socket_path, sessions).map_err(|_| HostError::WorkerSpawn)?;
     let worker = Rc::new(worker);
@@ -103,7 +105,7 @@ fn build_window(
     context.set_automation_allowed(false);
     context.set_cache_model(CacheModel::DocumentViewer);
     context.set_spell_checking_enabled(false);
-    register_scheme(&context)?;
+    register_scheme(&context, Rc::clone(&theme))?;
 
     let content_manager = UserContentManager::new();
     connect_bridge(
@@ -125,7 +127,7 @@ fn build_window(
         .network_session(&network_session)
         .user_content_manager(&content_manager)
         .settings(&settings)
-        .default_content_security_policy(EMBEDDED_THEME_CSP)
+        .default_content_security_policy(THEME_CSP)
         .build();
     connect_worker_outputs(
         &web_view,
@@ -142,6 +144,7 @@ fn build_window(
         Rc::clone(&worker),
         Rc::clone(&page_epoch),
         Rc::clone(&pending_reply),
+        theme,
         failed,
     );
 
@@ -163,14 +166,8 @@ fn build_window(
     Ok(window)
 }
 
-fn discover_trusted_sessions() -> Result<Vec<TrustedSession>, HostError> {
-    let directories = DEFAULT_SESSION_DIRS
-        .iter()
-        .map(|(path, kind)| SessionDirectory::new(path, *kind))
-        .collect();
-    let executable_paths = DEFAULT_EXECUTABLE_DIRS.iter().map(PathBuf::from).collect();
-    let config = DiscoveryConfig::new(directories).with_executable_search_paths(executable_paths);
-    let report = discover(&config).map_err(|_| HostError::SessionDiscovery)?;
+fn discover_trusted_sessions(config: &DiscoveryConfig) -> Result<Vec<TrustedSession>, HostError> {
+    let report = discover(config).map_err(|_| HostError::SessionDiscovery)?;
     if report.catalog().is_empty() {
         return Err(HostError::NoSessions);
     }
@@ -244,42 +241,52 @@ fn secure_settings() -> Settings {
         .build()
 }
 
-fn register_scheme(context: &WebContext) -> Result<(), HostError> {
+fn register_scheme(context: &WebContext, theme: Rc<ThemeSource>) -> Result<(), HostError> {
     let security_manager = context
         .security_manager()
         .ok_or(HostError::MissingSecurityManager)?;
     security_manager.register_uri_scheme_as_secure("fomalhaut");
     security_manager.register_uri_scheme_as_display_isolated("fomalhaut");
-    context.register_uri_scheme("fomalhaut", respond_to_scheme_request);
+    context.register_uri_scheme("fomalhaut", move |request| {
+        respond_to_scheme_request(request, &theme);
+    });
     Ok(())
 }
 
-fn respond_to_scheme_request(request: &URISchemeRequest) {
+fn respond_to_scheme_request(request: &URISchemeRequest, theme: &ThemeSource) {
     if request.http_method().as_deref() != Some("GET") {
         finish_scheme_response(
             request,
             405,
             "Method Not Allowed",
-            METHOD_NOT_ALLOWED_BODY,
+            METHOD_NOT_ALLOWED_BODY.to_vec(),
             "text/plain; charset=utf-8",
         );
         return;
     }
 
-    let asset = request.uri().as_deref().and_then(resolve_builtin_asset);
+    let asset = request.uri().as_deref().map(|uri| theme.resolve(uri));
     match asset {
-        Some(asset) => {
-            eprintln!(
-                "Fomalhaut served an allowlisted embedded theme resource ({})",
-                asset.content_type()
-            );
-            finish_scheme_response(request, 200, "OK", asset.body(), asset.content_type())
+        Some(Ok(Some(asset))) => {
+            let (body, content_type) = asset.into_parts();
+            eprintln!("Fomalhaut served an allowlisted theme resource ({content_type})");
+            finish_scheme_response(request, 200, "OK", body, content_type)
         }
-        None => finish_scheme_response(
+        Some(Err(_)) => {
+            eprintln!("Fomalhaut could not read an allowlisted theme resource");
+            finish_scheme_response(
+                request,
+                500,
+                "Internal Server Error",
+                RESOURCE_ERROR_BODY.to_vec(),
+                "text/plain; charset=utf-8",
+            )
+        }
+        Some(Ok(None)) | None => finish_scheme_response(
             request,
             404,
             "Not Found",
-            NOT_FOUND_BODY,
+            NOT_FOUND_BODY.to_vec(),
             "text/plain; charset=utf-8",
         ),
     }
@@ -289,18 +296,19 @@ fn finish_scheme_response(
     request: &URISchemeRequest,
     status: u32,
     reason: &str,
-    body: &'static [u8],
-    content_type: &str,
+    body: Vec<u8>,
+    content_type: &'static str,
 ) {
-    let bytes = glib::Bytes::from_static(body);
+    let length = i64::try_from(body.len()).expect(
+        "theme resources and fixed error bodies are bounded far below signed 64-bit lengths",
+    );
+    let bytes = glib::Bytes::from_owned(body);
     let stream = gio::MemoryInputStream::from_bytes(&bytes);
-    let length = i64::try_from(body.len())
-        .expect("embedded theme resource lengths always fit within signed 64-bit integers");
     let response = URISchemeResponse::new(&stream, length);
     response.set_content_type(content_type);
     response.set_status(status, Some(reason));
     let headers = soup::MessageHeaders::new(soup::MessageHeadersType::Response);
-    for (name, value) in EMBEDDED_THEME_HEADERS {
+    for (name, value) in THEME_HEADERS {
         headers.append(name, value);
     }
     response.set_http_headers(headers);
@@ -531,6 +539,7 @@ fn connect_web_view_policy(
     worker: Rc<WorkerHandle>,
     page_epoch: Rc<Cell<u64>>,
     pending_reply: Rc<RefCell<Option<PendingReply>>>,
+    theme: Rc<ThemeSource>,
     failed: Rc<Cell<bool>>,
 ) {
     web_view.connect_create(|_, _| {
@@ -542,8 +551,8 @@ fn connect_web_view_policy(
         eprintln!("Fomalhaut denied a WebView permission request");
         true
     });
-    web_view.connect_decide_policy(|_, decision, decision_type| {
-        decide_policy(decision, decision_type);
+    web_view.connect_decide_policy(move |_, decision, decision_type| {
+        decide_policy(decision, decision_type, &theme);
         true
     });
 
@@ -601,10 +610,14 @@ fn connect_web_view_policy(
     });
 }
 
-fn decide_policy(decision: &PolicyDecision, decision_type: PolicyDecisionType) {
+fn decide_policy(
+    decision: &PolicyDecision,
+    decision_type: PolicyDecisionType,
+    theme: &ThemeSource,
+) {
     let allowed = match decision_type {
-        PolicyDecisionType::NavigationAction => navigation_is_allowed(decision),
-        PolicyDecisionType::Response => response_is_allowed(decision),
+        PolicyDecisionType::NavigationAction => navigation_is_allowed(decision, theme),
+        PolicyDecisionType::Response => response_is_allowed(decision, theme),
         PolicyDecisionType::NewWindowAction => false,
         _ => false,
     };
@@ -616,18 +629,17 @@ fn decide_policy(decision: &PolicyDecision, decision_type: PolicyDecisionType) {
     }
 }
 
-fn navigation_is_allowed(decision: &PolicyDecision) -> bool {
+fn navigation_is_allowed(decision: &PolicyDecision, theme: &ThemeSource) -> bool {
     decision
         .downcast_ref::<NavigationPolicyDecision>()
         .and_then(NavigationPolicyDecision::navigation_action)
         .and_then(|action| action.request())
         .and_then(|request| request.uri())
         .as_deref()
-        .and_then(resolve_builtin_asset)
-        .is_some()
+        .is_some_and(|uri| theme.allows_navigation(uri))
 }
 
-fn response_is_allowed(decision: &PolicyDecision) -> bool {
+fn response_is_allowed(decision: &PolicyDecision, theme: &ThemeSource) -> bool {
     let Some(response) = decision.downcast_ref::<ResponsePolicyDecision>() else {
         return false;
     };
@@ -636,8 +648,7 @@ fn response_is_allowed(decision: &PolicyDecision) -> bool {
             .request()
             .and_then(|request| request.uri())
             .as_deref()
-            .and_then(resolve_builtin_asset)
-            .is_some()
+            .is_some_and(|uri| theme.allows_resource_uri(uri))
 }
 
 fn report_web_process_termination(reason: WebProcessTerminationReason) {
@@ -646,6 +657,8 @@ fn report_web_process_termination(reason: WebProcessTerminationReason) {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HostError {
+    Configuration,
+    ExternalTheme,
     MissingGreetdSocket,
     InvalidGreetdSocket,
     WorkerSpawn,
@@ -659,6 +672,8 @@ enum HostError {
 impl fmt::Display for HostError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::Configuration => "the system configuration is invalid",
+            Self::ExternalTheme => "the configured external theme is invalid",
             Self::MissingGreetdSocket => "GREETD_SOCK is not set",
             Self::InvalidGreetdSocket => "GREETD_SOCK must be a non-empty absolute path",
             Self::WorkerSpawn => "the authentication worker could not be started",
