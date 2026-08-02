@@ -167,6 +167,40 @@ core 不负责：
 
 前端只能选择 `SessionId`。实际命令始终由 Rust host 根据已发现的 session 生成。
 
+#### 4.2.1 Discovery 与可信命令映射
+
+session discovery 使用 `freedesktop-desktop-entry` 解析 Desktop Entry 基本格式和文件内
+本地化字段，并在 Fomalhaut 内实现面向登录 session 的严格校验与 `Exec` 参数解析。依赖
+禁用默认的 `gettext` feature，避免引入不必要的原生库和进程级 locale 行为；首阶段只采用
+Desktop Entry 文件自身的 locale 值。选择现有解析 crate 是为了复用规范中的转义、分组和
+locale 处理；登录 session 特有的安全策略仍由本项目掌握，不直接采用应用菜单的宽松默认
+行为。
+
+- 搜索目录由 host 以 `(path, SessionKind)` 有序提供；目录顺序就是优先级。默认目录和配置
+  合并策略留在 host 配置层，session crate 不读取进程环境来隐式改变搜索范围。
+- 每个目录只读取第一层且扩展名为 `.desktop` 的普通文件。目录不存在时忽略；目录存在但
+  无法读取时返回可处理错误。
+- `SessionId` 由 session 类型和 desktop 文件名确定，跨进程重建稳定，但其具体字符串格式
+  不属于兼容 API，前端必须将其视为不透明值。ID 不包含绝对路径。
+- 相同 `SessionId` 只处理最高优先级目录中的第一个文件；即使该文件被隐藏或校验失败，
+  也不回退到低优先级同 ID 文件，避免选择结果随错误类型产生意外变化。
+- 只接受 `Type=Application`、非空 `Name` 和非空且可解析的 `Exec`。`Hidden=true`、
+  `NoDisplay=true`、无效布尔值、无效 UTF-8、无效 `TryExec` 和不支持的 `Exec` field code
+  均拒绝进入可选列表。
+- `Exec` 按 Desktop Entry 的双引号和反斜杠规则转换为 argv；登录 session 不需要文件或
+  URL 参数，因此除表示字面量百分号的 `%%` 外拒绝所有 field code。绝不通过 shell 解释
+  `Exec`。
+- 绝对 `TryExec` 必须存在且可执行；相对 `TryExec` 只在 host 明确提供的 executable search
+  path 中解析，不隐式信任前端或主题提供的路径。
+- catalog 对外只公开 `SessionId`、本地化显示名和 `SessionKind`。解析出的 argv、desktop
+  文件路径和环境变量保持在可信 Rust 侧；只有 `SessionCatalog::command` 能把当前 catalog
+  中的 ID 转换为 `fomalhaut_core::SessionCommand`。
+- 生成命令时根据 session 类型设置 `XDG_SESSION_TYPE`，并根据文件名和可选
+  `DesktopNames` 设置 `XDG_SESSION_DESKTOP`、`DESKTOP_SESSION` 和
+  `XDG_CURRENT_DESKTOP`。X11 wrapper 等发行版策略由后续 host 配置层在可信侧组合。
+- discovery 返回可用 catalog 和逐项拒绝诊断；单个损坏文件不阻止其他 session 被发现，
+  但目录级 I/O 失败不会被静默吞掉。
+
 ### 4.3 `fomalhaut-web`
 
 - 创建并管理本地 WebView。
@@ -652,7 +686,8 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 - renderer sandbox 在不同发行版中的默认状态和配置方法。
 - 多显示器策略由 compositor 还是 Fomalhaut host 管理。
 - 用户发现使用 NSS、AccountsService，还是作为可选 provider。
-- session desktop entry 解析采用现有 crate 还是小型自有解析层。
+- session desktop entry 基本格式使用 `freedesktop-desktop-entry`，登录 session 的严格
+  `Exec` 校验和安全策略由 `fomalhaut-session` 实现。
 - WebKitGTK、Cage 和 greetd 的最低兼容版本；Rust 工具链继续跟随 stable。
 
 这些决策不得削弱本文定义的 core/UI 分离和前端权限边界。

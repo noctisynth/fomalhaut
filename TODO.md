@@ -68,14 +68,17 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### Session discovery
 
-- [ ] 定义不透明且可稳定重建的 `SessionId`。
-- [ ] 解析 Wayland desktop session。
-- [ ] 解析 X11 desktop session。
-- [ ] 处理 `Hidden`、`NoDisplay`、无效 `Exec` 和重复项。
-- [ ] 配置 session 搜索目录及优先级。
-- [ ] 将 session ID 映射为只在 Rust 内部可见的 `SessionCommand`。
-- [ ] 确保前端不能覆盖 executable、arguments 或 environment。
-- [ ] 添加 desktop entry fixture 和安全边界测试。
+- [x] 定义不透明且可稳定重建的 `SessionId`。
+- [x] 定义有序、显式标注 X11/Wayland 类型的搜索目录和逐项拒绝诊断。
+- [x] 禁用 desktop entry parser 的 gettext feature，仅使用文件内本地化字段。
+- [x] 解析 Wayland desktop session。
+- [x] 解析 X11 desktop session。
+- [x] 处理 `Hidden`、`NoDisplay`、无效布尔值、无效 `TryExec`、无效 `Exec` 和重复项。
+- [x] 严格解析 `Exec` argv，拒绝除 `%%` 外的 field code，且不经 shell 执行。
+- [x] 配置 session 搜索目录及优先级。
+- [x] 将 session ID 映射为只在 Rust 内部可见的 `SessionCommand`。
+- [x] 确保前端不能覆盖 executable、arguments 或 environment。
+- [x] 添加 desktop entry fixture 和安全边界测试。
 
 ## P0：WebView 技术原型
 

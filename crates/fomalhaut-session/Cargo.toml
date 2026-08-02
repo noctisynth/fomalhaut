@@ -5,6 +5,8 @@ version = "0.1.0-alpha"
 license.workspace = true
 
 [dependencies]
+fomalhaut-core = { version = "0.1.0-alpha", path = "../fomalhaut-core" }
+freedesktop-desktop-entry = { version = "0.8.1", default-features = false }
 
 [lints]
 workspace = true
