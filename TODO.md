@@ -108,12 +108,19 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### Host 集成
 
-- [ ] 从 `GREETD_SOCK` 建立 core 连接。
-- [ ] 把 core event 转换成公开状态和前端事件。
-- [ ] 把前端请求转换成经过状态与权限检查的 core 调用。
+- [x] 在 `fomalhaut-web` 实现不依赖 GTK 的认证 controller，维护公开状态、core prompt 映射
+      和单调事件 sequence。
+- [x] 在 GTK 主线程和专用单线程 Tokio worker 之间建立双向有界通道及单请求背压。
+- [x] 为 bridge 请求和 worker 输出增加页面 epoch，拒绝刷新前的旧 reply 和事件。
+- [x] 从 `GREETD_SOCK` 建立 core 连接。
+- [x] 把 core event 转换成公开状态和有序前端事件。
+- [x] 把 `state.get`、`auth.begin`、`auth.respond` 和 `auth.cancel` 转换成经过状态检查的 core
+      调用，继续禁用 session 与 power 请求。
 - [ ] 实现 session 选择并在认证成功后启动可信 session。
-- [ ] 页面刷新或 bridge 断开时取消活动认证。
-- [ ] 处理 WebView renderer 崩溃。
+- [x] 页面刷新或 bridge 断开时取消活动认证。
+- [x] 处理 WebView renderer 崩溃。
+- [x] 正常关闭时显式取消活动认证并等待 controller worker 退出。
+- [x] 使用 greetd stub 覆盖 bridge/controller 的密码、失败、过期 prompt、取消与刷新流程。
 - [ ] 登录成功后正确退出 Fomalhaut。
 - [ ] 确保 Fomalhaut 退出后 Cage 能退出并让 greetd 接管用户 session。
 

@@ -1,0 +1,383 @@
+//! Dedicated async worker that owns the greetd client outside the GTK main thread.
+
+use std::{
+    cell::RefCell,
+    error::Error,
+    fmt,
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
+    thread::{self, JoinHandle},
+};
+
+use fomalhaut_core::GreeterClient;
+use fomalhaut_web::{controller::HostController, protocol::RequestEnvelope};
+
+const CHANNEL_CAPACITY: usize = 8;
+
+pub struct WorkerBatch {
+    pub epoch: u64,
+    pub response: String,
+    pub event_scripts: Vec<String>,
+}
+
+pub enum WorkerOutput {
+    Ready,
+    Batch(WorkerBatch),
+    Fatal(&'static str),
+}
+
+enum WorkerCommand {
+    Request {
+        epoch: u64,
+        request: RequestEnvelope,
+    },
+    CancelForPage,
+    Shutdown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SubmitError {
+    Busy,
+    Stopped,
+}
+
+#[derive(Debug)]
+pub struct WorkerSpawnError(std::io::Error);
+
+impl fmt::Display for WorkerSpawnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("the authentication worker thread could not be started")
+    }
+}
+
+impl Error for WorkerSpawnError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+pub struct WorkerHandle {
+    sender: SyncSender<WorkerCommand>,
+    thread: RefCell<Option<JoinHandle<()>>>,
+}
+
+impl WorkerHandle {
+    pub fn spawn(socket_path: PathBuf) -> Result<(Self, Receiver<WorkerOutput>), WorkerSpawnError> {
+        let (command_sender, command_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
+        let (output_sender, output_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
+        let thread = thread::Builder::new()
+            .name("fomalhaut-auth-controller".to_owned())
+            .spawn(move || run_worker(socket_path, command_receiver, output_sender))
+            .map_err(WorkerSpawnError)?;
+
+        Ok((
+            Self {
+                sender: command_sender,
+                thread: RefCell::new(Some(thread)),
+            },
+            output_receiver,
+        ))
+    }
+
+    pub fn submit(&self, epoch: u64, request: RequestEnvelope) -> Result<(), SubmitError> {
+        self.try_send(WorkerCommand::Request { epoch, request })
+    }
+
+    pub fn cancel_for_page(&self) -> Result<(), SubmitError> {
+        self.try_send(WorkerCommand::CancelForPage)
+    }
+
+    pub fn shutdown(&self) {
+        let Some(thread) = self.thread.borrow_mut().take() else {
+            return;
+        };
+        let _ = self.sender.send(WorkerCommand::Shutdown);
+        if thread.join().is_err() {
+            eprintln!("Fomalhaut authentication worker terminated unexpectedly");
+        }
+    }
+
+    fn try_send(&self, command: WorkerCommand) -> Result<(), SubmitError> {
+        match self.sender.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(SubmitError::Busy),
+            Err(TrySendError::Disconnected(_)) => Err(SubmitError::Stopped),
+        }
+    }
+}
+
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn run_worker(
+    socket_path: PathBuf,
+    commands: Receiver<WorkerCommand>,
+    outputs: SyncSender<WorkerOutput>,
+) {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            let _ = outputs.send(WorkerOutput::Fatal(
+                "the authentication runtime could not be created",
+            ));
+            return;
+        }
+    };
+    let client = match runtime.block_on(GreeterClient::connect(socket_path)) {
+        Ok(client) => client,
+        Err(_) => {
+            let _ = outputs.send(WorkerOutput::Fatal(
+                "the authentication service could not be reached",
+            ));
+            return;
+        }
+    };
+    let mut controller = HostController::new(client);
+    if outputs.send(WorkerOutput::Ready).is_err() {
+        let _ = runtime.block_on(controller.cancel_for_lifecycle());
+        return;
+    }
+
+    while let Ok(command) = commands.recv() {
+        match command {
+            WorkerCommand::Request { epoch, request } => {
+                let batch = match runtime.block_on(controller.handle(request)) {
+                    Ok(batch) => batch,
+                    Err(_) => {
+                        send_fatal(
+                            &outputs,
+                            "the authentication controller could not maintain public state",
+                        );
+                        break;
+                    }
+                };
+                let (response, event_scripts) = match batch.into_bridge_parts() {
+                    Ok(parts) => parts,
+                    Err(_) => {
+                        send_fatal(
+                            &outputs,
+                            "the authentication controller could not encode its output",
+                        );
+                        break;
+                    }
+                };
+                if outputs
+                    .send(WorkerOutput::Batch(WorkerBatch {
+                        epoch,
+                        response,
+                        event_scripts,
+                    }))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            WorkerCommand::CancelForPage => {
+                if runtime.block_on(controller.cancel_for_lifecycle()).is_err() {
+                    send_fatal(
+                        &outputs,
+                        "the authentication controller could not cancel a stale page",
+                    );
+                    break;
+                }
+            }
+            WorkerCommand::Shutdown => {
+                if runtime.block_on(controller.cancel_for_lifecycle()).is_err() {
+                    send_fatal(
+                        &outputs,
+                        "the authentication controller could not cancel during shutdown",
+                    );
+                }
+                return;
+            }
+        }
+    }
+
+    let _ = runtime.block_on(controller.cancel_for_lifecycle());
+}
+
+fn send_fatal(outputs: &SyncSender<WorkerOutput>, message: &'static str) {
+    let _ = outputs.send(WorkerOutput::Fatal(message));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
+    };
+
+    use super::{WorkerHandle, WorkerOutput};
+    use fomalhaut_web::protocol::decode_request;
+    use greetd_ipc::{AuthMessageType, Request, Response, codec::TokioCodec};
+
+    static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn socket_path() -> PathBuf {
+        let sequence = SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "fomalhaut-worker-{}-{sequence}.sock",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn unix_worker_drives_password_authentication_and_shutdown_cancel() {
+        let path = socket_path();
+        let listener = std::os::unix::net::UnixListener::bind(&path)
+            .expect("unique worker test socket can be bound");
+        listener
+            .set_nonblocking(true)
+            .expect("test listener can be made nonblocking");
+        let server = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build()
+                .expect("test server runtime can be created");
+            runtime.block_on(async move {
+                let listener = tokio::net::UnixListener::from_std(listener)
+                    .expect("test listener enters its runtime");
+                let (mut stream, _) = listener.accept().await.expect("worker connects to stub");
+
+                let create = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads create request");
+                assert!(matches!(
+                    create,
+                    Request::CreateSession { username } if username == "alice"
+                ));
+                Response::AuthMessage {
+                    auth_message_type: AuthMessageType::Secret,
+                    auth_message: "Password:".to_owned(),
+                }
+                .write_to(&mut stream)
+                .await
+                .expect("stub writes password prompt");
+
+                let respond = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads password response");
+                assert!(matches!(
+                    respond,
+                    Request::PostAuthMessageResponse { response } if response.as_deref() == Some("correct")
+                ));
+                Response::Success
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub accepts authentication");
+
+                let cancel = Request::read_from(&mut stream)
+                    .await
+                    .expect("page change explicitly cancels authenticated session");
+                assert!(matches!(cancel, Request::CancelSession));
+                Response::Success
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub accepts page cancellation");
+
+                let retry = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads authentication retry");
+                assert!(matches!(
+                    retry,
+                    Request::CreateSession { username } if username == "alice"
+                ));
+                Response::AuthMessage {
+                    auth_message_type: AuthMessageType::Secret,
+                    auth_message: "Password:".to_owned(),
+                }
+                .write_to(&mut stream)
+                .await
+                .expect("stub writes retry prompt");
+
+                let shutdown_cancel = Request::read_from(&mut stream)
+                    .await
+                    .expect("shutdown explicitly cancels waiting prompt");
+                assert!(matches!(shutdown_cancel, Request::CancelSession));
+                Response::Success
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub accepts shutdown cancellation");
+            });
+        });
+
+        let (worker, outputs) = WorkerHandle::spawn(path.clone()).expect("worker thread starts");
+        assert!(matches!(
+            outputs
+                .recv_timeout(Duration::from_secs(2))
+                .expect("worker reports readiness"),
+            WorkerOutput::Ready
+        ));
+
+        let begin = decode_request(
+            br#"{"protocol":1,"id":1,"method":"auth.begin","params":{"username":"alice"}}"#,
+        )
+        .expect("begin request fixture is valid");
+        worker.submit(7, begin).expect("begin request is queued");
+        let WorkerOutput::Batch(begin) = outputs
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns password prompt")
+        else {
+            panic!("worker must return a controller batch");
+        };
+        assert_eq!(begin.epoch, 7);
+        assert!(
+            begin
+                .event_scripts
+                .iter()
+                .any(|event| event.contains("auth.prompt"))
+        );
+
+        let respond = decode_request(
+            br#"{"protocol":1,"id":2,"method":"auth.respond","params":{"promptId":1,"response":"correct"}}"#,
+        )
+        .expect("response request fixture is valid");
+        worker.submit(7, respond).expect("response is queued");
+        let WorkerOutput::Batch(authenticated) = outputs
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns authentication success")
+        else {
+            panic!("worker must return an authentication batch");
+        };
+        assert!(
+            authenticated
+                .event_scripts
+                .iter()
+                .any(|event| event.contains("auth.succeeded"))
+        );
+        assert!(!authenticated.response.contains("correct"));
+
+        worker
+            .cancel_for_page()
+            .expect("page cancellation is queued");
+        let retry = decode_request(
+            br#"{"protocol":1,"id":3,"method":"auth.begin","params":{"username":"alice"}}"#,
+        )
+        .expect("retry request fixture is valid");
+        worker.submit(8, retry).expect("retry request is queued");
+        let WorkerOutput::Batch(retry_prompt) = outputs
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns retry prompt")
+        else {
+            panic!("worker must return a retry batch");
+        };
+        assert_eq!(retry_prompt.epoch, 8);
+        assert!(
+            retry_prompt
+                .event_scripts
+                .iter()
+                .any(|event| event.contains("auth.prompt"))
+        );
+
+        worker.shutdown();
+        server.join().expect("stub server completes");
+        std::fs::remove_file(path).expect("worker test socket is removable");
+    }
+}

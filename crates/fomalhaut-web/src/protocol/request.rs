@@ -93,6 +93,12 @@ impl AuthRespondParams {
     pub fn into_response(self) -> ProtocolSecret {
         self.response
     }
+
+    /// Consumes the parameters and returns the prompt identifier and zeroizing answer together.
+    #[must_use]
+    pub fn into_parts(self) -> (PromptId, ProtocolSecret) {
+        (self.prompt_id, self.response)
+    }
 }
 
 /// Parameters for `session.select`.
@@ -162,6 +168,12 @@ impl RequestEnvelope {
     #[must_use]
     pub const fn request(&self) -> &FrontendRequest {
         &self.request
+    }
+
+    /// Consumes the envelope into its correlation ID and typed operation.
+    #[must_use]
+    pub fn into_parts(self) -> (RequestId, FrontendRequest) {
+        (self.id, self.request)
     }
 }
 

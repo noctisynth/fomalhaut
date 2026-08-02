@@ -221,7 +221,45 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 - 应用电源操作、主题路径和持久化策略。
 - 管理进程退出码、日志和恢复页面。
 
-### 4.5 Monorepo 版本与发布
+### 4.5 Host controller 与线程边界
+
+真实认证接入采用两层实现，保持 controller 可在无图形环境测试：
+
+- `fomalhaut-web::controller` 持有 `GreeterClient<T>`、公开状态快照、当前 core `PromptId` 和
+  事件 sequence。它接收已经严格解码的 `RequestEnvelope`，输出一个关联
+  `ResponseEnvelope` 和按 sequence 排序的 `EventEnvelope` 列表，不依赖 GTK/WebKit。
+- `fomalhaut` 在专用 OS 线程中运行单线程 Tokio runtime，并在该线程内创建
+  `GreeterClient<UnixTransport>`。GTK/WebKit 对象及 `ScriptMessageReply` 始终留在 GTK 主
+  线程；两侧只通过容量固定的同步通道交换可发送的类型。
+
+通道与页面生命周期遵循以下规则：
+
+- GTK 主线程使用非阻塞发送，队列已满时立即向当前请求返回脱敏的 `internal` 错误，不阻塞
+  UI，也不创建无界任务。首阶段同时只允许一个未完成 bridge 请求；并发请求被拒绝。
+- 每次 `LoadEvent::Started` 都递增页面 epoch、拒绝旧页面尚未完成的 reply，并按通道顺序请求
+  controller 取消活动认证。controller 输出携带发起请求时的 epoch；GTK 丢弃与当前页面不
+  匹配的输出，防止刷新后的旧响应或事件进入新文档。
+- controller 对一个请求的处理是串行事务：调用一次 core 操作，排空该操作产生的 core
+  event，先生成必要的 `state.changed`，再生成 prompt/message/succeeded/failed/cancelled
+  事件，最后把响应和事件作为一个输出批次交回 GTK。
+- 正常窗口退出、renderer 终止和 host 关闭都会发送 shutdown。worker 在退出前检查
+  `needs_cancel()`，需要时显式等待 `cancel()`；线程 join 完成后宿主才结束。异常 abort 仍只
+  能依靠连接关闭兜底。
+- 启动必须读取非空 `GREETD_SOCK`。变量缺失、路径无效、runtime 创建失败、连接失败或 worker
+  提前退出都是致命错误，宿主以非零状态明确退出，不继续显示无法认证的页面。
+
+bridge 在 GTK 主线程完成消息总长度检查和严格协议解码，再把 typed request 移入有界队列；
+不得把包含认证回答的原始 JSON 复制到跨线程队列。`auth.respond` 使用页面提供的数值只与
+controller 保存的当前 core `PromptId` 比较，实际调用 core 时传回原 core ID，不允许前端
+构造 core ID。
+
+当前纵向切片已使用内存 transport 和真实 Unix socket stub 验证密码 prompt、认证成功、认证
+失败、过期 prompt、显式 `auth.cancel`、页面取消、关闭取消、transport 断开脱敏、事件顺序
+及 session/power 禁用状态。Wayland 实例也已通过只保持连接的 stub 验证页面 `state.get`
+确实经过 WebKit bridge、有界通道和真实 controller；缺少或无法连接 `GREETD_SOCK` 均返回
+非零状态。
+
+### 4.6 Monorepo 版本与发布
 
 Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包版本和发布：
 

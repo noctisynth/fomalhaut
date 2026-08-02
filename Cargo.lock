@@ -101,8 +101,11 @@ dependencies = [
 name = "fomalhaut"
 version = "0.1.0-alpha"
 dependencies = [
+ "fomalhaut-core",
  "fomalhaut-web",
+ "greetd_ipc",
  "gtk4",
+ "tokio",
  "webkit6",
 ]
 
@@ -128,9 +131,11 @@ name = "fomalhaut-web"
 version = "0.1.0-alpha"
 dependencies = [
  "fomalhaut-core",
+ "greetd_ipc",
  "schemars",
  "serde",
  "serde_json",
+ "tokio",
  "zeroize",
 ]
 

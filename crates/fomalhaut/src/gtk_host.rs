@@ -1,48 +1,85 @@
 //! Native GTK4 and WebKitGTK 6.0 application host prototype.
 
-use std::{error::Error, fmt};
+use std::{
+    cell::{Cell, RefCell},
+    env,
+    error::Error,
+    fmt,
+    path::PathBuf,
+    rc::Rc,
+    sync::mpsc::{Receiver, TryRecvError},
+    time::Duration,
+};
 
 use fomalhaut_web::{
     assets::{PROTOTYPE_CSP, PROTOTYPE_HEADERS, resolve_builtin_asset},
-    prototype::{PrototypeReply, handle_prototype_request, prototype_event_dispatch_script},
+    bridge::response_json,
+    protocol::{ProtocolErrorBody, ProtocolErrorCode, RequestId, ResponseEnvelope, decode_request},
 };
 use gtk4 as gtk;
 use webkit6::{
     CacheModel, LoadEvent, NavigationPolicyDecision, NetworkSession, PolicyDecision,
-    PolicyDecisionType, ResponsePolicyDecision, Settings, URISchemeRequest, URISchemeResponse,
-    UserContentManager, WebContext, WebProcessTerminationReason, WebView, javascriptcore, soup,
+    PolicyDecisionType, ResponsePolicyDecision, ScriptMessageReply, Settings, URISchemeRequest,
+    URISchemeResponse, UserContentManager, WebContext, WebProcessTerminationReason, WebView,
+    javascriptcore, soup,
 };
 use webkit6::{gio, glib, prelude::*};
+
+use crate::controller_worker::{SubmitError, WorkerHandle, WorkerOutput};
 
 const APPLICATION_ID: &str = "org.fomalhautdm.Fomalhaut";
 const BRIDGE_NAME: &str = "fomalhaut";
 const PROTOTYPE_URI: &str = "fomalhaut://theme/";
 const NOT_FOUND_BODY: &[u8] = b"The requested prototype resource does not exist.\n";
 const METHOD_NOT_ALLOWED_BODY: &[u8] = b"The prototype resource scheme only accepts GET.\n";
+const CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+struct PendingReply {
+    epoch: u64,
+    context: javascriptcore::Context,
+    reply: ScriptMessageReply,
+}
 
 /// Runs the native host until its GTK application exits.
 pub fn run() -> glib::ExitCode {
     let application = gtk::Application::builder()
         .application_id(APPLICATION_ID)
         .build();
-    application.connect_activate(activate);
-    application.run()
+    let failed = Rc::new(Cell::new(false));
+    let activation_failed = Rc::clone(&failed);
+    application.connect_activate(move |application| activate(application, &activation_failed));
+    let exit_code = application.run();
+    if failed.get() {
+        glib::ExitCode::FAILURE
+    } else {
+        exit_code
+    }
 }
 
-fn activate(application: &gtk::Application) {
-    match build_window(application) {
+fn activate(application: &gtk::Application, failed: &Rc<Cell<bool>>) {
+    match build_window(application, Rc::clone(failed)) {
         Ok(window) => {
             window.fullscreen();
             window.present();
         }
         Err(error) => {
             eprintln!("Fomalhaut WebKitGTK host failed to initialize: {error}");
+            failed.set(true);
             application.quit();
         }
     }
 }
 
-fn build_window(application: &gtk::Application) -> Result<gtk::ApplicationWindow, HostError> {
+fn build_window(
+    application: &gtk::Application,
+    failed: Rc<Cell<bool>>,
+) -> Result<gtk::ApplicationWindow, HostError> {
+    let socket_path = greetd_socket_path()?;
+    let (worker, outputs) = WorkerHandle::spawn(socket_path).map_err(|_| HostError::WorkerSpawn)?;
+    let worker = Rc::new(worker);
+    let page_epoch = Rc::new(Cell::new(0));
+    let pending_reply = Rc::new(RefCell::new(None));
+
     let context = WebContext::new();
     context.set_automation_allowed(false);
     context.set_cache_model(CacheModel::DocumentViewer);
@@ -50,7 +87,12 @@ fn build_window(application: &gtk::Application) -> Result<gtk::ApplicationWindow
     register_scheme(&context)?;
 
     let content_manager = UserContentManager::new();
-    connect_bridge(&content_manager)?;
+    connect_bridge(
+        &content_manager,
+        Rc::clone(&worker),
+        Rc::clone(&page_epoch),
+        Rc::clone(&pending_reply),
+    )?;
 
     let network_session = NetworkSession::new_ephemeral();
     network_session.connect_download_started(|_, download| {
@@ -66,7 +108,23 @@ fn build_window(application: &gtk::Application) -> Result<gtk::ApplicationWindow
         .settings(&settings)
         .default_content_security_policy(PROTOTYPE_CSP)
         .build();
-    connect_web_view_policy(&web_view, application);
+    connect_worker_outputs(
+        &web_view,
+        application,
+        outputs,
+        Rc::clone(&worker),
+        Rc::clone(&page_epoch),
+        Rc::clone(&pending_reply),
+        Rc::clone(&failed),
+    );
+    connect_web_view_policy(
+        &web_view,
+        application,
+        Rc::clone(&worker),
+        Rc::clone(&page_epoch),
+        Rc::clone(&pending_reply),
+        failed,
+    );
 
     let window = gtk::ApplicationWindow::builder()
         .application(application)
@@ -75,13 +133,27 @@ fn build_window(application: &gtk::Application) -> Result<gtk::ApplicationWindow
         .default_height(720)
         .child(&web_view)
         .build();
-    window.connect_close_request(|_| {
+    window.connect_close_request(move |_| {
         eprintln!("Fomalhaut host window is closing");
+        reject_pending_reply(&pending_reply, "the host window closed");
+        worker.shutdown();
         glib::Propagation::Proceed
     });
 
     web_view.load_uri(PROTOTYPE_URI);
     Ok(window)
+}
+
+fn greetd_socket_path() -> Result<PathBuf, HostError> {
+    let socket = env::var_os("GREETD_SOCK").ok_or(HostError::MissingGreetdSocket)?;
+    if socket.as_os_str().is_empty() {
+        return Err(HostError::InvalidGreetdSocket);
+    }
+    let path = PathBuf::from(socket);
+    if !path.is_absolute() {
+        return Err(HostError::InvalidGreetdSocket);
+    }
+    Ok(path)
 }
 
 fn secure_settings() -> Settings {
@@ -178,28 +250,77 @@ fn finish_scheme_response(
     request.finish_with_response(&response);
 }
 
-fn connect_bridge(content_manager: &UserContentManager) -> Result<(), HostError> {
+fn connect_bridge(
+    content_manager: &UserContentManager,
+    worker: Rc<WorkerHandle>,
+    page_epoch: Rc<Cell<u64>>,
+    pending_reply: Rc<RefCell<Option<PendingReply>>>,
+) -> Result<(), HostError> {
     content_manager.connect_script_message_with_reply_received(
         Some(BRIDGE_NAME),
-        |_, value, reply| {
-            eprintln!("Fomalhaut prototype bridge received a script message");
+        move |_, value, reply| {
+            eprintln!("Fomalhaut bridge received a script message");
             let Some(input) = value.to_json(0) else {
-                eprintln!("Fomalhaut prototype bridge rejected a non-JSON script value");
+                eprintln!("Fomalhaut bridge rejected a non-JSON script value");
                 reply.return_error_message("the bridge requires a JSON-compatible message");
                 return true;
             };
-
-            match handle_prototype_request(input.as_bytes()) {
-                PrototypeReply::Json(response) => {
-                    let Some(context) = value.context() else {
-                        reply
-                            .return_error_message("the bridge could not access the script context");
-                        return true;
-                    };
-                    let response = javascriptcore::Value::from_json(&context, &response);
-                    reply.return_value(&response);
+            let request = match decode_request(input.as_bytes()) {
+                Ok(request) => request,
+                Err(error) => {
+                    if let Some(id) = error.request_id() {
+                        reply_with_response(
+                            value,
+                            reply,
+                            ResponseEnvelope::error(id, error.body().clone()),
+                        );
+                    } else {
+                        reply.return_error_message("the bridge rejected an invalid request");
+                    }
+                    return true;
                 }
-                PrototypeReply::Rejected(message) => reply.return_error_message(message),
+            };
+
+            let id = request.id();
+            if pending_reply.borrow().is_some() {
+                reply_with_response(
+                    value,
+                    reply,
+                    protocol_error_response(
+                        id,
+                        ProtocolErrorCode::InvalidState,
+                        "another bridge request is still in progress",
+                        true,
+                    ),
+                );
+                return true;
+            }
+            let Some(context) = value.context() else {
+                reply.return_error_message("the bridge could not access the script context");
+                return true;
+            };
+            let epoch = page_epoch.get();
+            match worker.submit(epoch, request) {
+                Ok(()) => {
+                    pending_reply.replace(Some(PendingReply {
+                        epoch,
+                        context,
+                        reply: reply.clone(),
+                    }));
+                }
+                Err(SubmitError::Busy) => reply_with_response(
+                    value,
+                    reply,
+                    protocol_error_response(
+                        id,
+                        ProtocolErrorCode::Internal,
+                        "the authentication controller is busy",
+                        true,
+                    ),
+                ),
+                Err(SubmitError::Stopped) => {
+                    reply.return_error_message("the authentication controller is unavailable")
+                }
             }
             true
         },
@@ -211,7 +332,135 @@ fn connect_bridge(content_manager: &UserContentManager) -> Result<(), HostError>
     Ok(())
 }
 
-fn connect_web_view_policy(web_view: &WebView, application: &gtk::Application) {
+fn protocol_error_response(
+    id: RequestId,
+    code: ProtocolErrorCode,
+    message: &'static str,
+    retryable: bool,
+) -> ResponseEnvelope {
+    ResponseEnvelope::error(id, ProtocolErrorBody::new(code, message, retryable))
+}
+
+fn reply_with_response(
+    value: &javascriptcore::Value,
+    reply: &ScriptMessageReply,
+    response: ResponseEnvelope,
+) {
+    let Some(context) = value.context() else {
+        reply.return_error_message("the bridge could not access the script context");
+        return;
+    };
+    let json = match response_json(&response) {
+        Ok(json) => json,
+        Err(_) => {
+            reply.return_error_message("the bridge could not encode a protocol response");
+            return;
+        }
+    };
+    let response = javascriptcore::Value::from_json(&context, &json);
+    reply.return_value(&response);
+}
+
+fn reject_pending_reply(pending_reply: &RefCell<Option<PendingReply>>, message: &str) {
+    if let Some(pending) = pending_reply.borrow_mut().take() {
+        pending.reply.return_error_message(message);
+    }
+}
+
+fn connect_worker_outputs(
+    web_view: &WebView,
+    application: &gtk::Application,
+    outputs: Receiver<WorkerOutput>,
+    worker: Rc<WorkerHandle>,
+    page_epoch: Rc<Cell<u64>>,
+    pending_reply: Rc<RefCell<Option<PendingReply>>>,
+    failed: Rc<Cell<bool>>,
+) {
+    let web_view = web_view.downgrade();
+    let application = application.downgrade();
+    glib::timeout_add_local(CONTROLLER_POLL_INTERVAL, move || {
+        loop {
+            match outputs.try_recv() {
+                Ok(WorkerOutput::Ready) => {
+                    eprintln!("Fomalhaut authentication controller connected to greetd")
+                }
+                Ok(WorkerOutput::Batch(batch)) => {
+                    if batch.epoch != page_epoch.get() {
+                        eprintln!("Fomalhaut discarded output from a stale page context");
+                        continue;
+                    }
+                    let Some(pending) = pending_reply.borrow_mut().take() else {
+                        eprintln!("Fomalhaut controller produced an uncorrelated reply");
+                        failed.set(true);
+                        worker.shutdown();
+                        if let Some(application) = application.upgrade() {
+                            application.quit();
+                        }
+                        return glib::ControlFlow::Break;
+                    };
+                    if pending.epoch != batch.epoch {
+                        pending
+                            .reply
+                            .return_error_message("the page context changed before reply delivery");
+                        continue;
+                    }
+                    let response =
+                        javascriptcore::Value::from_json(&pending.context, &batch.response);
+                    pending.reply.return_value(&response);
+
+                    if let Some(web_view) = web_view.upgrade() {
+                        for script in batch.event_scripts {
+                            web_view.evaluate_javascript(
+                                &script,
+                                None,
+                                None,
+                                None::<&gio::Cancellable>,
+                                |result| {
+                                    if result.is_err() {
+                                        eprintln!("Fomalhaut failed to deliver a controller event");
+                                    }
+                                },
+                            );
+                        }
+                    }
+                }
+                Ok(WorkerOutput::Fatal(message)) => {
+                    eprintln!("Fomalhaut authentication controller failed: {message}");
+                    failed.set(true);
+                    reject_pending_reply(&pending_reply, "the authentication controller stopped");
+                    worker.shutdown();
+                    if let Some(application) = application.upgrade() {
+                        application.quit();
+                    }
+                    return glib::ControlFlow::Break;
+                }
+                Err(TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                Err(TryRecvError::Disconnected) => {
+                    eprintln!("Fomalhaut authentication controller output channel closed");
+                    failed.set(true);
+                    reject_pending_reply(
+                        &pending_reply,
+                        "the authentication controller disconnected",
+                    );
+                    worker.shutdown();
+                    if let Some(application) = application.upgrade() {
+                        application.quit();
+                    }
+                    return glib::ControlFlow::Break;
+                }
+            }
+        }
+    });
+}
+
+fn connect_web_view_policy(
+    web_view: &WebView,
+    application: &gtk::Application,
+    worker: Rc<WorkerHandle>,
+    page_epoch: Rc<Cell<u64>>,
+    pending_reply: Rc<RefCell<Option<PendingReply>>>,
+    failed: Rc<Cell<bool>>,
+) {
     web_view.connect_create(|_, _| {
         eprintln!("Fomalhaut blocked a WebView new-window request");
         None
@@ -226,10 +475,16 @@ fn connect_web_view_policy(web_view: &WebView, application: &gtk::Application) {
         true
     });
 
-    let application = application.downgrade();
+    let terminated_application = application.downgrade();
+    let terminated_worker = Rc::clone(&worker);
+    let terminated_pending = Rc::clone(&pending_reply);
+    let terminated_failed = Rc::clone(&failed);
     web_view.connect_web_process_terminated(move |_, reason| {
         report_web_process_termination(reason);
-        if let Some(application) = application.upgrade() {
+        terminated_failed.set(true);
+        reject_pending_reply(&terminated_pending, "the WebView renderer terminated");
+        terminated_worker.shutdown();
+        if let Some(application) = terminated_application.upgrade() {
             application.quit();
         }
     });
@@ -238,29 +493,40 @@ fn connect_web_view_policy(web_view: &WebView, application: &gtk::Application) {
         eprintln!("Fomalhaut WebView failed to load an allowed resource");
         true
     });
-    web_view.connect_load_changed(|web_view, event| match event {
+    let load_application = application.downgrade();
+    web_view.connect_load_changed(move |_, event| match event {
         LoadEvent::Started => {
-            eprintln!("Fomalhaut invalidated the previous page context before loading")
+            let Some(next_epoch) = page_epoch.get().checked_add(1) else {
+                eprintln!("Fomalhaut page epoch exhausted");
+                failed.set(true);
+                reject_pending_reply(&pending_reply, "the page epoch is exhausted");
+                worker.shutdown();
+                if let Some(application) = load_application.upgrade() {
+                    application.quit();
+                }
+                return;
+            };
+            page_epoch.set(next_epoch);
+            reject_pending_reply(
+                &pending_reply,
+                "the page context changed before reply delivery",
+            );
+            if worker.cancel_for_page().is_err() {
+                eprintln!("Fomalhaut could not queue page authentication cancellation");
+                failed.set(true);
+                worker.shutdown();
+                if let Some(application) = load_application.upgrade() {
+                    application.quit();
+                }
+                return;
+            }
+            eprintln!("Fomalhaut invalidated the previous page context before loading");
         }
         LoadEvent::Redirected => eprintln!("Fomalhaut observed a WebView redirect"),
         LoadEvent::Committed => eprintln!("Fomalhaut committed an allowlisted page load"),
-        LoadEvent::Finished => deliver_prototype_event(web_view),
+        LoadEvent::Finished => eprintln!("Fomalhaut finished loading the current page context"),
         _ => eprintln!("Fomalhaut observed an unknown WebView load transition"),
     });
-}
-
-fn deliver_prototype_event(web_view: &WebView) {
-    match prototype_event_dispatch_script() {
-        Ok(script) => {
-            web_view.evaluate_javascript(&script, None, None, None::<&gio::Cancellable>, |result| {
-                match result {
-                    Ok(_) => eprintln!("Fomalhaut prototype delivered a frontend protocol event"),
-                    Err(_) => eprintln!("Fomalhaut prototype event delivery failed"),
-                }
-            })
-        }
-        Err(error) => eprintln!("Fomalhaut could not construct its prototype event: {error}"),
-    }
 }
 
 fn decide_policy(decision: &PolicyDecision, decision_type: PolicyDecisionType) {
@@ -308,6 +574,9 @@ fn report_web_process_termination(reason: WebProcessTerminationReason) {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HostError {
+    MissingGreetdSocket,
+    InvalidGreetdSocket,
+    WorkerSpawn,
     MissingSecurityManager,
     BridgeRegistration,
 }
@@ -315,6 +584,9 @@ enum HostError {
 impl fmt::Display for HostError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::MissingGreetdSocket => "GREETD_SOCK is not set",
+            Self::InvalidGreetdSocket => "GREETD_SOCK must be a non-empty absolute path",
+            Self::WorkerSpawn => "the authentication worker could not be started",
             Self::MissingSecurityManager => "WebKit did not provide a security manager",
             Self::BridgeRegistration => "the JavaScript message handler could not be registered",
         })
