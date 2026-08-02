@@ -575,6 +575,12 @@ crate 边界保持如下：
 
 在 Arch Linux、WebKitGTK 2.52.5、GTK 4.22.4 与 Cage 0.3.1 上的原型验证得到以下运行边界：
 
+- 临时运行时探针分别触发了 HTTPS 顶层导航、新窗口和下载，宿主的 policy、create 与
+  download 回调均在资源离开 WebView 前拒绝请求。另以回环地址监听器验证远程 `fetch` 和
+  图片资源：页面脚本执行探针期间没有建立连接，说明当前 CSP 在网络请求前生效。
+- 页面 reload 会先触发旧页面上下文失效日志，再为新文档重新建立 bridge；精确终止测试
+  WebKitWebProcess 后，宿主观测到 `Crashed` 并退出。正式 core 接入后必须在同一个上下文
+  失效入口取消活动认证，不能让新页面继承旧请求权限。
 - WebKitWebProcess 由 WebKitGTK 通过 bubblewrap 启动；运行时观测到 `NoNewPrivs=1`、seccomp
   filter 生效且无 effective capabilities。6.0 API 不暴露 4.1 API 中的 sandbox 开关，宿主
   不尝试关闭 sandbox，也不为 renderer 增加额外文件系统路径。

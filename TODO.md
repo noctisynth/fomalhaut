@@ -96,10 +96,10 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       并测试其精确资源白名单及 CSP 边界。
 - [x] 通过单一 WebKit script message handler 验证 JavaScript 到 Rust 的协议 v1 bridge。
 - [x] 验证 Rust 到 JavaScript 只投递序列化后的协议消息。
-- [ ] 验证导航、新窗口和下载拦截。
-- [ ] 验证默认禁止远程网络资源。
+- [x] 验证导航、新窗口和下载拦截。
+- [x] 验证默认禁止远程网络资源。
 - [x] 默认关闭开发者工具、自动弹窗和非必要 Web 能力。
-- [ ] 让 renderer 终止、页面刷新和窗口退出进入可观察的拒绝式处理路径。
+- [x] 让 renderer 终止、页面刷新和窗口退出进入可观察的拒绝式处理路径。
 - [x] 调查并记录 renderer sandbox 行为。
 - [x] 记录 Arch Linux 上 GTK4/WebKitGTK/Cage 的运行时依赖、包体积和调试构建 RSS 快照。
 - [ ] 测量发布构建的 PSS/峰值，并记录非 Arch 发行版的包名、可用版本与打包成本。

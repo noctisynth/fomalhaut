@@ -238,24 +238,29 @@ fn connect_web_view_policy(web_view: &WebView, application: &gtk::Application) {
         eprintln!("Fomalhaut WebView failed to load an allowed resource");
         true
     });
-    web_view.connect_load_changed(|web_view, event| {
-        if event != LoadEvent::Finished {
-            return;
+    web_view.connect_load_changed(|web_view, event| match event {
+        LoadEvent::Started => {
+            eprintln!("Fomalhaut invalidated the previous page context before loading")
         }
-        match prototype_event_dispatch_script() {
-            Ok(script) => web_view.evaluate_javascript(
-                &script,
-                None,
-                None,
-                None::<&gio::Cancellable>,
-                |result| match result {
+        LoadEvent::Redirected => eprintln!("Fomalhaut observed a WebView redirect"),
+        LoadEvent::Committed => eprintln!("Fomalhaut committed an allowlisted page load"),
+        LoadEvent::Finished => deliver_prototype_event(web_view),
+        _ => eprintln!("Fomalhaut observed an unknown WebView load transition"),
+    });
+}
+
+fn deliver_prototype_event(web_view: &WebView) {
+    match prototype_event_dispatch_script() {
+        Ok(script) => {
+            web_view.evaluate_javascript(&script, None, None, None::<&gio::Cancellable>, |result| {
+                match result {
                     Ok(_) => eprintln!("Fomalhaut prototype delivered a frontend protocol event"),
                     Err(_) => eprintln!("Fomalhaut prototype event delivery failed"),
-                },
-            ),
-            Err(error) => eprintln!("Fomalhaut could not construct its prototype event: {error}"),
+                }
+            })
         }
-    });
+        Err(error) => eprintln!("Fomalhaut could not construct its prototype event: {error}"),
+    }
 }
 
 fn decide_policy(decision: &PolicyDecision, decision_type: PolicyDecisionType) {
