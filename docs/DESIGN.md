@@ -586,6 +586,28 @@ entrypoint = "index.html"
 - 支持集成和截图测试。
 - 帮助主题作者验证运行环境。
 
+在外部主题目录、配置解析和故障回退完成前，可执行宿主把该 minimal theme 作为只读资源嵌入
+二进制，使真实 greetd 纵向链路具备最小可操作界面。它仍是示例而不是固定产品 UI，并遵守：
+
+- 不使用前端框架、包管理器、构建步骤、内联脚本或网络资源，只包含 allowlist 中的 HTML、
+  CSS 和 JavaScript。
+- 启动时调用 `state.get`，展示可信 session 摘要并保持 host 给出的默认选择；用户改变选择时
+  只发送 `session.select`。
+- 一个表单先收集手工用户名，随后根据任意数量的 `auth.prompt` 动态切换 secret/visible
+  输入。页面不假定 prompt 是密码，也不限制 PAM 轮数。
+- 每次提交认证回答都先从 DOM 读取值，立即清空输入框并释放页面侧引用，再等待
+  `auth.respond`；页面仍不声称 JavaScript 字符串可以被可靠清零。
+- bridge 请求串行发送。等待响应期间禁用表单与 session 选择，并显示 busy 状态；
+  `auth.message`、`auth.failed`、`auth.cancelled`、协议错误和 bridge 失败都以文本方式展示，
+  不把消息作为 HTML 插入。
+- 使用原生 label、form、input、select、button、`aria-live` 和键盘提交提供最小无障碍能力。
+  登录失败或取消后恢复用户名输入；session 启动成功由 host 退出，不由页面导航处理。
+
+该嵌入式主题已在真实 WebKitGTK/Wayland 实例中验证：allowlist 依次加载 HTML、CSS 和外部
+JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源不需要网络、内联脚本或
+宽松 CSP。认证与 session 行为继续由 controller 和真实 Unix socket stub 的全流程测试覆盖，
+真实 PAM 输入则留给 greetd/Cage 系统测试，避免在开发会话中模拟用户密码。
+
 ## 9. WebView 运行环境
 
 应用宿主固定使用 GTK4 + WebKitGTK 6.0，并通过 Rust `gtk4` 与 `webkit6` 原生绑定直接调用。
@@ -610,8 +632,9 @@ crate 边界保持如下：
   后续 Core 集成通过有界消息通道把请求交给异步 controller，再把序列化后的结果投递回
   GLib 主上下文。
 
-首个应用侧原型使用内置的最小页面，不读取管理员主题目录，也不连接真实 greetd。它必须
-验证以下宿主能力，验证通过后才能进入真实 greeter 集成：
+应用侧最初使用内置探针页面验证宿主能力；完成真实 core 和可信 session 接入后，该资源已
+演进为上一节定义的嵌入式 minimal theme。当前仍不读取管理员主题目录，但已经连接真实
+greetd，并继续维持以下已经验证的宿主边界：
 
 - 创建 GTK4 全屏窗口并嵌入 WebKitGTK 6.0 `WebView`。
 - 通过 `fomalhaut://theme/` 自定义 scheme 加载内置 HTML、CSS 和 JavaScript，不使用
@@ -636,8 +659,8 @@ crate 边界保持如下：
   侧精确 URI 白名单，CSP 允许 scheme 不代表允许任意 host 或 path。
 - renderer 终止、页面刷新和窗口退出具有可观察且拒绝式的处理路径。
 
-原型阶段可以用静态状态响应验证双向 bridge，但不得伪装成可用登录流程。真实 Core、Session、
-配置和外部主题目录接入仍属于后续 Host 集成与主题资源任务。
+嵌入式 minimal theme 只为首个可操作登录和协议示例提供基线；外部主题目录、配置、清单检查
+和内置故障页面仍属于后续主题资源任务，不能通过继续扩展嵌入常量来替代。
 
 在 Arch Linux、WebKitGTK 2.52.5、GTK 4.22.4 与 Cage 0.3.1 上的原型验证得到以下运行边界：
 

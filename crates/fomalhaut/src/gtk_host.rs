@@ -1,4 +1,4 @@
-//! Native GTK4 and WebKitGTK 6.0 application host prototype.
+//! Native GTK4 and WebKitGTK 6.0 application host.
 
 use std::{
     cell::{Cell, RefCell},
@@ -15,7 +15,7 @@ use fomalhaut_session::{
     DiscoveryConfig, SessionDirectory, SessionKind as CatalogSessionKind, discover,
 };
 use fomalhaut_web::{
-    assets::{PROTOTYPE_CSP, PROTOTYPE_HEADERS, resolve_builtin_asset},
+    assets::{EMBEDDED_THEME_CSP, EMBEDDED_THEME_HEADERS, resolve_builtin_asset},
     bridge::response_json,
     controller::TrustedSession,
     protocol::{
@@ -36,9 +36,9 @@ use crate::controller_worker::{SubmitError, WorkerHandle, WorkerOutput};
 
 const APPLICATION_ID: &str = "org.fomalhautdm.Fomalhaut";
 const BRIDGE_NAME: &str = "fomalhaut";
-const PROTOTYPE_URI: &str = "fomalhaut://theme/";
-const NOT_FOUND_BODY: &[u8] = b"The requested prototype resource does not exist.\n";
-const METHOD_NOT_ALLOWED_BODY: &[u8] = b"The prototype resource scheme only accepts GET.\n";
+const BUILTIN_THEME_URI: &str = "fomalhaut://theme/";
+const NOT_FOUND_BODY: &[u8] = b"The requested embedded theme resource does not exist.\n";
+const METHOD_NOT_ALLOWED_BODY: &[u8] = b"The embedded theme resource scheme only accepts GET.\n";
 const CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const DEFAULT_EXECUTABLE_DIRS: [&str; 2] = ["/usr/local/bin", "/usr/bin"];
 const DEFAULT_SESSION_DIRS: [(&str, CatalogSessionKind); 4] = [
@@ -125,7 +125,7 @@ fn build_window(
         .network_session(&network_session)
         .user_content_manager(&content_manager)
         .settings(&settings)
-        .default_content_security_policy(PROTOTYPE_CSP)
+        .default_content_security_policy(EMBEDDED_THEME_CSP)
         .build();
     connect_worker_outputs(
         &web_view,
@@ -159,7 +159,7 @@ fn build_window(
         glib::Propagation::Proceed
     });
 
-    web_view.load_uri(PROTOTYPE_URI);
+    web_view.load_uri(BUILTIN_THEME_URI);
     Ok(window)
 }
 
@@ -270,7 +270,7 @@ fn respond_to_scheme_request(request: &URISchemeRequest) {
     match asset {
         Some(asset) => {
             eprintln!(
-                "Fomalhaut served an allowlisted prototype resource ({})",
+                "Fomalhaut served an allowlisted embedded theme resource ({})",
                 asset.content_type()
             );
             finish_scheme_response(request, 200, "OK", asset.body(), asset.content_type())
@@ -295,12 +295,12 @@ fn finish_scheme_response(
     let bytes = glib::Bytes::from_static(body);
     let stream = gio::MemoryInputStream::from_bytes(&bytes);
     let length = i64::try_from(body.len())
-        .expect("embedded prototype resource lengths always fit within signed 64-bit integers");
+        .expect("embedded theme resource lengths always fit within signed 64-bit integers");
     let response = URISchemeResponse::new(&stream, length);
     response.set_content_type(content_type);
     response.set_status(status, Some(reason));
     let headers = soup::MessageHeaders::new(soup::MessageHeadersType::Response);
-    for (name, value) in PROTOTYPE_HEADERS {
+    for (name, value) in EMBEDDED_THEME_HEADERS {
         headers.append(name, value);
     }
     response.set_http_headers(headers);

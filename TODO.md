@@ -154,15 +154,17 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### Minimal theme
 
-- [ ] 提供无框架、无构建依赖的 minimal theme。
-- [ ] 支持手工输入用户名。
-- [ ] 支持 session 选择。
-- [ ] 动态支持 secret 和 visible prompt。
-- [ ] 支持多轮 PAM prompt。
-- [ ] 展示 info、error、busy 和失败状态。
-- [ ] 提交后立即清空输入框并释放 secret 引用。
-- [ ] 支持键盘操作和基础无障碍标签。
-- [ ] 明确标注该主题仅为示例，不是固定产品 UI。
+- [x] 将内置 bridge probe 升级为连接真实 controller 的只读嵌入式 minimal theme，作为外部
+      主题加载完成前的可操作登录基线。
+- [x] 提供无框架、无构建依赖的 minimal theme。
+- [x] 支持手工输入用户名。
+- [x] 支持 session 选择。
+- [x] 动态支持 secret 和 visible prompt。
+- [x] 支持多轮 PAM prompt。
+- [x] 展示 info、error、busy 和失败状态。
+- [x] 提交后立即清空输入框并释放 secret 引用。
+- [x] 支持键盘操作和基础无障碍标签。
+- [x] 明确标注该主题仅为示例，不是固定产品 UI。
 
 ### greetd/Cage 集成
 
