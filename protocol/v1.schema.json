@@ -1,0 +1,758 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WireMessage",
+  "description": "Every top-level JSON message described by the v1 schema.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/RequestEnvelope"
+    },
+    {
+      "$ref": "#/$defs/ResponseEnvelope"
+    },
+    {
+      "$ref": "#/$defs/EventEnvelope"
+    }
+  ],
+  "$defs": {
+    "AuthBeginParams": {
+      "description": "Parameters for `auth.begin`.",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "username"
+      ]
+    },
+    "AuthMessage": {
+      "description": "Bounded PAM message retained for state recovery.",
+      "type": "object",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/MessageLevel"
+        },
+        "text": {
+          "type": "string",
+          "x-fomalhaut-maxUtf8Bytes": 4096
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "text"
+      ]
+    },
+    "AuthRespondParams": {
+      "description": "Parameters for `auth.respond`.",
+      "type": "object",
+      "properties": {
+        "promptId": {
+          "$ref": "#/$defs/PromptId"
+        },
+        "response": {
+          "$ref": "#/$defs/ProtocolSecret"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "promptId",
+        "response"
+      ]
+    },
+    "AuthState": {
+      "description": "Authentication lifecycle visible to the frontend.",
+      "type": "string",
+      "enum": [
+        "disconnected",
+        "idle",
+        "authenticating",
+        "waiting_for_prompt",
+        "authenticated",
+        "starting_session",
+        "started",
+        "cancelling",
+        "failed"
+      ]
+    },
+    "Capabilities": {
+      "description": "Capabilities enabled by trusted host policy.",
+      "type": "object",
+      "properties": {
+        "power": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PowerAction"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "power"
+      ]
+    },
+    "EmptyParams": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "EmptyResult": {
+      "description": "Empty success payload.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ProtocolErrorBody"
+        },
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": false
+        },
+        "protocol": {
+          "type": "integer",
+          "format": "uint16",
+          "const": 1,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "id",
+        "ok",
+        "error"
+      ]
+    },
+    "EventEnvelope": {
+      "description": "Sequenced event envelope.",
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "integer",
+          "format": "uint16",
+          "const": 1,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "sequence": {
+          "$ref": "#/$defs/Sequence"
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/StateChangedData"
+            },
+            "event": {
+              "type": "string",
+              "const": "state.changed"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Prompt"
+            },
+            "event": {
+              "type": "string",
+              "const": "auth.prompt"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AuthMessage"
+            },
+            "event": {
+              "type": "string",
+              "const": "auth.message"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "auth.succeeded"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "auth.failed"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "auth.cancelled"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SessionSelectedData"
+            },
+            "event": {
+              "type": "string",
+              "const": "session.selected"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "session.started"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        }
+      ],
+      "required": [
+        "protocol",
+        "sequence"
+      ],
+      "unevaluatedProperties": false
+    },
+    "MessageLevel": {
+      "description": "Severity of a non-interactive authentication message.",
+      "type": "string",
+      "enum": [
+        "info",
+        "error"
+      ]
+    },
+    "PowerAction": {
+      "description": "Power operations currently exposed by the protocol vocabulary.",
+      "type": "string",
+      "enum": [
+        "poweroff",
+        "reboot",
+        "suspend"
+      ]
+    },
+    "PowerRequestParams": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/PowerAction"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ]
+    },
+    "Prompt": {
+      "description": "Frontend-safe active prompt.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PromptKind"
+        },
+        "message": {
+          "type": "string",
+          "x-fomalhaut-maxUtf8Bytes": 4096
+        },
+        "promptId": {
+          "$ref": "#/$defs/PromptId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "promptId",
+        "kind",
+        "message"
+      ]
+    },
+    "PromptId": {
+      "description": "Identifier of the currently active authentication prompt.",
+      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "PromptKind": {
+      "description": "How a prompt answer should be rendered while typed.",
+      "type": "string",
+      "enum": [
+        "secret",
+        "visible"
+      ]
+    },
+    "ProtocolErrorBody": {
+      "description": "Frontend-safe error body.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ProtocolErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ]
+    },
+    "ProtocolErrorCode": {
+      "description": "Stable error category exposed to the frontend.",
+      "oneOf": [
+        {
+          "description": "Input is not valid JSON.",
+          "type": "string",
+          "const": "invalid_json"
+        },
+        {
+          "description": "Input exceeded the message size limit.",
+          "type": "string",
+          "const": "message_too_large"
+        },
+        {
+          "description": "The protocol major version is unsupported.",
+          "type": "string",
+          "const": "unsupported_version"
+        },
+        {
+          "description": "The common request envelope is malformed.",
+          "type": "string",
+          "const": "invalid_request"
+        },
+        {
+          "description": "The requested method is unknown.",
+          "type": "string",
+          "const": "unknown_method"
+        },
+        {
+          "description": "Method parameters are malformed or outside configured bounds.",
+          "type": "string",
+          "const": "invalid_params"
+        },
+        {
+          "description": "The operation is invalid in the current host state.",
+          "type": "string",
+          "const": "invalid_state"
+        },
+        {
+          "description": "The prompt identifier is no longer active.",
+          "type": "string",
+          "const": "stale_prompt"
+        },
+        {
+          "description": "The selected session is absent from the trusted catalog.",
+          "type": "string",
+          "const": "session_not_found"
+        },
+        {
+          "description": "The method exists but is disabled by policy.",
+          "type": "string",
+          "const": "method_disabled"
+        },
+        {
+          "description": "A sanitized internal failure occurred.",
+          "type": "string",
+          "const": "internal"
+        }
+      ]
+    },
+    "ProtocolSecret": {
+      "description": "Frontend authentication answer with redacted formatting and zeroizing drop.",
+      "type": "string",
+      "x-fomalhaut-maxUtf8Bytes": 16384
+    },
+    "RequestEnvelope": {
+      "description": "Strict top-level request.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "protocol": {
+          "type": "integer",
+          "format": "uint16",
+          "const": 1,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "oneOf": [
+        {
+          "description": "Retrieves a complete public state snapshot.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "state.get"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Starts authentication for a username.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "auth.begin"
+            },
+            "params": {
+              "$ref": "#/$defs/AuthBeginParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Answers the active prompt.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "auth.respond"
+            },
+            "params": {
+              "$ref": "#/$defs/AuthRespondParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Cancels active authentication.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "auth.cancel"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Selects an opaque trusted session.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "session.select"
+            },
+            "params": {
+              "$ref": "#/$defs/SessionSelectParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "description": "Requests an enumerated power action. The host keeps this disabled until policy exists.",
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "power.request"
+            },
+            "params": {
+              "$ref": "#/$defs/PowerRequestParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        }
+      ],
+      "required": [
+        "protocol",
+        "id"
+      ],
+      "unevaluatedProperties": false
+    },
+    "RequestId": {
+      "description": "Correlation identifier supplied by the frontend.",
+      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "ResponseEnvelope": {
+      "description": "Response associated with a request ID.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "ResponseResult": {
+      "description": "Successful operation payload.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EmptyResult"
+        },
+        {
+          "$ref": "#/$defs/StateSnapshot"
+        }
+      ]
+    },
+    "Sequence": {
+      "description": "Monotonically increasing event sequence value.",
+      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "SessionKind": {
+      "description": "Public session family.",
+      "type": "string",
+      "enum": [
+        "wayland",
+        "x11"
+      ]
+    },
+    "SessionSelectParams": {
+      "description": "Parameters for `session.select`.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "SessionSelectedData": {
+      "description": "Session-selection event data.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "SessionSummary": {
+      "description": "Frontend-safe session metadata.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ]
+    },
+    "StateChangedData": {
+      "description": "Authentication-state event data.",
+      "type": "object",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/AuthState"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ]
+    },
+    "StateSnapshot": {
+      "description": "Complete state needed to rebuild a frontend after refresh.",
+      "type": "object",
+      "properties": {
+        "authentication": {
+          "$ref": "#/$defs/AuthState"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuthMessage"
+          },
+          "maxItems": 16
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Prompt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selectedSessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-fomalhaut-maxUtf8Bytes": 256
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "maxItems": 128
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "authentication",
+        "prompt",
+        "messages",
+        "sessions",
+        "selectedSessionId",
+        "capabilities"
+      ]
+    },
+    "SuccessResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "protocol": {
+          "type": "integer",
+          "format": "uint16",
+          "const": 1,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "result": {
+          "$ref": "#/$defs/ResponseResult"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "id",
+        "ok",
+        "result"
+      ]
+    }
+  }
+}

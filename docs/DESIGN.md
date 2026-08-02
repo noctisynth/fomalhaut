@@ -367,12 +367,28 @@ Cancelling ─────────────────────► Id
 
 ### 7.1 基本原则
 
-- 协议显式携带主版本号。
-- 请求具有唯一 ID，响应关联该 ID。
-- 状态事件具有递增序号，便于丢弃旧事件。
+- 协议显式携带整数主版本号；首个版本固定为 `1`。
+- 请求具有唯一 ID，响应关联该 ID。请求 ID 和事件 sequence 必须是不大于
+  `9_007_199_254_740_991` 的非负整数，以便 JavaScript 精确表示。
+- 状态事件具有单调递增 sequence，便于丢弃旧事件；sequence 耗尽是 host 的不可恢复错误，
+  不允许回绕。
 - 只暴露完成登录 UI 所必需的操作。
-- JSON schema 与 Rust 类型共同维护。
-- 未知方法、未知字段和版本不兼容必须返回结构化错误。
+- JSON Schema Draft 2020-12 从 Rust wire 类型确定性生成并提交到
+  `protocol/v1.schema.json`；测试比较生成结果与提交文件，防止两者漂移。
+- 未知方法、未知字段、未知 enum 值和版本不兼容必须被严格拒绝并转换为结构化错误。
+- 单条 JSON 消息最大 128 KiB；用户名最大 256 bytes，认证回答最大 16 KiB，session ID
+  最大 256 bytes，session 显示名最大 256 bytes，prompt/message 最大 4 KiB。状态快照最多
+  暴露 128 个 session 和 16 条近期认证消息。
+- 所有长度按 UTF-8 bytes 计算。用户名、session ID 和认证回答拒绝 NUL；用于标识符的文本
+  还拒绝控制字符。
+- JSON Schema 标准的 `maxLength` 按 Unicode 字符数而非 UTF-8 bytes 计算，因此 wire schema
+  不使用该关键字表达 byte 上限，而使用 `x-fomalhaut-maxUtf8Bytes` 注解公开实际边界；Rust
+  解码器中的 byte 长度校验是强制执行点。固定长度数组等按条目计数的边界仍使用标准
+  `maxItems`。
+- 认证回答在 Rust wire 类型中使用独立的 zeroizing 类型，其 `Debug`/`Display` 必须脱敏，
+  并直接转换为 `fomalhaut_core::Secret`，不得经过可记录的通用字符串接口。
+- 解析入口先检查消息总长度，再解析严格的公共 envelope，最后按 method 解析具体 params；
+  不直接向调用方暴露宽松的 `serde_json::Value`。
 
 示例请求：
 
@@ -394,7 +410,8 @@ Cancelling ─────────────────────► Id
 {
   "protocol": 1,
   "id": 12,
-  "ok": true
+  "ok": true,
+  "result": {}
 }
 ```
 
@@ -415,12 +432,37 @@ Cancelling ─────────────────────► Id
 
 ### 7.2 建议开放的方法
 
-- `state.get`
-- `auth.begin`
-- `auth.respond`
-- `auth.cancel`
-- `session.select`
-- `power.request`
+- `state.get`：无参数，返回完整公开状态快照。
+- `auth.begin`：接收用户名。
+- `auth.respond`：接收当前 `promptId` 和 zeroizing 回答。
+- `auth.cancel`：无参数。
+- `session.select`：只接收不透明 session ID。
+- `power.request`：只接收 `poweroff`、`reboot` 或 `suspend` 枚举；在管理员策略完成前始终
+  返回 `method_disabled`。
+
+请求保持顶层 `{ protocol, id, method, params }` 形式。响应保持顶层
+`{ protocol, id, ok, result }` 或 `{ protocol, id, ok, error }` 形式，且只能通过构造器建立
+success/error 不变量。无法解析出请求 ID 的畸形 JSON 不生成一个伪造 ID 的响应，由 bridge
+记录脱敏诊断并丢弃；已经解析出 ID 的错误必须关联原请求。
+
+公开状态快照包含：认证状态、当前 prompt（如有）、有限数量的近期 info/error 消息、可选
+session 摘要、当前选择的 session ID 和 capability。session 摘要只有 ID、显示名和 X11 /
+Wayland 类型。capability 中的 power action 列表在策略启用前为空。
+
+v1 事件至少包含：
+
+- `state.changed`
+- `auth.prompt`
+- `auth.message`
+- `auth.succeeded`
+- `auth.failed`
+- `auth.cancelled`
+- `session.selected`
+- `session.started`
+
+结构化错误 code 至少覆盖：JSON/长度错误、不支持的版本、无效请求、未知方法、无效参数、
+非法状态、过期 prompt、未知 session、禁用方法和内部错误。错误 message 必须是脱敏且适合
+展示的稳定类别文本，不透传 serde、greetd、PAM 或文件系统的原始错误内容。
 
 是否提供用户列表由系统配置决定。前端必须始终能够使用手工用户名输入，以兼容隐藏用户、
 网络用户以及无法从 NSS/AccountsService 枚举的账户。

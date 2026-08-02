@@ -54,17 +54,19 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### 前端协议 v1
 
-- [ ] 定义请求、响应、事件和错误的公共 envelope。
-- [ ] 定义 `state.get`。
-- [ ] 定义 `auth.begin`、`auth.respond` 和 `auth.cancel`。
-- [ ] 定义 `session.select`。
-- [ ] 定义 `power.request`，但在策略层完成前保持禁用。
-- [ ] 为事件增加单调递增 sequence。
-- [ ] 为请求增加唯一 ID 和对应响应。
-- [ ] 规定字段与消息的最大长度。
-- [ ] 创建 `protocol/v1.schema.json`。
-- [ ] 添加 JSON schema 与 Rust 序列化类型的一致性测试。
-- [ ] 记录协议兼容和版本升级规则。
+- [x] 定义请求、响应、事件和错误的公共 envelope。
+- [x] 定义 `state.get`。
+- [x] 定义 `auth.begin`、`auth.respond` 和 `auth.cancel`。
+- [x] 定义 `session.select`。
+- [x] 定义 `power.request`，但在策略层完成前保持禁用。
+- [x] 为事件增加单调递增 sequence。
+- [x] 为请求增加唯一 ID 和对应响应。
+- [x] 规定字段与消息的最大长度，并用 Schema 扩展注解准确表达 UTF-8 byte 上限。
+- [x] 对未知字段、未知方法、版本、JavaScript safe integer 和 UTF-8 byte 长度进行严格校验。
+- [x] 为认证回答实现 zeroizing、脱敏的 wire 类型并直接转换为 core `Secret`。
+- [x] 创建 `protocol/v1.schema.json`。
+- [x] 添加 JSON schema 与 Rust 序列化类型的一致性测试。
+- [x] 记录协议兼容和版本升级规则。
 
 ### Session discovery
 
