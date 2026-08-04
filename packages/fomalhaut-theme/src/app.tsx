@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   LoaderCircle,
+  LockKeyhole,
   MonitorCog,
   UserRound,
   UserRoundPlus,
@@ -12,7 +13,12 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { ThemeScreen } from "@/state/theme-store";
@@ -272,31 +278,17 @@ function OtherUserView({ username }: { username: string | null }) {
 
   return (
     <AuthenticationLayout onBackLabel="Back to users">
-      <div
-        className={cn(
-          "grid size-24 place-items-center rounded-full border-2 border-white/15",
-          "bg-white/5 text-muted-foreground",
-          "shadow-[0_0_50px_rgba(142,197,255,0.12)]",
-        )}
-      >
-        <UserRound className="size-10" aria-hidden="true" />
-      </div>
       <div className="text-center">
-        <h1 className="text-3xl font-medium tracking-tight">Other user</h1>
+        <p className="mb-3 text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
+          Fomalhaut
+        </p>
+        <h1 className="text-3xl font-medium tracking-tight">Sign in</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {username ?? "Sign in with a local or directory account"}
+          Enter a local or directory account.
         </p>
       </div>
       <AuthenticationFeedback />
-      {username ? (
-        prompt ? (
-          <PromptForm prompt={prompt} />
-        ) : (
-          <AuthenticationWaiting />
-        )
-      ) : (
-        <ManualIdentityForm />
-      )}
+      <ManualAuthenticationForm username={username} prompt={prompt} />
     </AuthenticationLayout>
   );
 }
@@ -366,49 +358,154 @@ function AuthenticationLayout({
   );
 }
 
-function ManualIdentityForm() {
+function ManualAuthenticationForm({
+  username,
+  prompt,
+}: {
+  username: string | null;
+  prompt: Prompt | null;
+}) {
   const busy = useThemeStore((state) => state.busy);
+  const authentication = useThemeStore(
+    (state) => state.snapshot?.authentication ?? "idle",
+  );
+  const error = useThemeStore((state) => state.error);
   const submitManualUsername = useThemeStore(
     (state) => state.submitManualUsername,
   );
+  const respondToPrompt = useThemeStore((state) => state.respondToPrompt);
+  const retryAuthentication = useThemeStore(
+    (state) => state.retryAuthentication,
+  );
   const usernameInput = useRef<HTMLInputElement>(null);
+  const responseInput = useRef<HTMLInputElement>(null);
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    const username = usernameInput.current?.value.trim() ?? "";
-    if (username.length > 0) {
-      void submitManualUsername(username);
+    if (!username) {
+      const enteredUsername = usernameInput.current?.value.trim() ?? "";
+      if (enteredUsername.length > 0) {
+        void submitManualUsername(enteredUsername);
+      }
+      return;
+    }
+    if (prompt) {
+      let response = responseInput.current?.value ?? "";
+      if (responseInput.current) {
+        responseInput.current.value = "";
+      }
+      const pending = respondToPrompt(prompt, response);
+      response = "";
+      void pending;
     }
   };
+
+  const canRetry = Boolean(
+    username && !prompt && (authentication === "failed" || error),
+  );
 
   return (
     <form className="w-full space-y-4" onSubmit={submit}>
       <div className="space-y-2">
-        <Label htmlFor="username">Username</Label>
-        <div className="relative">
-          <Input
-            id="username"
+        <Label htmlFor="manual-username">Username</Label>
+        <InputGroup
+          className="h-12 rounded-xl border-white/15 bg-black/20 backdrop-blur-xl"
+          data-disabled={busy || Boolean(username)}
+        >
+          <InputGroupAddon>
+            <UserRound aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            key={username ?? "username-entry"}
+            id="manual-username"
             ref={usernameInput}
-            className="h-12 border-white/15 bg-black/20 pr-12 text-base backdrop-blur-xl"
+            defaultValue={username ?? ""}
             name="username"
             autoComplete="username"
-            autoFocus
-            disabled={busy}
-            required
+            autoFocus={!username}
+            disabled={busy || Boolean(username)}
+            required={!username}
           />
-          <SubmitArrow disabled={busy} label="Continue" />
-        </div>
+          {!username && (
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                type="submit"
+                variant="default"
+                size="icon-sm"
+                disabled={busy}
+                aria-label="Continue"
+              >
+                {busy ? (
+                  <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+                ) : (
+                  <ArrowRight />
+                )}
+              </InputGroupButton>
+            </InputGroupAddon>
+          )}
+        </InputGroup>
       </div>
-      <div className="space-y-2 opacity-55">
-        <Label htmlFor="pending-credential">Authentication prompt</Label>
-        <Input
-          id="pending-credential"
-          className="h-12 border-white/10 bg-black/10"
-          type="password"
-          placeholder="Available after username"
-          disabled
-        />
+      <div className={cn("space-y-2", !prompt && "opacity-60")}>
+        <Label htmlFor="manual-credential">
+          {prompt?.message ?? "Password"}
+        </Label>
+        <InputGroup
+          className="h-12 rounded-xl border-white/15 bg-black/20 backdrop-blur-xl"
+          data-disabled={busy || !prompt}
+        >
+          <InputGroupAddon>
+            <LockKeyhole aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            id="manual-credential"
+            ref={responseInput}
+            type={prompt?.kind === "visible" ? "text" : "password"}
+            placeholder={
+              username ? "Waiting for authentication…" : "Enter username first"
+            }
+            autoComplete={
+              prompt?.kind === "secret" ? "current-password" : "off"
+            }
+            autoFocus={Boolean(prompt)}
+            disabled={busy || !prompt}
+            required={Boolean(prompt)}
+          />
+          {username && (
+            <InputGroupAddon align="inline-end">
+              {prompt ? (
+                <InputGroupButton
+                  type="submit"
+                  variant="default"
+                  size="icon-sm"
+                  disabled={busy}
+                  aria-label="Sign in"
+                >
+                  {busy ? (
+                    <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+                  ) : (
+                    <ArrowRight />
+                  )}
+                </InputGroupButton>
+              ) : (
+                !canRetry && (
+                  <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+                )
+              )}
+            </InputGroupAddon>
+          )}
+        </InputGroup>
       </div>
+      {canRetry && (
+        <Button
+          className="w-full rounded-xl border-white/15 bg-white/10 backdrop-blur-xl"
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void retryAuthentication()}
+        >
+          Try again
+        </Button>
+      )}
     </form>
   );
 }
@@ -432,51 +529,36 @@ function PromptForm({ prompt }: { prompt: Prompt }) {
   return (
     <form className="w-full space-y-2" onSubmit={submit}>
       <Label htmlFor="prompt-response">{prompt.message}</Label>
-      <div className="relative">
-        <Input
+      <InputGroup className="h-12 rounded-xl border-white/15 bg-black/20 backdrop-blur-xl">
+        <InputGroupAddon>
+          <LockKeyhole aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
           id="prompt-response"
           ref={responseInput}
-          className={cn(
-            "h-12 border-white/15 bg-black/20 pr-12 text-base backdrop-blur-xl",
-            "focus-visible:border-primary/70 focus-visible:ring-primary/30",
-          )}
           type={prompt.kind === "secret" ? "password" : "text"}
           autoComplete={prompt.kind === "secret" ? "current-password" : "off"}
           autoFocus
           disabled={busy}
           required
         />
-        <SubmitArrow disabled={busy} label="Sign in" />
-      </div>
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            type="submit"
+            variant="default"
+            size="icon-sm"
+            disabled={busy}
+            aria-label="Sign in"
+          >
+            {busy ? (
+              <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+            ) : (
+              <ArrowRight />
+            )}
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </form>
-  );
-}
-
-function SubmitArrow({
-  disabled,
-  label,
-}: {
-  disabled: boolean;
-  label: string;
-}) {
-  return (
-    <button
-      className={cn(
-        "absolute top-1.5 right-1.5 grid size-9 place-items-center rounded-md",
-        "bg-primary text-primary-foreground transition hover:bg-primary/90",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
-        "disabled:pointer-events-none disabled:opacity-50",
-      )}
-      type="submit"
-      disabled={disabled}
-      aria-label={label}
-    >
-      {disabled ? (
-        <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
-      ) : (
-        <ArrowRight className="size-4" />
-      )}
-    </button>
   );
 }
 

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FomalhautClient } from "fomalhaut-sdk";
 import { describe, expect, test } from "vitest";
@@ -75,8 +75,12 @@ describe("SPA authentication UI", () => {
 
     await user.click(screen.getByRole("button", { name: /Other user/ }));
 
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Other user" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Username")).toBeEnabled();
-    expect(screen.getByLabelText("Authentication prompt")).toBeDisabled();
+    expect(screen.getByLabelText("Password")).toBeDisabled();
   });
 
   test("submits a manual username before enabling PAM prompts", async () => {
@@ -87,11 +91,25 @@ describe("SPA authentication UI", () => {
 
     await user.type(screen.getByLabelText("Username"), "carol{Enter}");
 
-    expect(screen.getByText("carol")).toBeVisible();
+    expect(screen.getByLabelText("Username")).toHaveValue("carol");
+    expect(screen.getByLabelText("Username")).toBeDisabled();
+    expect(screen.getByLabelText("Password")).toBeDisabled();
     expect(transport.requests.at(-1)).toMatchObject({
       method: "auth.begin",
       params: { username: "carol" },
     });
+
+    act(() => {
+      transport.emit({
+        protocol: 1,
+        sequence: 1,
+        event: "auth.prompt",
+        data: { promptId: 9, kind: "secret", message: "Password for carol" },
+      });
+    });
+
+    expect(screen.getByLabelText("Username")).toHaveValue("carol");
+    expect(screen.getByLabelText("Password for carol")).toBeEnabled();
   });
 
   test("clears a secret answer before its asynchronous request completes", async () => {
