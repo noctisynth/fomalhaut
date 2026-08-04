@@ -51,6 +51,16 @@ export function App() {
       <Background />
       <Clock />
 
+      {phase === "ready" && snapshot && screen.name !== "user-selection" && (
+        <AuthenticationBackButton
+          label={
+            screen.name === "authentication-recovery"
+              ? "Cancel authentication"
+              : "Back to users"
+          }
+        />
+      )}
+
       <div className="relative z-10 grid min-h-screen place-items-center px-6 py-28">
         {phase === "loading" && <LoadingView />}
         {phase === "failed" && <UnavailableView message={error} />}
@@ -265,7 +275,7 @@ function KnownUserView({ user }: { user: UserSummary }) {
   const prompt = useThemeStore((state) => state.snapshot?.prompt ?? null);
 
   return (
-    <AuthenticationLayout onBackLabel="Back to users">
+    <AuthenticationLayout>
       <UserAvatar
         user={user}
         className={cn(
@@ -289,7 +299,7 @@ function OtherUserView({ username }: { username: string | null }) {
   const prompt = useThemeStore((state) => state.snapshot?.prompt ?? null);
 
   return (
-    <AuthenticationLayout onBackLabel="Back to users">
+    <AuthenticationLayout>
       <div className="text-center">
         <p className="mb-3 text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
           Fomalhaut
@@ -309,7 +319,7 @@ function AuthenticationRecoveryView() {
   const prompt = useThemeStore((state) => state.snapshot?.prompt ?? null);
 
   return (
-    <AuthenticationLayout onBackLabel="Cancel authentication">
+    <AuthenticationLayout>
       <div
         className={cn(
           "grid size-24 place-items-center rounded-full border-2 border-primary/30",
@@ -335,16 +345,7 @@ function AuthenticationRecoveryView() {
   );
 }
 
-function AuthenticationLayout({
-  children,
-  onBackLabel,
-}: {
-  children: ReactNode;
-  onBackLabel: string;
-}) {
-  const busy = useThemeStore((state) => state.busy);
-  const cancelAndReturn = useThemeStore((state) => state.cancelAndReturn);
-
+function AuthenticationLayout({ children }: { children: ReactNode }) {
   return (
     <section
       className={cn(
@@ -352,21 +353,29 @@ function AuthenticationLayout({
         "animate-in fade-in duration-200 motion-reduce:animate-none",
       )}
     >
-      <Button
-        className={cn(
-          "fixed top-28 left-6 gap-2 rounded-full border-white/10",
-          "bg-black/10 backdrop-blur-md sm:left-10",
-        )}
-        type="button"
-        variant="outline"
-        disabled={busy}
-        onClick={() => void cancelAndReturn()}
-      >
-        <ArrowLeft className="size-4" aria-hidden="true" />
-        {onBackLabel}
-      </Button>
       {children}
     </section>
+  );
+}
+
+function AuthenticationBackButton({ label }: { label: string }) {
+  const busy = useThemeStore((state) => state.busy);
+  const cancelAndReturn = useThemeStore((state) => state.cancelAndReturn);
+
+  return (
+    <Button
+      className={cn(
+        "fixed top-28 left-6 z-20 gap-2 rounded-full border-white/10",
+        "bg-black/10 backdrop-blur-md sm:left-10",
+      )}
+      type="button"
+      variant="outline"
+      disabled={busy}
+      onClick={() => void cancelAndReturn()}
+    >
+      <ArrowLeft className="size-4" aria-hidden="true" />
+      {label}
+    </Button>
   );
 }
 

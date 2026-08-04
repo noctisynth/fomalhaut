@@ -51,8 +51,9 @@ describe("SPA authentication UI", () => {
     expect(screen.getByRole("heading", { name: "Alice" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Back to users" })).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Back to users" }).closest("section"),
-    ).not.toHaveClass("zoom-in-95");
+      screen.getByRole("button", { name: "Back to users" }).parentElement
+        ?.tagName,
+    ).toBe("MAIN");
     expect(transport.requests.at(-1)).toMatchObject({ method: "auth.begin" });
   });
 
