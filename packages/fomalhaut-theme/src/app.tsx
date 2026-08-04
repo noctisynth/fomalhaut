@@ -409,7 +409,7 @@ function ManualAuthenticationForm({
       <div className="space-y-2">
         <Label htmlFor="manual-username">Username</Label>
         <InputGroup
-          className="h-12 rounded-xl border-white/15 bg-black/20 backdrop-blur-xl"
+          className="h-12 border-white/15 bg-black/20 backdrop-blur-xl"
           data-disabled={busy || Boolean(username)}
         >
           <InputGroupAddon>
@@ -450,7 +450,7 @@ function ManualAuthenticationForm({
           {prompt?.message ?? "Password"}
         </Label>
         <InputGroup
-          className="h-12 rounded-xl border-white/15 bg-black/20 backdrop-blur-xl"
+          className="h-12 border-white/15 bg-black/20 backdrop-blur-xl"
           data-disabled={busy || !prompt}
         >
           <InputGroupAddon>
@@ -529,7 +529,7 @@ function PromptForm({ prompt }: { prompt: Prompt }) {
   return (
     <form className="w-full space-y-2" onSubmit={submit}>
       <Label htmlFor="prompt-response">{prompt.message}</Label>
-      <InputGroup className="h-12 rounded-xl border-white/15 bg-black/20 backdrop-blur-xl">
+      <InputGroup className="h-12 border-white/15 bg-black/20 backdrop-blur-xl">
         <InputGroupAddon>
           <LockKeyhole aria-hidden="true" />
         </InputGroupAddon>
