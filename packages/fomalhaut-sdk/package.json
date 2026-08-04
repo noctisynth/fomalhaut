@@ -5,6 +5,11 @@
   "type": "module",
   "sideEffects": false,
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noctisynth/fomalhaut.git",
+    "directory": "packages/fomalhaut-sdk"
+  },
   "files": [
     "dist"
   ],

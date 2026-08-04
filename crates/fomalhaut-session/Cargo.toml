@@ -2,7 +2,9 @@
 name = "fomalhaut-session"
 edition = "2024"
 version = "0.1.0-alpha"
+description = "Trusted desktop session discovery and launch resolution for Fomalhaut"
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 fomalhaut-core = { version = "0.1.0-alpha", path = "../fomalhaut-core" }

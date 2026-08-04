@@ -317,6 +317,17 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 - 本地和 Agent 环境禁止执行 `smif version` 与 `smif publish`。
 - 版本更新和发布只能由 GitHub Actions 中的 `semifold ci` 执行；该流程根据 changeset
   更新各包版本、包间依赖并发布已经完成版本变更的包。
+- 所有 Rust package 必须提供 crates.io 接受的非空 `description` 和
+  `license`/`license-file`；Fomalhaut 统一继承 `AGPL-3.0-only` license 与仓库 URL，各 crate
+  保留与自身职责对应的独立 description。`repository` 虽不是 crates.io 的硬性发布字段，仍
+  必须提供，确保注册表元数据可追溯到源码。
+- 所有 npm 发布 package 必须提供合法且非 private 的 `name`、SemVer `version`；同时维护
+  `description`、`license`、`repository`、明确的 `exports` 和 `files` 白名单。根 workspace
+  package 必须保持 private，不得发布。
+- `semifold-ci.yaml` 在运行 `semifold ci` 前必须使用 Bun frozen lockfile 安装依赖并构建
+  `fomalhaut-sdk`，确保 npm `files = ["dist"]` 的发布内容在全新 runner 中真实存在。发布前可
+  本地运行 `cargo package` 和 `npm pack --dry-run` 检查 payload，但仍严禁本地执行
+  `cargo publish`、`npm publish`、`smif version` 或 `smif publish`。
 - Semifold 配置必须通过 `smif init`、`smif config` 等 CLI 维护，不手工模拟其输出。
 - Semifold 的 base branch 为 `main`，release branch 为 `release`。
 - `semifold-status.yaml` 在面向 `main` 的 pull request 上报告 changeset 状态。

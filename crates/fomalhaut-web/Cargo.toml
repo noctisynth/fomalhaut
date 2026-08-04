@@ -2,7 +2,9 @@
 name = "fomalhaut-web"
 edition = "2024"
 version = "0.1.0-alpha"
+description = "Frontend protocol, theme loader, and web greeter controller for Fomalhaut"
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 cap-std = "4.0.2"

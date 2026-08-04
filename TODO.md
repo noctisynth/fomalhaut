@@ -289,6 +289,12 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       publish。
 - [x] 将 status 与 CI workflow 的 Semifold CLI pin 到本地 `0.3.0-rc.1` 对应的 action 版本
       `v0.3.0-rc.1`。
+- [x] 为四个 Rust crate 补齐 crates.io 所需 description、license 和 repository metadata，
+      并为 `fomalhaut-sdk` 补齐 npm repository metadata。
+- [x] 在 Semifold CI 发布前使用 frozen `bun.lock` 安装依赖并构建 SDK，确保 npm payload
+      包含 `dist`。
+- [x] 在首次正式发布前对四个 crate 执行 `cargo package` payload 检查，并对 SDK 执行
+      `npm pack --dry-run`。
 - [ ] 完成许可证、第三方依赖和资源归属检查。
 - [ ] 发布前执行完整安全检查和端到端测试。
 

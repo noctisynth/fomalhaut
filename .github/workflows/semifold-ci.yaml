@@ -32,6 +32,10 @@ jobs:
         run: |
           bun --version
           bun --revision
+      - name: Install TypeScript dependencies
+        run: bun install --frozen-lockfile
+      - name: Build TypeScript SDK
+        run: bun run --cwd packages/fomalhaut-sdk build
       - name: Semifold CI
         run: semifold ci
         env:

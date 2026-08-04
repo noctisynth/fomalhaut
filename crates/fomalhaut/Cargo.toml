@@ -2,7 +2,9 @@
 name = "fomalhaut"
 edition = "2024"
 version = "0.1.0-alpha"
+description = "WebKitGTK display manager greeter for greetd"
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 fomalhaut-core = { version = "0.1.0-alpha", path = "../fomalhaut-core" }
