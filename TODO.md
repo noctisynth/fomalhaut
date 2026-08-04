@@ -190,10 +190,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 保留 Semifold CI 的 `npm publish --provenance --access public` 作为 OIDC 发布专用例外；
       npm 不得参与安装、workspace、脚本、测试、构建或 lockfile，根 private package 不得进入
       Semifold 发布列表。
-- [x] 首次发布期间通过 `actions/setup-node` 的 npm registry 配置让 GitHub Secret
-      `NPM_TOKEN` 映射的 `NODE_AUTH_TOKEN` 生效；不得启用 npm package-manager cache。
-- [ ] `fomalhaut-sdk` 首次发布并配置 trusted publisher 后，移除临时 `NODE_AUTH_TOKEN`，恢复
-      OIDC-only 发布。
+- [x] `fomalhaut-sdk` 首次发布后移除 npm token、registry auth 和 `.npmrc` 配置；后续由
+      Node.js 24/npm 运行时与 GitHub `id-token: write` 执行 OIDC-only 发布。
 - [x] 只使用 Bun 管理 Node workspace，提交文本格式 `bun.lock`，并拒绝 npm、pnpm 或 Yarn
       lockfile；CI 使用 `bun install --frozen-lockfile`。
 - [x] 本地使用 `bun upgrade --canary`，GitHub Actions 使用 `oven-sh/setup-bun@v2` 和显式
@@ -295,6 +293,7 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       并为 `fomalhaut-sdk` 补齐 npm repository metadata。
 - [x] 在 Semifold CI 发布前使用 frozen `bun.lock` 安装依赖并构建 SDK，确保 npm payload
       包含 `dist`。
+- [x] 在 Semifold CI 安装 WebKitGTK 开发包，使 `cargo publish` 可以验证最终 greeter crate。
 - [x] 在首次正式发布前对四个 crate 执行 `cargo package` payload 检查，并对 SDK 执行
       `npm pack --dry-run`。
 - [ ] 完成许可证、第三方依赖和资源归属检查。

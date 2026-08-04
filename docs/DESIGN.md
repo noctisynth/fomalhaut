@@ -334,6 +334,9 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
   `fomalhaut-sdk`，确保 npm `files = ["dist"]` 的发布内容在全新 runner 中真实存在。发布前可
   本地运行 `cargo package` 和 `npm pack --dry-run` 检查 payload，但仍严禁本地执行
   `cargo publish`、`npm publish`、`smif version` 或 `smif publish`。
+- `semifold-ci.yaml` 必须安装 `libwebkitgtk-6.0-dev`，让 `cargo publish` 对最终
+  `fomalhaut` crate 的 tarball 验证能够发现 GLib、GTK4 与 WebKitGTK pkg-config metadata；
+  不得通过跳过 Cargo verification 掩盖缺失的系统构建依赖。
 - Semifold 配置必须通过 `smif init`、`smif config` 等 CLI 维护，不手工模拟其输出。
 - Semifold 的 base branch 为 `main`，release branch 为 `release`。
 - `semifold-status.yaml` 在面向 `main` 的 pull request 上报告 changeset 状态。
@@ -601,14 +604,10 @@ npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockf
 执行 publish；该命令只能由 GitHub Actions 中的 `semifold ci` 间接调用。根 private package
 不登记为 Semifold 发布包，只同步 `packages/fomalhaut-sdk`。
 
-由于 npm trusted publishing 不能在 package 首次创建前完成关联，首次发布允许一个临时的
-bootstrap 凭据例外：`semifold-ci` 仅在 `Semifold CI` 步骤把 GitHub Actions Secret
-`NPM_TOKEN` 映射为 npm 识别的 `NODE_AUTH_TOKEN`，并在此前通过 `actions/setup-node@v6` 的
-`registry-url: https://registry.npmjs.org` 生成只引用该环境变量的项目级 `.npmrc`。该 action
-必须关闭 package-manager cache，不能引入 npm lockfile 或替代 Bun 的安装流程。token 不得
-写入仓库、日志或其他步骤；
-`fomalhaut-sdk` 首次发布成功并完成 trusted publisher 配置后，必须删除该环境变量，恢复为
-仅使用 OIDC provenance 的发布流程。
+`fomalhaut-sdk` 首次发布已经完成，后续 npm 发布仅使用 trusted publishing/OIDC：workflow
+保留 `id-token: write`，并通过 `actions/setup-node@v6` 提供支持 OIDC 的 Node.js 24/npm
+运行时，但不得配置 `registry-url`、`.npmrc`、`NPM_TOKEN` 或 `NODE_AUTH_TOKEN`。setup-node
+不得启用 npm package-manager cache，也不得引入 npm lockfile 或替代 Bun 的安装流程。
 
 Fomalhaut 有意跟随 Bun 的滚动 canary，以使用稳定版尚未发布的 Rust 实现开发线；不把它写成
 尚不存在的稳定 `1.4.0`。本地工具链必须是 `bun upgrade --canary` 所选择的 canary，GitHub
