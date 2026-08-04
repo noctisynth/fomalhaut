@@ -1,11 +1,11 @@
 [package]
 name = "fomalhaut-session"
 edition = "2024"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.0"
 license.workspace = true
 
 [dependencies]
-fomalhaut-core = { version = "0.1.0-alpha", path = "../fomalhaut-core" }
+fomalhaut-core = { version = "0.1.0-alpha.0", path = "../fomalhaut-core" }
 freedesktop-desktop-entry = { version = "0.8.1", default-features = false }
 
 [lints]
