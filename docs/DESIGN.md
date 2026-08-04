@@ -131,6 +131,21 @@ fomalhaut/
 │           └── policy.rs
 ├── protocol/
 │   └── v1.schema.json
+├── packages/
+│   └── fomalhaut-sdk/
+│       ├── package.json
+│       ├── tsconfig.json
+│       └── src/
+│           ├── generated/
+│           │   └── v1/
+│           ├── bridge.ts
+│           ├── client.ts
+│           ├── errors.ts
+│           ├── events.ts
+│           └── index.ts
+├── biome.json
+├── bun.lock
+├── package.json
 ├── examples/
 │   └── minimal-theme/
 └── docs/
@@ -441,6 +456,11 @@ Cancelling ─────────────────────► Id
 - 只暴露完成登录 UI 所必需的操作。
 - JSON Schema Draft 2020-12 从 Rust wire 类型确定性生成并提交到
   `protocol/v1.schema.json`；测试比较生成结果与提交文件，防止两者漂移。
+- Draft 2020-12 的规范 metaschema URI 固定为
+  `https://json-schema.org/draft/2020-12/schema`。该 URI 由 JSON Schema 官方文档使用，且
+  返回 `application/schema+json`；编辑器因 MIME、网络、缓存或 dialect 支持问题无法下载时，
+  应通过编辑器 schema catalog、缓存或本地映射解决，不得把使用 2020-12 dialect 生成的文档
+  伪装成 Draft-07。
 - 未知方法、未知字段、未知 enum 值和版本不兼容必须被严格拒绝并转换为结构化错误。
 - 单条 JSON 消息最大 128 KiB；用户名最大 256 bytes，认证回答最大 16 KiB，session ID
   最大 256 bytes，session 显示名最大 256 bytes，prompt/message 最大 4 KiB。状态快照最多
@@ -541,6 +561,71 @@ v1 事件至少包含：
 - 任意文件读取和目录遍历。
 - 任意 URL 导航或网络代理。
 - 原始 PAM 错误 description 的无条件透传。
+
+### 7.4 TypeScript SDK
+
+Fomalhaut 把可由主题项目直接安装的 TypeScript SDK 作为正式下游包维护。npm 包名固定为无
+scope 的 `fomalhaut-sdk`；不使用无法注册的 `@fomalhaut` scope。SDK 位于
+`packages/fomalhaut-sdk`，属于 Bun workspace，不加入 Cargo workspace，并由 Semifold
+的 Node.js resolver 独立维护版本和 `alpha` release channel。
+
+Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfile。根 `package.json`
+以 `workspaces = ["packages/*"]` 发现 package，根 package 必须为 private；`bun install` 产生
+并提交文本格式的 `bun.lock`，CI 使用 `bun install --frozen-lockfile`，禁止隐式迁移或同时提交
+其他包管理器 lockfile。
+
+Fomalhaut 有意跟随 Bun 的滚动 canary，以使用稳定版尚未发布的 Rust 实现开发线；不把它写成
+尚不存在的稳定 `1.4.0`。本地工具链必须是 `bun upgrade --canary` 所选择的 canary，GitHub
+Actions 必须使用 `oven-sh/setup-bun@v2` 且显式设置 `bun-version: canary`，不得省略后回退到
+`latest`，也不得填入 `1.4.0`。canary 会随 Bun `main` 更新，因此 CI 必须输出
+`bun --version` 与 `bun --revision` 以记录实际验证的提交；`bun.lock` 只保证 npm 依赖解析可
+复现，不宣称固定滚动 canary 可执行文件本身。
+
+Rust wire 类型仍是协议的唯一事实来源。`fomalhaut-web` 使用 `ts-rs` 为请求、响应、事件、
+状态、prompt、session 和结构化错误派生 TypeScript 类型，并通过
+`#[ts(export, export_to = "v1/request-envelope.ts")]` 这类显式目标把每个类型导出为独立文件。
+所有 `.ts`、`.tsx` 和生成 binding 文件名必须使用 ASCII `kebab-case`；不得使用
+`PascalCase` 或 `camelCase` 文件名。TypeScript 类型和类名仍按语言惯例使用 `PascalCase`，
+该命名约束只作用于文件和目录项。
+
+`export_to` 只记录相对于 `TS_RS_EXPORT_DIR` 的稳定路径，不在 Rust 源码中硬编码跨越仓库的
+`../../../packages/...` 路径。普通 Cargo 测试把自动导出定向到被忽略的 `target/ts-rs`，避免
+测试修改源码树；显式 SDK 生成命令才把根目录覆盖为
+`packages/fomalhaut-sdk/src/generated`。生成流程不得放在 `build.rs` 或正常 greeter 启动路径
+中，也不得要求运行中的低权限 `greeter` 写开发产物。
+
+生成边界必须特别处理：
+
+- `RequestId`、`PromptId` 和 `Sequence` 虽由 Rust `u64` 承载，但已被协议限制为 JavaScript
+  safe integer，导出时逐类型映射为 TypeScript `number`；不得全局把任意 `u64` 映射为
+  `number`。
+- `EmptyParams` 必须表达没有可接受字段的对象语义；若 `ts-rs` 生成宽泛的 `{}`，应覆盖为
+  `Record<string, never>`。
+- UTF-8 byte 上限、集合数量和其他不能由 TypeScript 静态表达的约束仍以 Rust 校验和
+  `protocol/v1.schema.json` 为准；SDK 类型不能替代运行时协议验证。
+- 生成结果必须提交，并由 CI 重新生成后检查 Git diff，防止 Rust、JSON Schema 和 SDK 类型
+  漂移。
+
+`fomalhaut-sdk` 在生成 wire types 上提供手写、框架无关的 Client。公开 API 至少覆盖
+`state.get`、`session.select`、`auth.begin`、`auth.respond`、`auth.cancel` 和带判别联合收窄的
+事件订阅；策略仍禁用时不提供高级 `power.request` 方法。Client 内部管理 request ID、验证
+响应关联、协议版本和单调 event sequence，并把协议拒绝、bridge 失败和本地 busy 分成稳定
+错误类型。
+
+SDK 通过可注入的 `FomalhautTransport` 隔离宿主，默认 `WebKitTransport` 封装
+`window.webkit.messageHandlers.fomalhaut` 与 `fomalhaut:event`。这允许 Node 单元测试、未来
+demo transport 或其他宿主复用 Client。Client 同一时刻只允许一个请求，不自动排队认证回答，
+避免 secret 因排队在 JavaScript 闭包中延长存活；SDK 不记录请求 body，主题仍须在提交后立即
+清空输入元素。首阶段 SDK 保持零运行时依赖、纯 ESM，并由 TypeScript compiler 生成 JavaScript
+和 declaration 文件，不引入 bundler。
+
+所有手写和生成的 TypeScript 都由仓库锁定版本的 Biome 统一处理。生成命令先运行 `ts-rs`，
+再对 generated 目录执行 Biome format，随后执行只读 check；CI 使用 Biome `ci`、TypeScript
+typecheck、SDK 单元测试和 build，并在重新生成后以 Git diff 检查产物已提交。生成目录不得整体
+关闭 linter；只能为生成器无法规避的问题添加有说明的最小规则 override。Biome 和 TypeScript
+随项目滚动升级到最新稳定版，但每个提交必须通过精确依赖版本与 `bun.lock` 保持可复现。所有
+脚本通过 `bun run` 调度，SDK 测试使用 `bun test`；首阶段 build 仍由 TypeScript compiler 生成
+标准 ESM JavaScript 和 declaration，不为仅有的库代码额外引入 bundler。
 
 ## 8. 前端和主题
 
@@ -908,11 +993,15 @@ executable_search_paths = ["/usr/local/bin", "/usr/bin"]
 
 - Rust crate 遵循语义化版本。
 - 各 crate 独立维护版本，由 Semifold changeset 决定版本提升级别。
+- `fomalhaut-sdk` 作为独立 Node.js package 维护版本，由 Semifold Node.js resolver 和英文
+  changeset 决定提升级别；本地同样不得执行 `smif version` 或 `smif publish`。
 - 所有 crate 使用 Rust 2024 Edition，并跟随最新 Rust stable，不承诺固定 MSRV。
 - Cargo manifest 不设置 `rust-version`；CI 不维护旧 Rust 版本兼容性矩阵。
 - Rust stable 或依赖升级引起的必要技术变动，仍须先更新本文和 `TODO.md` 再实施。
 - 第三方依赖跟随最新稳定版本，但通过 manifest 语义化约束和已提交 lockfile 保持构建可复现。
 - 前端协议单独维护整数主版本。
+- 只修改手写 SDK Client 时只提升 `fomalhaut-sdk`；Rust wire 类型变化并改变生成产物时，
+  changeset 必须同时包含 `fomalhaut-web` 和 `fomalhaut-sdk`。
 - 同一 host 至少支持其当前协议版本。
 - 破坏性前端协议变更必须增加主版本。
 - 新增可选字段不应破坏旧主题。
