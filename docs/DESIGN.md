@@ -442,16 +442,18 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   可执行，且配置的 greeter 账户可由系统账户数据库解析；验证失败不得生成不可启动的配置。
 - Rust 使用 `cargo build --release --locked -p fomalhaut`，前端先执行
   `bun install --frozen-lockfile` 再调用 workspace 的 `build:theme`，不得隐式更新 lockfile。
-- 二进制先写入同目录临时文件，保留现有文件的带时间戳备份后通过 rename 切换。主题每次安装
-  到只读 release 目录，`/etc/fomalhaut/themes/nocturne` 使用相对 symlink 原子指向新 release；
-  既有普通目录首次迁移时保留为 `legacy` 备份，不递归删除旧主题或 release。
+- 安装必须内容级幂等：构建后的二进制、主题树或 updater 生成的 TOML 与当前安装内容完全相同
+  时，分别跳过备份、替换、release 创建和 symlink 切换。确有变化的二进制先写入同目录临时
+  文件，保留现有文件的带时间戳备份后通过 rename 切换。变化的主题安装到只读 release 目录，
+  `/etc/fomalhaut/themes/nocturne` 使用相对 symlink 原子指向新 release；既有普通目录首次迁移时
+  保留为 `legacy` 备份，不递归删除旧主题或 release。
 - `/etc/fomalhaut/config.toml` 与 `/etc/greetd/config.toml` 不允许用 `sed`/正则盲目覆盖整份
   文件。内置 updater 必须先用 Python 标准库 `tomllib` 验证旧内容，只修改脚本拥有的 table/key，
   再验证新 TOML 和预期值；现有文件先生成同目录时间戳备份，临时文件继承 mode/owner，并用
   同文件系统 `os.replace` 与 fsync 原子提交。为避免原子替换悄然改变链接语义，配置文件为
   symlink 或其他非普通文件时必须拒绝修改。两个配置目标的类型和现有 TOML 必须在切换二进制、
   主题或任一配置前完成 preflight；无法解析、重复目标 key 或验证失败必须 fail closed，不能留下
-  已知可提前避免的部分安装。
+  已知可提前避免的部分安装。只有新旧 TOML 文本确实不同时才创建备份并原子替换。
 - Fomalhaut 配置只维护 `[frontend].path`，并在明确传入缩放参数或首次创建文件时维护
   `[display].scale`；其他 section 和注释尽量原样保留。greetd 配置只维护
   `[default_session].command` 与 `user`，命令使用绝对二进制路径、Cage 和独立

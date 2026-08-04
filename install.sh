@@ -108,6 +108,7 @@ install_arch_dependencies() {
     base-devel
     cage
     dbus
+    diffutils
     git
     glib2
     glibc
@@ -151,7 +152,7 @@ if [[ "$system_root" == "/" ]]; then
   install_arch_dependencies
 fi
 
-for command in cargo bun python3 git install cp mv ln find grep chmod chown cat date; do
+for command in cargo bun python3 git install cp mv ln find grep chmod chown cat cmp diff readlink date; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable after dependency setup: $command"
 done
 
@@ -304,6 +305,10 @@ for section, key, kind, raw in updates:
     if parsed.get(section, {}).get(key) != expected:
         raise SystemExit(f"generated TOML did not preserve [{section}].{key}")
 
+if path.exists() and new_text == old_text:
+    print(f"Unchanged {path}")
+    raise SystemExit(0)
+
 path.parent.mkdir(parents=True, exist_ok=True)
 old_stat = path.stat() if path.exists() else None
 if old_stat is not None:
@@ -395,13 +400,18 @@ binary_path="$(rooted "$runtime_binary")"
 binary_directory="${binary_path%/*}"
 binary_temporary="$binary_directory/.fomalhaut.new.$install_id"
 
-run_privileged install -d -m 0755 -- "$binary_directory"
-if [[ -e "$binary_path" || -L "$binary_path" ]]; then
-  run_privileged cp -a -- "$binary_path" "$binary_path.bak.$install_id"
+if [[ -f "$binary_path" && ! -L "$binary_path" && -x "$binary_path" ]] \
+  && run_privileged cmp -s -- "$binary_source" "$binary_path"; then
+  printf 'Unchanged %s\n' "$runtime_binary"
+else
+  run_privileged install -d -m 0755 -- "$binary_directory"
+  if [[ -e "$binary_path" || -L "$binary_path" ]]; then
+    run_privileged cp -a -- "$binary_path" "$binary_path.bak.$install_id"
+  fi
+  run_privileged install -m 0755 -- "$binary_source" "$binary_temporary"
+  run_privileged mv -fT -- "$binary_temporary" "$binary_path"
+  printf 'Installed %s\n' "$runtime_binary"
 fi
-run_privileged install -m 0755 -- "$binary_source" "$binary_temporary"
-run_privileged mv -fT -- "$binary_temporary" "$binary_path"
-printf 'Installed %s\n' "$runtime_binary"
 
 readonly theme_runtime="/etc/fomalhaut/themes/nocturne"
 theme_path="$(rooted "$theme_runtime")"
@@ -410,27 +420,44 @@ release_base="$theme_parent/.nocturne-releases"
 release_path="$release_base/$install_id"
 theme_link_temporary="$theme_parent/.nocturne-link.$install_id"
 
-run_privileged install -d -m 0755 -- "$theme_parent" "$release_base" "$release_path"
-run_privileged cp -a -- "$theme_source/." "$release_path/"
-if [[ "$system_root" == "/" ]]; then
-  run_privileged chown -R root:root -- "$release_path"
-fi
-run_privileged find "$release_path" -type d -exec chmod 0755 {} +
-run_privileged find "$release_path" -type f -exec chmod 0644 {} +
-run_privileged ln -s -- ".nocturne-releases/$install_id" "$theme_link_temporary"
-
-if [[ -e "$theme_path" && ! -L "$theme_path" ]]; then
-  legacy_path="$theme_path.legacy.$install_id"
-  run_privileged mv -T -- "$theme_path" "$legacy_path"
-  if ! run_privileged mv -T -- "$theme_link_temporary" "$theme_path"; then
-    run_privileged mv -T -- "$legacy_path" "$theme_path"
-    die "theme symlink switch failed; the previous directory was restored"
+theme_unchanged=false
+if [[ -L "$theme_path" && -d "$theme_path" ]]; then
+  theme_link_target="$(run_privileged readlink -- "$theme_path")"
+  if [[ "$theme_link_target" =~ ^\.nocturne-releases/[A-Za-z0-9._-]+$ ]]; then
+    if run_privileged diff -qr -- "$theme_source" "$theme_path" >/dev/null; then
+      theme_unchanged=true
+    else
+      diff_status=$?
+      ((diff_status == 1)) || die "the installed theme could not be compared safely"
+    fi
   fi
-  printf 'Preserved the previous theme directory at %s\n' "$legacy_path"
-else
-  run_privileged mv -fT -- "$theme_link_temporary" "$theme_path"
 fi
-printf 'Installed theme release %s\n' "$theme_runtime"
+
+if $theme_unchanged; then
+  printf 'Unchanged %s\n' "$theme_runtime"
+else
+  run_privileged install -d -m 0755 -- "$theme_parent" "$release_base" "$release_path"
+  run_privileged cp -a -- "$theme_source/." "$release_path/"
+  if [[ "$system_root" == "/" ]]; then
+    run_privileged chown -R root:root -- "$release_path"
+  fi
+  run_privileged find "$release_path" -type d -exec chmod 0755 {} +
+  run_privileged find "$release_path" -type f -exec chmod 0644 {} +
+  run_privileged ln -s -- ".nocturne-releases/$install_id" "$theme_link_temporary"
+
+  if [[ -e "$theme_path" && ! -L "$theme_path" ]]; then
+    legacy_path="$theme_path.legacy.$install_id"
+    run_privileged mv -T -- "$theme_path" "$legacy_path"
+    if ! run_privileged mv -T -- "$theme_link_temporary" "$theme_path"; then
+      run_privileged mv -T -- "$legacy_path" "$theme_path"
+      die "theme symlink switch failed; the previous directory was restored"
+    fi
+    printf 'Preserved the previous theme directory at %s\n' "$legacy_path"
+  else
+    run_privileged mv -fT -- "$theme_link_temporary" "$theme_path"
+  fi
+  printf 'Installed theme release %s\n' "$theme_runtime"
+fi
 
 run_privileged install -d -m 0755 -- "${fomalhaut_config%/*}" "${greetd_config%/*}"
 
