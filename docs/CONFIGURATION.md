@@ -3,6 +3,37 @@
 Fomalhaut 固定读取 `/etc/fomalhaut/config.toml`。文件不存在时使用内嵌 minimal theme 和系统
 session 默认目录；文件存在但无法读取、包含未知字段或验证失败时，Fomalhaut 以非零状态退出。
 
+## 从源码安装
+
+仓库根目录的安装器会锁定依赖构建 release 二进制和 React 参考主题，并安装到系统目录：
+
+```sh
+./install.sh --display-scale 1.5
+```
+
+脚本必须由普通用户执行；构建阶段不使用 root，只在写系统目录时调用 `sudo`。默认安装结果为：
+
+- `/usr/local/bin/fomalhaut`
+- `/etc/fomalhaut/themes/nocturne`
+- `/etc/fomalhaut/config.toml`
+- `/etc/greetd/config.toml`
+
+源码构建所需的 Rust、Bun canary、GTK/WebKitGTK 开发环境必须已经可用；真实系统安装还会在写入
+前确认 `/usr/bin/cage`、`/usr/bin/dbus-run-session` 和指定的 greeter 账户存在。
+
+重复运行同一命令即可更新安装。既有二进制和普通主题目录会保留带时间戳的备份，主题 release
+不会自动删除。两个 TOML 文件会先解析和验证，只更新安装器负责的字段，并在同目录保留
+`*.bak.<时间戳>.<进程号>`；无效 TOML、重复目标字段或 symlink 配置会让安装器拒绝修改。
+配置 preflight 在切换二进制和主题之前执行，因此可提前检测的问题不会造成部分安装。
+安装成功后默认不重启 greetd，避免结束当前图形会话。确认可以退出当前会话时，可显式执行：
+
+```sh
+./install.sh --display-scale 1.5 --restart
+```
+
+使用非默认安装前缀时传入绝对 `--prefix`。`--system-root /tmp/fomalhaut-root` 只用于在隔离目录
+验证安装结果，不调用 `sudo`，也不允许 `--restart`。完整参数见 `./install.sh --help`。
+
 ## 最小外部主题配置
 
 ```toml

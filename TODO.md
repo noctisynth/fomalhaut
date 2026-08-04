@@ -330,6 +330,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ## P2：打包与首个发行版
 
+- [x] 添加根目录安全安装器：支持首次/更新构建、原子二进制与主题部署、TOML 备份验证更新、
+      显式 greetd restart 和临时 system-root 集成测试。
 - [ ] 确定 greetd、WebKit 和 Cage 的最低版本；Rust 继续跟随 stable。
 - [ ] 提供 systemd-tmpfiles 配置（如果需要状态或日志目录）。
 - [ ] 提供示例 greetd 配置和安装说明。
