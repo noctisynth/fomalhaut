@@ -872,6 +872,58 @@ JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源�
 宽松 CSP。认证与 session 行为继续由 controller 和真实 Unix socket stub 的全流程测试覆盖，
 真实 PAM 输入则留给 greetd/Cage 系统测试，避免在开发会话中模拟用户密码。
 
+### 8.1 React 参考主题
+
+仓库在 `packages/fomalhaut-theme` 维护一个独立、私有且不参与 Semifold/npm 发布的官方参考
+主题。它用于证明 `fomalhaut-sdk` 能支持完整的框架前端，并向主题作者提供可构建示例；它不
+嵌入 Rust 二进制、不替代无构建依赖的内置 minimal theme，也不改变用户通过
+`[frontend].path` 选择任意可信静态主题的能力。生产产物是 `dist/` 下的纯静态目录，根目录
+包含 `theme.toml` 与 `index.html`，管理员可以直接让配置指向该绝对路径。
+
+参考主题固定采用 React、TypeScript、Vite、Tailwind CSS v4、shadcn/ui Luma style 与
+Zustand。依赖和脚本继续只由 Bun canary 管理；Vite 使用官方 React 与 Tailwind Vite plugin，
+并设置 `base = "./"`，确保所有构建资源相对于 `fomalhaut://theme/` 加载。项目不引入 router、
+SSR、服务端数据获取、CSS Modules、Sass、CSS-in-JS、远程字体或网络资源。shadcn 组件使用
+CSS variables 和 Luma 的圆角、柔和层级与宽松布局基础；首阶段只采用不依赖浮层定位和内联
+style 的 Button、Card、Input、Label、Avatar、Alert、Separator 等组件，session 选择使用
+Tailwind/Luma token 修饰的原生 `select`，避免 portal/positioning 组件触碰当前严格 CSP。
+
+所有项目自有文件与目录使用 ASCII `kebab-case`；`package.json`、`components.json`、
+`tsconfig.json`、`index.html` 等生态固定单词文件名继续保持小写，Vite 配置显式命名为
+`vite-config.ts`。TypeScript 类型和 React component 标识符仍使用语言惯例的 PascalCase。
+项目添加文件名审计测试，阻止后续引入 PascalCase/camelCase 文件名。组件样式只使用 Tailwind
+utility 与 shadcn semantic token，不允许 `style` prop、内联 `<style>` 或手写 component
+selector；动态或较长的 `className` 必须通过 shadcn 提供的 `cn()` 分组组合。
+
+前端只通过 workspace 中的 `fomalhaut-sdk` 访问宿主。SDK runtime 负责 client 生命周期与全部
+v1 事件订阅，Zustand vanilla store 保存公开状态快照、选择、busy 和脱敏错误，并通过 React
+provider 注入，便于 mock transport 测试。store 不使用 persist/devtools middleware，不写
+localStorage/sessionStorage，不保存或记录 PAM 回答。认证输入使用不受控 DOM input：提交时先
+读取值、同步清空 DOM 并释放页面侧引用，再调用 SDK；JavaScript 字符串无法可靠清零的限制
+仍然成立。
+
+用户选择遵守以下确定行为：零个摘要时直接使用手工用户名；恰好一个摘要时初始默认选中并
+预填用户名，但不得自动调用 `auth.begin`；多个摘要时不默认选择。始终展示“其他用户”路径。
+一旦用户手工选择摘要或“其他用户”，后续状态恢复不得用单用户默认规则覆盖该选择。认证失败
+后可以保留用户名选择以便重试，但不得保留 PAM 回答。头像只使用 host 提供的不透明
+`avatarUrl`，加载失败显示无个人信息的 fallback。
+
+普通浏览器中的 Vite 开发服务器没有 WebKit bridge，因此项目提供只在
+`import.meta.env.DEV` 分支动态加载的 `development-transport.ts`，以实现
+`FomalhautTransport` 并模拟公开状态、prompt、失败、取消和事件。它只是主题开发 fixture，
+不等同于宿主级 demo mode。生产构建必须 dead-code eliminate 该 transport；缺少真实 bridge
+时显示拒绝式错误，不能静默使用模拟认证。项目自有源码禁止调用 `fetch`、WebSocket 或其他
+网络 API；构建测试检查产物没有 demo 标记，检查 HTML/CSS 没有远程 URL、inline
+script/style、form navigation 或绝对资源 URL，并确认所有资源小于宿主 8 MiB 上限且清单位于
+产物根目录。生产 JavaScript bundle 不采用简单的 `fetch(` 字符串禁令，因为 ReactDOM 19
+自身包含 stylesheet preload 的内部 `fetch` 实现；它不是主题发起网络访问的授权边界。网络
+隔离仍由主题源码审查、静态资源引用检查以及宿主 CSP/WebKit policy 共同强制执行。
+
+测试至少覆盖 store 初始恢复和事件转换、单用户默认选择、零/多用户手工选择、session 选择、
+secret/visible 多轮 prompt、回答在异步请求完成前已从 DOM 清空、busy 背压、错误/取消恢复、
+头像 fallback、文件命名和生产构建契约。CI 通过 Bun 运行 Biome、TypeScript、Vitest 和 Vite
+build；最终还必须在 WebKitGTK 自定义 scheme 中验证 module script、CSS 与分块资源加载。
+
 ## 9. WebView 运行环境
 
 应用宿主固定使用 GTK4 + WebKitGTK 6.0，并通过 Rust `gtk4` 与 `webkit6` 原生绑定直接调用。

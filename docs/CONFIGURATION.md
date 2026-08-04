@@ -50,6 +50,23 @@ window.addEventListener('fomalhaut:event', (event) => {
 `auth.*`/`session.*` 事件。主题可以读取其页面中输入的认证内容，因此管理员仍应只安装可信
 来源的主题。
 
+仓库中的 React 参考主题可通过以下命令构建：
+
+```sh
+bun run build:theme
+```
+
+构建产物位于 `packages/fomalhaut-theme/dist`。在本地仓库测试时，可将其绝对路径直接写入：
+
+```toml
+[frontend]
+path = "/home/example/Projects/fomalhaut/packages/fomalhaut-theme/dist"
+```
+
+该目录必须允许 `greeter` 用户遍历和读取。普通浏览器开发服务器会使用仅开发环境存在的模拟
+transport；它接受 `fomalhaut` 作为 fixture 密码。生产构建不会包含该 transport，脱离真实
+WebKit bridge 时会拒绝登录请求。
+
 `state.get` 的 `users` 数组提供经过宿主过滤的 `username`、`displayName` 和可选
 `avatarUrl`。头像 URL 只会是宿主管理的 `fomalhaut://avatar/<id>`，主题不得尝试从用户名推导
 本地路径。用户列表可能为空，主题必须始终保留手工用户名输入；选择用户摘要后仍应将其

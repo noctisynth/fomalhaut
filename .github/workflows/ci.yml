@@ -70,6 +70,15 @@ jobs:
       - name: Build SDK
         run: bun run --cwd packages/fomalhaut-sdk build
 
+      - name: Check React theme
+        run: bun run --cwd packages/fomalhaut-theme check
+
+      - name: Test React theme
+        run: bun run --cwd packages/fomalhaut-theme test
+
+      - name: Build React theme
+        run: bun run --cwd packages/fomalhaut-theme build
+
       - name: Rustdoc
         env:
           RUSTDOCFLAGS: -D warnings

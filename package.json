@@ -4,6 +4,9 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "generate:sdk": "TS_RS_EXPORT_DIR=../../packages/fomalhaut-sdk/src/generated cargo test -p fomalhaut-web export_bindings && bun run --cwd packages/fomalhaut-sdk format:generated",
-    "check:sdk": "bun run generate:sdk && git diff --exit-code -- packages/fomalhaut-sdk/src/generated && bun run --cwd packages/fomalhaut-sdk check"
+    "check:sdk": "bun run generate:sdk && git diff --exit-code -- packages/fomalhaut-sdk/src/generated && bun run --cwd packages/fomalhaut-sdk check",
+    "check:theme": "bun run --cwd packages/fomalhaut-sdk build && bun run --cwd packages/fomalhaut-theme check",
+    "test:theme": "bun run --cwd packages/fomalhaut-sdk build && bun run --cwd packages/fomalhaut-theme test",
+    "build:theme": "bun run --cwd packages/fomalhaut-sdk build && bun run --cwd packages/fomalhaut-theme build"
   }
 }

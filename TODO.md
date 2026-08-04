@@ -244,6 +244,24 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 编写前端协议快速入门。
 - [ ] 编写从纯 HTML 到框架构建产物的主题示例说明。
 
+## P1：React 参考主题
+
+- [x] 在 `packages/fomalhaut-theme` 初始化不参与发布的 Bun/Vite React TypeScript 项目，使用
+      Tailwind CSS v4 Vite plugin、shadcn/ui Luma style、Zustand、Biome 与 Vitest。
+- [x] 保证所有项目自有文件/目录为 ASCII kebab-case，添加命名审计；长或动态 `className`
+      使用 shadcn `cn()`，不引入 inline style、CSS Modules、CSS-in-JS 或远程资源。
+- [x] 以可注入 `FomalhautClient`、runtime、Zustand vanilla store 和 React provider 实现
+      `state.get`、全部 v1 事件、busy 背压和脱敏错误恢复，不持久化或记录 PAM 回答。
+- [x] 实现 Luma 登录界面：零用户手工输入、单用户默认选中但不自动认证、多用户明确选择、
+      “其他用户”、头像 fallback、可信 session 选择及任意轮 secret/visible prompt。
+- [x] 实现仅 Vite DEV 动态加载的 `development-transport.ts`，生产缺少 WebKit bridge 时拒绝；
+      源码审计禁止网络 API，构建检查不得包含 demo 标记、远程资源引用、inline script/style
+      或越界资源；不对包含 ReactDOM 内部 stylesheet preload 的生产 bundle 使用字符串级
+      `fetch(` 禁令。
+- [x] 让 `dist/` 包含相对资源引用、`index.html` 和 `theme.toml`，补齐 store、组件、DOM 清空、
+      文件命名与构建契约测试，并把 format/typecheck/test/build 接入根脚本和 CI。
+- [ ] 在真实 WebKitGTK/Cage 中验证 React module script、CSS、用户/session、认证与退出流程。
+
 ## P1：用户发现与头像
 
 - [x] 在严格配置中加入 `auto`、`accounts_service`、`nss`、`none` 用户 provider，默认
