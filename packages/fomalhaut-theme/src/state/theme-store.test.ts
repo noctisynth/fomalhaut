@@ -1,6 +1,6 @@
 import { FomalhautClient } from "fomalhaut-sdk";
 import { describe, expect, test } from "vitest";
-import { createThemeStore, initialUsername } from "@/state/theme-store";
+import { createThemeStore } from "@/state/theme-store";
 import { MockTransport, snapshot } from "@/test/mock-transport";
 
 const alice = {
@@ -10,67 +10,81 @@ const alice = {
 };
 const bob = { username: "bob", displayName: "Bob", avatarUrl: null };
 
-describe("initial user selection", () => {
-  test("selects exactly one discovered user", () => {
-    expect(initialUsername([alice])).toBe("alice");
-  });
-
-  test("does not select zero or multiple users", () => {
-    expect(initialUsername([])).toBeNull();
-    expect(initialUsername([alice, bob])).toBeNull();
-  });
-
-  test.each([
-    { users: [], username: null, manual: true },
-    { users: [alice], username: "alice", manual: false },
-    { users: [alice, bob], username: null, manual: false },
-  ])(
-    "restores $users.length user summaries",
-    async ({ users, username, manual }) => {
+describe("SPA identity selection", () => {
+  test.each([{ users: [] }, { users: [alice] }, { users: [alice, bob] }])(
+    "always opens the selection screen for $users.length users",
+    async ({ users }) => {
       const transport = new MockTransport(snapshot(users));
       const client = new FomalhautClient(transport);
       const runtime = createThemeStore(client);
 
       await runtime.initialize();
 
-      expect(runtime.store.getState().selectedUsername).toBe(username);
-      expect(runtime.store.getState().manualUsername).toBe(manual);
-      expect(transport.requests).toHaveLength(1);
-      runtime.destroy();
-      client.close();
+      expect(runtime.store.getState().screen).toEqual({
+        name: "user-selection",
+      });
+      expect(transport.requests.map((request) => request.method)).toEqual([
+        "state.get",
+      ]);
     },
   );
-});
 
-test("keeps an explicit choice across initial state recovery", async () => {
-  const transport = new MockTransport(snapshot([alice]));
-  const client = new FomalhautClient(transport);
-  const runtime = createThemeStore(client);
-  runtime.store.getState().selectOtherUser();
+  test("starts authentication only after a known user is chosen", async () => {
+    const transport = new MockTransport(snapshot([alice]));
+    const client = new FomalhautClient(transport);
+    const runtime = createThemeStore(client);
+    await runtime.initialize();
 
-  await runtime.initialize();
+    await runtime.store.getState().chooseKnownUser(alice);
 
-  expect(runtime.store.getState().manualUsername).toBe(true);
-  expect(runtime.store.getState().selectedUsername).toBeNull();
-});
-
-test("converts session selection events into snapshot state", async () => {
-  const transport = new MockTransport(snapshot([alice]));
-  const client = new FomalhautClient(transport);
-  const runtime = createThemeStore(client);
-  await runtime.initialize();
-
-  transport.emit({
-    protocol: 1,
-    sequence: 1,
-    event: "session.selected",
-    data: { sessionId: "x11" },
+    expect(runtime.store.getState().screen).toEqual({
+      name: "known-user",
+      user: alice,
+    });
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "auth.begin",
+      params: { username: "alice" },
+    });
   });
 
-  expect(runtime.store.getState().snapshot?.selectedSessionId).toBe("x11");
+  test("keeps manual identity on its authentication screen", async () => {
+    const transport = new MockTransport(snapshot());
+    const client = new FomalhautClient(transport);
+    const runtime = createThemeStore(client);
+    await runtime.initialize();
+
+    runtime.store.getState().chooseOtherUser();
+    await runtime.store.getState().submitManualUsername("carol");
+
+    expect(runtime.store.getState().screen).toEqual({
+      name: "other-user",
+      username: "carol",
+    });
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "auth.begin",
+      params: { username: "carol" },
+    });
+  });
+
+  test("uses a generic recovery screen when active identity is unavailable", async () => {
+    const active = snapshot([], {
+      promptId: 3,
+      kind: "secret",
+      message: "Password",
+    });
+    const transport = new MockTransport(active);
+    const client = new FomalhautClient(transport);
+    const runtime = createThemeStore(client);
+
+    await runtime.initialize();
+
+    expect(runtime.store.getState().screen).toEqual({
+      name: "authentication-recovery",
+    });
+  });
 });
 
-test("converts authentication events without retaining prompt answers", async () => {
+test("converts protocol events into recovered snapshot state", async () => {
   const transport = new MockTransport(snapshot([alice]));
   const client = new FomalhautClient(transport);
   const runtime = createThemeStore(client);
@@ -94,16 +108,23 @@ test("converts authentication events without retaining prompt answers", async ()
     event: "auth.message",
     data: { level: "info", text: "Touch your security key" },
   });
+  transport.emit({
+    protocol: 1,
+    sequence: 4,
+    event: "session.selected",
+    data: { sessionId: "x11" },
+  });
 
   expect(runtime.store.getState().snapshot).toMatchObject({
     authentication: "waiting_for_prompt",
     prompt: { promptId: 4, kind: "visible", message: "Token" },
     messages: [{ level: "info", text: "Touch your security key" }],
+    selectedSessionId: "x11",
   });
 
   transport.emit({
     protocol: 1,
-    sequence: 4,
+    sequence: 5,
     event: "auth.cancelled",
     data: {},
   });
@@ -111,11 +132,50 @@ test("converts authentication events without retaining prompt answers", async ()
 
   transport.emit({
     protocol: 1,
-    sequence: 5,
+    sequence: 6,
     event: "session.started",
     data: {},
   });
   expect(runtime.store.getState().snapshot?.authentication).toBe("started");
+});
+
+test("cancels an active authentication before returning", async () => {
+  const transport = new MockTransport(snapshot([alice]));
+  const client = new FomalhautClient(transport);
+  const runtime = createThemeStore(client);
+  await runtime.initialize();
+  await runtime.store.getState().chooseKnownUser(alice);
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "state.changed",
+    data: { state: "waiting_for_prompt" },
+  });
+
+  expect(await runtime.store.getState().cancelAndReturn()).toBe(true);
+  expect(transport.requests.at(-1)?.method).toBe("auth.cancel");
+  expect(runtime.store.getState().screen.name).toBe("user-selection");
+});
+
+test("does not leave authentication when cancellation fails", async () => {
+  const transport = new MockTransport(snapshot([alice]));
+  const client = new FomalhautClient(transport);
+  const runtime = createThemeStore(client);
+  await runtime.initialize();
+  await runtime.store.getState().chooseKnownUser(alice);
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "state.changed",
+    data: { state: "waiting_for_prompt" },
+  });
+  transport.rejectMethod = "auth.cancel";
+
+  expect(await runtime.store.getState().cancelAndReturn()).toBe(false);
+  expect(runtime.store.getState().screen.name).toBe("known-user");
+  expect(runtime.store.getState().error).toBe(
+    "The Fomalhaut host is unavailable.",
+  );
 });
 
 test("applies busy backpressure before requests reach the SDK", async () => {

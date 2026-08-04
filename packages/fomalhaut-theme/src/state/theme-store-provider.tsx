@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useContext, useRef } from "react";
-import { useStore } from "zustand";
+import { useStore } from "zustand/react";
 import type { ThemeState, ThemeStore } from "@/state/theme-store";
 
 const ThemeStoreContext = createContext<ThemeStore | null>(null);

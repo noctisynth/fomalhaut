@@ -11,6 +11,7 @@ export class MockTransport implements FomalhautTransport {
   readonly #receivers = new Set<FomalhautEventReceiver>();
   readonly #snapshot: StateSnapshot;
   respondPromise: Promise<void> | null = null;
+  rejectMethod: RequestEnvelope["method"] | null = null;
 
   public constructor(snapshot: StateSnapshot) {
     this.#snapshot = snapshot;
@@ -18,6 +19,9 @@ export class MockTransport implements FomalhautTransport {
 
   public async request(request: RequestEnvelope): Promise<unknown> {
     this.requests.push(request);
+    if (request.method === this.rejectMethod) {
+      throw new Error("mock transport rejection");
+    }
     if (request.method === "auth.respond" && this.respondPromise) {
       await this.respondPromise;
     }

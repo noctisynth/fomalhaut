@@ -885,7 +885,7 @@ Zustand。依赖和脚本继续只由 Bun canary 管理；Vite 使用官方 Reac
 并设置 `base = "./"`，确保所有构建资源相对于 `fomalhaut://theme/` 加载。项目不引入 router、
 SSR、服务端数据获取、CSS Modules、Sass、CSS-in-JS、远程字体或网络资源。shadcn 组件使用
 CSS variables 和 Luma 的圆角、柔和层级与宽松布局基础；首阶段只采用不依赖浮层定位和内联
-style 的 Button、Card、Input、Label、Avatar、Alert、Separator 等组件，session 选择使用
+style 的 Button、Input、Label、Avatar、Alert、Separator 等组件，session 选择使用
 Tailwind/Luma token 修饰的原生 `select`，避免 portal/positioning 组件触碰当前严格 CSP。
 
 所有项目自有文件与目录使用 ASCII `kebab-case`；`package.json`、`components.json`、
@@ -902,11 +902,31 @@ localStorage/sessionStorage，不保存或记录 PAM 回答。认证输入使用
 读取值、同步清空 DOM 并释放页面侧引用，再调用 SDK；JavaScript 字符串无法可靠清零的限制
 仍然成立。
 
-用户选择遵守以下确定行为：零个摘要时直接使用手工用户名；恰好一个摘要时初始默认选中并
-预填用户名，但不得自动调用 `auth.begin`；多个摘要时不默认选择。始终展示“其他用户”路径。
-一旦用户手工选择摘要或“其他用户”，后续状态恢复不得用单用户默认规则覆盖该选择。认证失败
-后可以保留用户名选择以便重试，但不得保留 PAM 回答。头像只使用 host 提供的不透明
-`avatarUrl`，加载失败显示无个人信息的 fallback。
+主题是单文档、无 URL router 的内存 SPA。Zustand 使用判别状态在用户选择页、已知用户认证页、
+其他用户认证页和身份未知的认证恢复页之间切换，不调用 history 或产生新的顶层导航。入口页
+始终只负责身份选择：零个摘要时只显示“其他用户”，一个或多个摘要时都不会自动进入认证页，
+已知用户与“其他用户”都是显式入口。用户点击已知摘要后才切换到以大头像、显示名、用户名和
+当前 session 为中心的认证页，并立即以其可信 `username` 调用 `auth.begin`。
+
+“其他用户”页保持标准用户名与认证凭据的双区域布局，但受 greetd/PAM 顺序约束：初始只有
+用户名输入可用，凭据区域保留位置但禁用；用户确认用户名并完成 `auth.begin` 后，收到的
+`auth.prompt` 决定第二个输入是 secret 还是 visible，后续任意轮 prompt 在原位置替换。主题
+不得为了让两个输入同时可编辑而跨 `auth.begin` 暂存密码。认证输入继续在请求前同步清空。
+返回用户列表时，如果认证已开始，必须先成功执行 `auth.cancel`；取消失败则停留在认证页并
+显示脱敏错误，避免在宿主仍有活动会话时开始另一用户认证。
+
+页面运行期保留已选择或手工输入的用户名，但不持久化。刷新后若 `state.get` 表明认证仍在进行，
+当前协议又没有提供活动用户名，主题进入不展示头像或猜测用户名的通用认证恢复页：有 prompt
+时允许继续回答，同时始终允许取消并返回用户选择页。认证失败后可以保留当前运行期用户名以便
+重试，但不得保留 PAM 回答。头像只使用 host 提供的不透明 `avatarUrl`，加载失败显示无个人
+信息的 fallback。
+
+视觉结构采用设备登录界面而非网页 Card：深空全屏背景使用 `#050812`、`#0A1730`、
+`#102A52` 三层夜空底色，以 `#8EC5FF` 为交互冰蓝、`#F4F7FC` 为星光白、`#F2D6A2` 为少量
+暖星高光。时间与日期位于左上，选择页主体居中，已知用户认证页使用 96px 头像与单一玻璃输入，
+用户切换入口位于主体列表，session 控件固定在右下设备区。界面不使用居中的网页 Card、Toast
+或大面积按钮容器；错误与 PAM message 在认证输入附近原位显示。视图切换和 focus 使用克制的
+160–240ms 过渡，并遵守 `prefers-reduced-motion`。
 
 普通浏览器中的 Vite 开发服务器没有 WebKit bridge，因此项目提供只在
 `import.meta.env.DEV` 分支动态加载的 `development-transport.ts`，以实现
@@ -919,10 +939,11 @@ script/style、form navigation 或绝对资源 URL，并确认所有资源小于
 自身包含 stylesheet preload 的内部 `fetch` 实现；它不是主题发起网络访问的授权边界。网络
 隔离仍由主题源码审查、静态资源引用检查以及宿主 CSP/WebKit policy 共同强制执行。
 
-测试至少覆盖 store 初始恢复和事件转换、单用户默认选择、零/多用户手工选择、session 选择、
-secret/visible 多轮 prompt、回答在异步请求完成前已从 DOM 清空、busy 背压、错误/取消恢复、
-头像 fallback、文件命名和生产构建契约。CI 通过 Bun 运行 Biome、TypeScript、Vitest 和 Vite
-build；最终还必须在 WebKitGTK 自定义 scheme 中验证 module script、CSS 与分块资源加载。
+测试至少覆盖 store 初始恢复和事件转换、零/单/多用户均停留选择页、已知用户与其他用户分支、
+身份未知的活动认证恢复、session 选择、secret/visible 多轮 prompt、回答在异步请求完成前已从
+DOM 清空、busy 背压、取消失败不离开认证页、头像 fallback、文件命名和生产构建契约。CI 通过
+Bun 运行 Biome、TypeScript、Vitest 和 Vite build；最终还必须在 WebKitGTK 自定义 scheme 中
+验证 module script、CSS 与分块资源加载。
 
 ## 9. WebView 运行环境
 
