@@ -667,6 +667,9 @@ function SessionControl() {
   if (!snapshot) {
     return null;
   }
+  const selectedSession = snapshot.sessions.find(
+    (session) => session.id === snapshot.selectedSessionId,
+  );
 
   return (
     <div
@@ -691,11 +694,15 @@ function SessionControl() {
         <SelectTrigger
           id="session"
           className={cn(
-            "max-w-52 border-white/10 bg-black/20 text-starlight backdrop-blur-xl",
+            "w-52 border-white/10 bg-black/20 text-starlight backdrop-blur-xl",
             "focus-visible:border-primary/60 focus-visible:ring-primary/30",
           )}
         >
-          <SelectValue placeholder="Choose session" />
+          <SelectValue placeholder="Choose session">
+            {selectedSession
+              ? `${selectedSession.name} · ${selectedSession.kind}`
+              : null}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent side="top" align="end">
           {snapshot.sessions.map((session) => (

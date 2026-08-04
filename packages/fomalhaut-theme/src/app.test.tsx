@@ -221,8 +221,12 @@ describe("SPA authentication UI", () => {
     const transport = new MockTransport(state);
     await renderTheme(transport);
     const user = userEvent.setup();
+    const trigger = screen.getByRole("combobox", { name: "Session" });
 
-    await user.click(screen.getByRole("combobox", { name: "Session" }));
+    expect(trigger).toHaveClass("w-52");
+    expect(trigger).toHaveTextContent("Wayland · wayland");
+
+    await user.click(trigger);
     await user.click(screen.getByRole("option", { name: "X11 · x11" }));
 
     expect(transport.requests.at(-1)).toMatchObject({
