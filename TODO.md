@@ -190,8 +190,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 保留 Semifold CI 的 `npm publish --provenance --access public` 作为 OIDC 发布专用例外；
       npm 不得参与安装、workspace、脚本、测试、构建或 lockfile，根 private package 不得进入
       Semifold 发布列表。
-- [x] 首次发布期间仅在 `Semifold CI` 步骤将 GitHub Secret `NPM_TOKEN` 映射为
-      `NODE_AUTH_TOKEN`，用于创建 npm package。
+- [x] 首次发布期间通过 `actions/setup-node` 的 npm registry 配置让 GitHub Secret
+      `NPM_TOKEN` 映射的 `NODE_AUTH_TOKEN` 生效；不得启用 npm package-manager cache。
 - [ ] `fomalhaut-sdk` 首次发布并配置 trusted publisher 后，移除临时 `NODE_AUTH_TOKEN`，恢复
       OIDC-only 发布。
 - [x] 只使用 Bun 管理 Node workspace，提交文本格式 `bun.lock`，并拒绝 npm、pnpm 或 Yarn

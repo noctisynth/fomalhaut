@@ -36,6 +36,11 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build TypeScript SDK
         run: bun run --cwd packages/fomalhaut-sdk build
+      - name: Configure npm auth
+        uses: actions/setup-node@v6
+        with:
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
       - name: Semifold CI
         run: semifold ci
         env:

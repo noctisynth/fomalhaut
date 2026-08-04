@@ -603,7 +603,10 @@ npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockf
 
 由于 npm trusted publishing 不能在 package 首次创建前完成关联，首次发布允许一个临时的
 bootstrap 凭据例外：`semifold-ci` 仅在 `Semifold CI` 步骤把 GitHub Actions Secret
-`NPM_TOKEN` 映射为 npm 识别的 `NODE_AUTH_TOKEN`。token 不得写入仓库、日志或其他步骤；
+`NPM_TOKEN` 映射为 npm 识别的 `NODE_AUTH_TOKEN`，并在此前通过 `actions/setup-node@v6` 的
+`registry-url: https://registry.npmjs.org` 生成只引用该环境变量的项目级 `.npmrc`。该 action
+必须关闭 package-manager cache，不能引入 npm lockfile 或替代 Bun 的安装流程。token 不得
+写入仓库、日志或其他步骤；
 `fomalhaut-sdk` 首次发布成功并完成 trusted publisher 配置后，必须删除该环境变量，恢复为
 仅使用 OIDC provenance 的发布流程。
 
