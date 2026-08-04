@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "check": "biome check . && tsc --noEmit --project tsconfig.json",
+    "check": "biome check . && tsc --noEmit --project tsconfig.json && tsc --project test/tsconfig.json",
     "format": "biome format --write .",
     "format:generated": "biome format --write src/generated",
     "test": "bun test"

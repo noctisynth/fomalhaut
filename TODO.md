@@ -224,8 +224,9 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       sequence。
 - [x] 区分协议、bridge 和本地 busy 错误；同一时刻只允许一个请求，不排队或记录认证回答。
 - [x] 使用 mock transport 覆盖成功、协议拒绝、bridge 失败、并发、乱序和重复事件。
-- [x] 添加由 `bun run` 调度的 Biome CI、TypeScript typecheck、build 和生成产物漂移检查，
-      并使用 `bun test` 运行 SDK 单元测试。
+- [x] 添加由 `bun run` 调度的 Biome CI、TypeScript source/test typecheck、build 和生成产物
+      漂移检查，并使用 `bun test` 运行 SDK 单元测试；测试目录使用就近 `tsconfig.json` 加载
+      `bun:test` 类型并纳入 IDE configured project。
 - [x] 编写 `fomalhaut-sdk` 快速入门。
 - [ ] 让后续 minimal theme 构建版本使用 SDK 而非手写 bridge 调用。
 
