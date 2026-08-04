@@ -574,6 +574,12 @@ Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfi
 并提交文本格式的 `bun.lock`，CI 使用 `bun install --frozen-lockfile`，禁止隐式迁移或同时提交
 其他包管理器 lockfile。
 
+包管理器约束对发布事务保留一个窄例外：Semifold CI 可使用其 Node.js resolver 默认生成的
+`npm publish --provenance --access public`，以支持 npm trusted publishing/OIDC provenance。
+npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockfile 生成，本地与 Agent 也不得
+执行 publish；该命令只能由 GitHub Actions 中的 `semifold ci` 间接调用。根 private package
+不登记为 Semifold 发布包，只同步 `packages/fomalhaut-sdk`。
+
 Fomalhaut 有意跟随 Bun 的滚动 canary，以使用稳定版尚未发布的 Rust 实现开发线；不把它写成
 尚不存在的稳定 `1.4.0`。本地工具链必须是 `bun upgrade --canary` 所选择的 canary，GitHub
 Actions 必须使用 `oven-sh/setup-bun@v2` 且显式设置 `bun-version: canary`，不得省略后回退到
@@ -582,8 +588,12 @@ Actions 必须使用 `oven-sh/setup-bun@v2` 且显式设置 `bun-version: canary
 复现，不宣称固定滚动 canary 可执行文件本身。
 
 Rust wire 类型仍是协议的唯一事实来源。`fomalhaut-web` 使用 `ts-rs` 为请求、响应、事件、
-状态、prompt、session 和结构化错误派生 TypeScript 类型，并通过
-`#[ts(export, export_to = "v1/request-envelope.ts")]` 这类显式目标把每个类型导出为独立文件。
+状态、prompt、session 和结构化错误派生 TypeScript 类型。生成边界与 Rust 协议模块保持
+一致：同一个 Rust 源文件中的公开 wire 类型合并到同一个 TypeScript 文件，而不是为每个
+类型创建文件。首阶段固定映射为 `error.rs` → `protocol-error.ts`、`request.rs` →
+`protocol-request.ts`、`message.rs` → `protocol-message.ts`、`secret.rs` →
+`protocol-secret.ts`；模块内各类型通过相同的
+`#[ts(export, export_to = "v1/protocol-request.ts")]` 目标由 `ts-rs` 原生合并并去重 import。
 所有 `.ts`、`.tsx` 和生成 binding 文件名必须使用 ASCII `kebab-case`；不得使用
 `PascalCase` 或 `camelCase` 文件名。TypeScript 类型和类名仍按语言惯例使用 `PascalCase`，
 该命名约束只作用于文件和目录项。

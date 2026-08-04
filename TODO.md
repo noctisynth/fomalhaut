@@ -181,48 +181,53 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ### Workspace 与发布
 
-- [ ] 初始化 Bun workspace 和无 scope 的 `fomalhaut-sdk` package，保持纯 ESM、零运行时
+- [x] 初始化 Bun workspace 和无 scope 的 `fomalhaut-sdk` package，保持纯 ESM、零运行时
       依赖并独立使用 `0.1.0-alpha` 初始版本。
-- [ ] 通过 `smif config sync --resolver nodejs` 注册 package，并将其 release channel 设为
+- [x] 通过 `smif config sync --resolver nodejs` 注册 package，并将其 release channel 设为
       `alpha`；不得手工模拟 Semifold 配置或在本地执行 version/publish。
-- [ ] 只使用 Bun 管理 Node workspace，提交文本格式 `bun.lock`，并拒绝 npm、pnpm 或 Yarn
+- [x] 保留 Semifold CI 的 `npm publish --provenance --access public` 作为 OIDC 发布专用例外；
+      npm 不得参与安装、workspace、脚本、测试、构建或 lockfile，根 private package 不得进入
+      Semifold 发布列表。
+- [x] 只使用 Bun 管理 Node workspace，提交文本格式 `bun.lock`，并拒绝 npm、pnpm 或 Yarn
       lockfile；CI 使用 `bun install --frozen-lockfile`。
-- [ ] 本地使用 `bun upgrade --canary`，GitHub Actions 使用 `oven-sh/setup-bun@v2` 和显式
+- [x] 本地使用 `bun upgrade --canary`，GitHub Actions 使用 `oven-sh/setup-bun@v2` 和显式
       `bun-version: canary`；不得填写尚未发布的 `1.4.0` 或回退到 stable/latest。
-- [ ] 在 CI 输出 `bun --version` 和 `bun --revision`，记录每次滚动 canary 实际验证的 Rust
+- [x] 在 CI 输出 `bun --version` 和 `bun --revision`，记录每次滚动 canary 实际验证的 Rust
       实现提交。
-- [ ] 使用锁定的最新稳定 TypeScript 与 Biome，通过 `bun add` 管理并建立滚动更新策略。
-- [ ] 配置 package exports、declaration 输出和只包含发布产物的 npm files 白名单。
+- [x] 使用锁定的最新稳定 TypeScript 与 Biome，通过 `bun add` 管理并建立滚动更新策略。
+- [x] 配置 package exports、declaration 输出和只包含发布产物的 npm files 白名单。
 
 ### Rust 类型生成
 
-- [ ] 通过 Cargo CLI 为 `fomalhaut-web` 添加 `ts-rs`，为所有公开 wire 类型派生 TypeScript。
-- [ ] 使用 `#[ts(export, export_to = "...")]` 显式导出独立类型文件，保证所有 TypeScript 和
-      binding 文件名只使用 ASCII `kebab-case`。
-- [ ] 让普通测试导出到 `target/ts-rs`，仅由显式生成命令写入
+- [x] 通过 Cargo CLI 为 `fomalhaut-web` 添加 `ts-rs`，为所有公开 wire 类型派生 TypeScript。
+- [x] 使用 `#[ts(export, export_to = "...")]` 按 Rust 协议模块聚合导出
+      `protocol-error.ts`、`protocol-request.ts`、`protocol-message.ts` 和
+      `protocol-secret.ts`，保证所有 TypeScript 和 binding 文件名只使用 ASCII
+      `kebab-case`。
+- [x] 让普通测试导出到 `target/ts-rs`，仅由显式生成命令写入
       `packages/fomalhaut-sdk/src/generated`，不得使用 `build.rs` 或 greeter 启动流程生成。
-- [ ] 将 JavaScript-safe 的 `RequestId`、`PromptId` 和 `Sequence` 精确映射为 `number`，并验证
+- [x] 将 JavaScript-safe 的 `RequestId`、`PromptId` 和 `Sequence` 精确映射为 `number`，并验证
       `EmptyParams` 不会退化成宽泛的 `{}`。
-- [ ] 生成后运行 Biome format 与只读 check，并以“重新生成后 Git 无 diff”测试 Rust、JSON
+- [x] 生成后运行 Biome format 与只读 check，并以“重新生成后 Git 无 diff”测试 Rust、JSON
       Schema 和 TypeScript 产物一致性。
-- [ ] 为不能由 TypeScript 表达的 UTF-8 byte 和集合上限保留 Schema/Rust 权威说明。
+- [x] 为不能由 TypeScript 表达的 UTF-8 byte 和集合上限保留 Schema/Rust 权威说明。
 - [ ] 为不接受 `application/schema+json` 或无法联网的 IDE 提供 Draft 2020-12 schema catalog、
       缓存或本地映射指引，不得把 Schema dialect 改写为 Draft-07。
 
 ### Client API
 
-- [ ] 定义可注入的 `FomalhautTransport` 和默认 `WebKitTransport`。
-- [ ] 实现 `state.get`、`session.select`、`auth.begin`、`auth.respond` 和 `auth.cancel` 的强类型
+- [x] 定义可注入的 `FomalhautTransport` 和默认 `WebKitTransport`。
+- [x] 实现 `state.get`、`session.select`、`auth.begin`、`auth.respond` 和 `auth.cancel` 的强类型
       Client API；power policy 完成前不提供高级电源方法。
-- [ ] 实现按事件名收窄的 typed event subscription 和取消订阅。
-- [ ] 由 Client 管理 JavaScript-safe request ID，并校验响应 ID、协议版本和单调 event
+- [x] 实现按事件名收窄的 typed event subscription 和取消订阅。
+- [x] 由 Client 管理 JavaScript-safe request ID，并校验响应 ID、协议版本和单调 event
       sequence。
-- [ ] 区分协议、bridge 和本地 busy 错误；同一时刻只允许一个请求，不排队或记录认证回答。
-- [ ] 使用 mock transport 覆盖成功、协议拒绝、bridge 失败、并发、乱序和重复事件。
-- [ ] 添加由 `bun run` 调度的 Biome CI、TypeScript typecheck、build 和生成产物漂移检查，
+- [x] 区分协议、bridge 和本地 busy 错误；同一时刻只允许一个请求，不排队或记录认证回答。
+- [x] 使用 mock transport 覆盖成功、协议拒绝、bridge 失败、并发、乱序和重复事件。
+- [x] 添加由 `bun run` 调度的 Biome CI、TypeScript typecheck、build 和生成产物漂移检查，
       并使用 `bun test` 运行 SDK 单元测试。
-- [ ] 编写 `fomalhaut-sdk` 快速入门，并让后续 minimal theme 构建版本使用 SDK 而非手写 bridge
-      调用。
+- [x] 编写 `fomalhaut-sdk` 快速入门。
+- [ ] 让后续 minimal theme 构建版本使用 SDK 而非手写 bridge 调用。
 
 ## P1：开发体验
 

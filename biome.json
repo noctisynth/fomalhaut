@@ -1,0 +1,25 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "files": {
+    "includes": ["**", "!!**/dist", "!!**/node_modules"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "useFilenamingConvention": {
+          "level": "error",
+          "options": {
+            "filenameCases": ["kebab-case"],
+            "requireAscii": true
+          }
+        }
+      }
+    }
+  }
+}

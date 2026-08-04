@@ -1,0 +1,33 @@
+{
+  "name": "fomalhaut-sdk",
+  "version": "0.1.0-alpha",
+  "description": "Typed frontend client for the Fomalhaut greetd greeter protocol",
+  "type": "module",
+  "sideEffects": false,
+  "license": "AGPL-3.0-only",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/generated/v1/index.d.ts",
+      "import": "./dist/generated/v1/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "check": "biome check . && tsc --noEmit --project tsconfig.json",
+    "format": "biome format --write .",
+    "format:generated": "biome format --write src/generated",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@types/bun": "1.3.14",
+    "typescript": "7.0.2"
+  }
+}

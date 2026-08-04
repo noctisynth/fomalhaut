@@ -19,6 +19,11 @@ path = "crates/fomalhaut-core"
 resolver = "rust"
 channel = "alpha"
 
+[packages.fomalhaut-sdk]
+path = "packages/fomalhaut-sdk"
+resolver = "nodejs"
+channel = "alpha"
+
 [packages.fomalhaut-session]
 path = "crates/fomalhaut-session"
 resolver = "rust"
@@ -30,6 +35,7 @@ resolver = "rust"
 channel = "alpha"
 
 [resolver.rust.pre-check]
+type = "http"
 url = "https://crates.io/api/v1/crates/{{ package.name }}/{{ package.version }}"
 
 [resolver.rust.pre-check.extra-headers]
@@ -44,4 +50,17 @@ command = "cargo"
 args = [
     "generate-lockfile",
 ]
-dry_run = true
+dry-run = true
+
+[resolver.nodejs.pre-check]
+type = "http"
+url = "https://registry.npmjs.org/{{ package.name }}/{{ package.version }}"
+
+[[resolver.nodejs.publish]]
+command = "npm"
+args = [
+    "publish",
+    "--provenance",
+    "--access",
+    "public",
+]

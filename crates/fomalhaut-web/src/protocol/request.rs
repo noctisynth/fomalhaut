@@ -3,6 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use ts_rs::TS;
 
 use super::{
     MAX_MESSAGE_BYTES, MAX_SAFE_INTEGER, MAX_SESSION_ID_BYTES, MAX_USERNAME_BYTES,
@@ -11,9 +12,14 @@ use super::{
 };
 
 /// Correlation identifier supplied by the frontend.
-#[derive(Clone, Copy, Debug, Eq, Hash, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(transparent)]
-pub struct RequestId(#[schemars(range(max = 9_007_199_254_740_991_u64))] u64);
+#[ts(export, export_to = "v1/protocol-request.ts")]
+pub struct RequestId(
+    #[schemars(range(max = 9_007_199_254_740_991_u64))]
+    #[ts(type = "number")]
+    u64,
+);
 
 impl RequestId {
     /// Constructs an ID exactly representable by JavaScript.
@@ -32,9 +38,14 @@ impl RequestId {
 }
 
 /// Identifier of the currently active authentication prompt.
-#[derive(Clone, Copy, Debug, Eq, Hash, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(transparent)]
-pub struct PromptId(#[schemars(range(max = 9_007_199_254_740_991_u64))] u64);
+#[ts(export, export_to = "v1/protocol-request.ts")]
+pub struct PromptId(
+    #[schemars(range(max = 9_007_199_254_740_991_u64))]
+    #[ts(type = "number")]
+    u64,
+);
 
 impl PromptId {
     /// Constructs a prompt ID exactly representable by JavaScript.
@@ -53,8 +64,9 @@ impl PromptId {
 }
 
 /// Parameters for `auth.begin`.
-#[derive(Debug, JsonSchema, Serialize)]
+#[derive(Debug, JsonSchema, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-request.ts")]
 pub struct AuthBeginParams {
     #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
     username: String,
@@ -74,8 +86,9 @@ impl AuthBeginParams {
 }
 
 /// Parameters for `auth.respond`.
-#[derive(Debug, JsonSchema, Serialize)]
+#[derive(Debug, JsonSchema, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-request.ts")]
 pub struct AuthRespondParams {
     prompt_id: PromptId,
     response: ProtocolSecret,
@@ -102,8 +115,9 @@ impl AuthRespondParams {
 }
 
 /// Parameters for `session.select`.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-request.ts")]
 pub struct SessionSelectParams {
     #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
     session_id: String,
@@ -123,8 +137,9 @@ impl SessionSelectParams {
 }
 
 /// Typed frontend operation.
-#[derive(Debug, JsonSchema, Serialize)]
+#[derive(Debug, JsonSchema, Serialize, TS)]
 #[serde(tag = "method", content = "params")]
+#[ts(export, export_to = "v1/protocol-request.ts")]
 pub enum FrontendRequest {
     /// Retrieves a complete public state snapshot.
     #[serde(rename = "state.get")]
@@ -147,10 +162,12 @@ pub enum FrontendRequest {
 }
 
 /// Strict top-level request.
-#[derive(Debug, JsonSchema, Serialize)]
+#[derive(Debug, JsonSchema, Serialize, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export, export_to = "v1/protocol-request.ts")]
 pub struct RequestEnvelope {
     #[schemars(extend("const" = 1))]
+    #[ts(type = "1")]
     protocol: u16,
     id: RequestId,
     #[serde(flatten)]
@@ -186,8 +203,13 @@ struct RawEnvelope {
     params: Value,
 }
 
-#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(
+    export,
+    export_to = "v1/protocol-request.ts",
+    type = "Record<string, never>"
+)]
 pub struct EmptyParams {}
 
 #[derive(Deserialize)]
@@ -209,8 +231,9 @@ struct RawSessionSelectParams {
     session_id: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-request.ts")]
 pub struct PowerRequestParams {
     action: PowerAction,
 }

@@ -28,6 +28,19 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Install Bun canary
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Record Bun canary revision
+        run: |
+          bun --version
+          bun --revision
+
+      - name: Install TypeScript dependencies
+        run: bun install --frozen-lockfile
+
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -36,6 +49,15 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-targets
+
+      - name: Check generated TypeScript and SDK
+        run: bun run check:sdk
+
+      - name: Test TypeScript SDK
+        run: bun run --cwd packages/fomalhaut-sdk test
+
+      - name: Build TypeScript SDK
+        run: bun run --cwd packages/fomalhaut-sdk build
 
       - name: Build documentation
         env:

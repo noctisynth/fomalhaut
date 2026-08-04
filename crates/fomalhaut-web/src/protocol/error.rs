@@ -4,12 +4,14 @@ use std::{error::Error, fmt};
 
 use schemars::JsonSchema;
 use serde::Serialize;
+use ts_rs::TS;
 
 use super::RequestId;
 
 /// Stable error category exposed to the frontend.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-error.ts")]
 pub enum ProtocolErrorCode {
     /// Input is not valid JSON.
     InvalidJson,
@@ -36,8 +38,9 @@ pub enum ProtocolErrorCode {
 }
 
 /// Frontend-safe error body.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-error.ts")]
 pub struct ProtocolErrorBody {
     code: ProtocolErrorCode,
     message: String,

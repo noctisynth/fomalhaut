@@ -22,6 +22,14 @@ jobs:
           fetch-depth: 0
       - name: Setup Semifold
         uses: noctisynth/setup-semifold@main
+      - name: Install Bun canary
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+      - name: Record Bun canary revision
+        run: |
+          bun --version
+          bun --revision
       - name: Semifold CI
         run: semifold ci
         env:

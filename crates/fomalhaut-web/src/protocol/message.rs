@@ -2,6 +2,7 @@
 
 use schemars::JsonSchema;
 use serde::Serialize;
+use ts_rs::TS;
 
 use super::{
     MAX_AUTH_MESSAGES, MAX_DISPLAY_TEXT_BYTES, MAX_SAFE_INTEGER, MAX_SESSION_ID_BYTES,
@@ -10,8 +11,9 @@ use super::{
 };
 
 /// Authentication lifecycle visible to the frontend.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum AuthState {
     Disconnected,
     Idle,
@@ -25,16 +27,18 @@ pub enum AuthState {
 }
 
 /// How a prompt answer should be rendered while typed.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum PromptKind {
     Secret,
     Visible,
 }
 
 /// Frontend-safe active prompt.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct Prompt {
     prompt_id: PromptId,
     kind: PromptKind,
@@ -59,16 +63,18 @@ impl Prompt {
 }
 
 /// Severity of a non-interactive authentication message.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum MessageLevel {
     Info,
     Error,
 }
 
 /// Bounded PAM message retained for state recovery.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct AuthMessage {
     level: MessageLevel,
     #[schemars(extend("x-fomalhaut-maxUtf8Bytes" = 4096))]
@@ -84,16 +90,18 @@ impl AuthMessage {
 }
 
 /// Public session family.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum SessionKind {
     Wayland,
     X11,
 }
 
 /// Frontend-safe session metadata.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct SessionSummary {
     #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
     id: String,
@@ -118,8 +126,9 @@ impl SessionSummary {
 }
 
 /// Power operations currently exposed by the protocol vocabulary.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum PowerAction {
     Poweroff,
     Reboot,
@@ -127,8 +136,9 @@ pub enum PowerAction {
 }
 
 /// Capabilities enabled by trusted host policy.
-#[derive(Clone, Debug, Default, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct Capabilities {
     power: Vec<PowerAction>,
 }
@@ -148,8 +158,9 @@ impl Capabilities {
 }
 
 /// Complete state needed to rebuild a frontend after refresh.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct StateSnapshot {
     authentication: AuthState,
     prompt: Option<Prompt>,
@@ -193,21 +204,28 @@ impl StateSnapshot {
 }
 
 /// Empty success payload.
-#[derive(Clone, Copy, Debug, Default, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(
+    export,
+    export_to = "v1/protocol-message.ts",
+    type = "Record<string, never>"
+)]
 pub struct EmptyResult {}
 
 /// Successful operation payload.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(untagged)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum ResponseResult {
     Empty(EmptyResult),
     State(StateSnapshot),
 }
 
 /// Response associated with a request ID.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(untagged)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum ResponseEnvelope {
     Success(SuccessResponse),
     Error(ErrorResponse),
@@ -237,32 +255,43 @@ impl ResponseEnvelope {
     }
 }
 
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct SuccessResponse {
     #[schemars(extend("const" = 1))]
+    #[ts(type = "1")]
     protocol: u16,
     id: RequestId,
     #[schemars(extend("const" = true))]
+    #[ts(type = "true")]
     ok: bool,
     result: ResponseResult,
 }
 
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct ErrorResponse {
     #[schemars(extend("const" = 1))]
+    #[ts(type = "1")]
     protocol: u16,
     id: RequestId,
     #[schemars(extend("const" = false))]
+    #[ts(type = "false")]
     ok: bool,
     error: ProtocolErrorBody,
 }
 
 /// Monotonically increasing event sequence value.
-#[derive(Clone, Copy, Debug, Eq, Hash, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(transparent)]
-pub struct Sequence(#[schemars(range(max = 9_007_199_254_740_991_u64))] u64);
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub struct Sequence(
+    #[schemars(range(max = 9_007_199_254_740_991_u64))]
+    #[ts(type = "number")]
+    u64,
+);
 
 impl Sequence {
     /// Returns the numeric sequence.
@@ -300,8 +329,9 @@ impl EventSequence {
 }
 
 /// Typed event emitted by the trusted host.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(tag = "event", content = "data")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum Event {
     #[serde(rename = "state.changed")]
     StateChanged(StateChangedData),
@@ -322,8 +352,9 @@ pub enum Event {
 }
 
 /// Authentication-state event data.
-#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct StateChangedData {
     state: AuthState,
 }
@@ -337,8 +368,9 @@ impl StateChangedData {
 }
 
 /// Session-selection event data.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct SessionSelectedData {
     #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
     session_id: String,
@@ -353,10 +385,12 @@ impl SessionSelectedData {
 }
 
 /// Sequenced event envelope.
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct EventEnvelope {
     #[schemars(extend("const" = 1))]
+    #[ts(type = "1")]
     protocol: u16,
     sequence: Sequence,
     #[serde(flatten)]
@@ -376,8 +410,9 @@ impl EventEnvelope {
 }
 
 /// Every top-level JSON message described by the v1 schema.
-#[derive(JsonSchema, Serialize)]
+#[derive(JsonSchema, Serialize, TS)]
 #[serde(untagged)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum WireMessage {
     Request(RequestEnvelope),
     Response(ResponseEnvelope),

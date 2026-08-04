@@ -5,15 +5,21 @@ use std::fmt;
 use fomalhaut_core::Secret;
 use schemars::JsonSchema;
 use serde::Serialize;
+use ts_rs::TS;
 use zeroize::Zeroize;
 
 use super::{MAX_AUTH_RESPONSE_BYTES, ProtocolValueError, value::validate_text};
 
 /// Frontend authentication answer with redacted formatting and zeroizing drop.
-#[derive(JsonSchema, Serialize)]
+#[derive(JsonSchema, Serialize, TS)]
 #[serde(transparent)]
 #[schemars(transparent)]
-pub struct ProtocolSecret(#[schemars(extend("x-fomalhaut-maxUtf8Bytes" = 16_384))] String);
+#[ts(export, export_to = "v1/protocol-secret.ts")]
+pub struct ProtocolSecret(
+    #[schemars(extend("x-fomalhaut-maxUtf8Bytes" = 16_384))]
+    #[ts(type = "string")]
+    String,
+);
 
 impl ProtocolSecret {
     /// Validates and wraps an authentication answer.
