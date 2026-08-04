@@ -49,6 +49,7 @@ export class MockTransport implements FomalhautTransport {
 export function snapshot(
   users: StateSnapshot["users"] = [],
   prompt: StateSnapshot["prompt"] = null,
+  power: StateSnapshot["capabilities"]["power"] = [],
 ): StateSnapshot {
   return {
     authentication: prompt ? "waiting_for_prompt" : "idle",
@@ -57,6 +58,6 @@ export function snapshot(
     users,
     sessions: [{ id: "wayland", name: "Wayland", kind: "wayland" }],
     selectedSessionId: "wayland",
-    capabilities: { power: [] },
+    capabilities: { power },
   };
 }

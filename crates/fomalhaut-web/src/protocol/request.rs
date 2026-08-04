@@ -156,7 +156,7 @@ pub enum FrontendRequest {
     /// Selects an opaque trusted session.
     #[serde(rename = "session.select")]
     SessionSelect(SessionSelectParams),
-    /// Requests an enumerated power action. The host keeps this disabled until policy exists.
+    /// Requests an enumerated power action allowed by trusted host policy.
     #[serde(rename = "power.request")]
     PowerRequest(PowerRequestParams),
 }

@@ -538,7 +538,7 @@
           ]
         },
         {
-          "description": "Requests an enumerated power action. The host keeps this disabled until policy exists.",
+          "description": "Requests an enumerated power action allowed by trusted host policy.",
           "type": "object",
           "properties": {
             "method": {

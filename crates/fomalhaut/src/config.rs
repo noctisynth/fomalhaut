@@ -9,6 +9,7 @@ use std::{
 };
 
 use fomalhaut_session::{DiscoveryConfig, SessionDirectory, SessionKind};
+use fomalhaut_web::protocol::PowerAction;
 use serde::Deserialize;
 
 const CONFIG_PATH: &str = "/etc/fomalhaut/config.toml";
@@ -25,6 +26,7 @@ pub struct AppConfig {
     theme_directory: Option<PathBuf>,
     discovery: DiscoveryConfig,
     users: UserDiscoveryConfig,
+    power: PowerConfig,
 }
 
 impl AppConfig {
@@ -35,8 +37,29 @@ impl AppConfig {
 
     /// Consumes the configuration into its theme, session, and user discovery inputs.
     #[must_use]
-    pub fn into_parts(self) -> (Option<PathBuf>, DiscoveryConfig, UserDiscoveryConfig) {
-        (self.theme_directory, self.discovery, self.users)
+    pub fn into_parts(
+        self,
+    ) -> (
+        Option<PathBuf>,
+        DiscoveryConfig,
+        UserDiscoveryConfig,
+        PowerConfig,
+    ) {
+        (self.theme_directory, self.discovery, self.users, self.power)
+    }
+}
+
+/// Administrator allowlist for system power operations.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PowerConfig {
+    actions: Vec<PowerAction>,
+}
+
+impl PowerConfig {
+    /// Returns the configured actions in stable protocol order.
+    #[must_use]
+    pub fn actions(&self) -> &[PowerAction] {
+        &self.actions
     }
 }
 
@@ -85,6 +108,7 @@ struct RawConfig {
     frontend: Option<RawFrontend>,
     sessions: Option<RawSessions>,
     users: Option<RawUsers>,
+    power: Option<RawPower>,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +131,12 @@ struct RawUsers {
     provider: Option<UserProvider>,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPower {
+    actions: Option<Vec<PowerAction>>,
+}
+
 /// Sanitized system configuration failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigError {
@@ -114,6 +144,7 @@ pub enum ConfigError {
     TooLarge,
     Parse,
     InvalidPath,
+    InvalidPowerPolicy,
 }
 
 impl fmt::Display for ConfigError {
@@ -123,6 +154,7 @@ impl fmt::Display for ConfigError {
             Self::TooLarge => "the system configuration exceeds 64 KiB",
             Self::Parse => "the system configuration is invalid TOML",
             Self::InvalidPath => "the system configuration contains an invalid path",
+            Self::InvalidPowerPolicy => "the system configuration contains an invalid power policy",
         })
     }
 }
@@ -191,10 +223,30 @@ fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
     let users = UserDiscoveryConfig {
         provider: raw.users.unwrap_or_default().provider.unwrap_or_default(),
     };
+    let configured_power = raw.power.unwrap_or_default().actions.unwrap_or_default();
+    if configured_power.len() > 3
+        || configured_power
+            .iter()
+            .enumerate()
+            .any(|(index, action)| configured_power[..index].contains(action))
+    {
+        return Err(ConfigError::InvalidPowerPolicy);
+    }
+    let power = PowerConfig {
+        actions: [
+            PowerAction::Poweroff,
+            PowerAction::Reboot,
+            PowerAction::Suspend,
+        ]
+        .into_iter()
+        .filter(|action| configured_power.contains(action))
+        .collect(),
+    };
     Ok(AppConfig {
         theme_directory,
         discovery,
         users,
+        power,
     })
 }
 
@@ -217,6 +269,8 @@ fn validate_path(path: &Path) -> Result<(), ConfigError> {
 mod tests {
     use std::{fs, path::Path};
 
+    use fomalhaut_web::protocol::PowerAction;
+
     use super::{ConfigError, RawConfig, load_from_path, validate};
 
     #[test]
@@ -224,10 +278,11 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("fomalhaut-missing-config-{}", std::process::id()));
         let config = load_from_path(&path).expect("an absent configuration uses defaults");
-        let (theme, discovery, users) = config.into_parts();
+        let (theme, discovery, users, power) = config.into_parts();
         assert_eq!(theme, None);
         assert_eq!(discovery.directories().len(), 4);
         assert_eq!(users.provider(), super::UserProvider::Auto);
+        assert!(power.actions().is_empty());
     }
 
     #[test]
@@ -245,7 +300,7 @@ mod tests {
         )
         .expect("configuration fixture is valid TOML");
         let config = validate(raw).expect("configuration fixture is semantically valid");
-        let (theme, discovery, _) = config.into_parts();
+        let (theme, discovery, _, _) = config.into_parts();
         assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/theme")));
         assert_eq!(discovery.directories().len(), 2);
         assert_eq!(discovery.directories()[0].path(), Path::new("/opt/first"));
@@ -262,7 +317,7 @@ mod tests {
         )
         .expect("user provider fixture is valid TOML");
         let config = validate(raw).expect("user provider fixture is valid");
-        let (_, _, users) = config.into_parts();
+        let (_, _, users, _) = config.into_parts();
         assert_eq!(users.provider(), super::UserProvider::None);
 
         assert!(
@@ -270,6 +325,44 @@ mod tests {
                 r#"
                     [users]
                     provider = "passwd"
+                "#,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn power_policy_is_strict_unique_and_stably_ordered() {
+        let raw = toml::from_str::<RawConfig>(
+            r#"
+                [power]
+                actions = ["suspend", "poweroff"]
+            "#,
+        )
+        .expect("power policy fixture is valid TOML");
+        let config = validate(raw).expect("power policy fixture is valid");
+        let (_, _, _, power) = config.into_parts();
+        assert_eq!(
+            power.actions(),
+            &[PowerAction::Poweroff, PowerAction::Suspend]
+        );
+
+        let duplicate = toml::from_str::<RawConfig>(
+            r#"
+                [power]
+                actions = ["reboot", "reboot"]
+            "#,
+        )
+        .expect("duplicate policy is syntactically valid TOML");
+        assert_eq!(
+            validate(duplicate).err(),
+            Some(ConfigError::InvalidPowerPolicy)
+        );
+        assert!(
+            toml::from_str::<RawConfig>(
+                r#"
+                    [power]
+                    actions = ["hibernate"]
                 "#,
             )
             .is_err()

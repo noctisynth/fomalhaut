@@ -16,7 +16,8 @@ use fomalhaut_web::{
 };
 
 use crate::{
-    config::UserDiscoveryConfig,
+    config::{PowerConfig, UserDiscoveryConfig},
+    power::LogindPowerControl,
     users::{AvatarAsset, discover_users},
 };
 
@@ -75,6 +76,7 @@ impl WorkerHandle {
         socket_path: PathBuf,
         sessions: Vec<TrustedSession>,
         users: UserDiscoveryConfig,
+        power: PowerConfig,
     ) -> Result<(Self, Receiver<WorkerOutput>), WorkerSpawnError> {
         let (command_sender, command_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         let (output_sender, output_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
@@ -85,6 +87,7 @@ impl WorkerHandle {
                     socket_path,
                     sessions,
                     users,
+                    power,
                     command_receiver,
                     output_sender,
                 );
@@ -137,6 +140,7 @@ fn run_worker(
     socket_path: PathBuf,
     sessions: Vec<TrustedSession>,
     user_config: UserDiscoveryConfig,
+    power_config: PowerConfig,
     commands: Receiver<WorkerCommand>,
     outputs: SyncSender<WorkerOutput>,
 ) {
@@ -169,7 +173,8 @@ fn run_worker(
             return;
         }
     };
-    let mut controller = HostController::with_catalogs(client, sessions, users);
+    let power = LogindPowerControl::discover(&power_config);
+    let mut controller = HostController::with_power_control(client, sessions, users, power);
     if outputs.send(WorkerOutput::Ready(avatars)).is_err() {
         let _ = runtime.block_on(controller.cancel_for_lifecycle());
         return;
@@ -248,7 +253,7 @@ mod tests {
     };
 
     use super::{WorkerHandle, WorkerOutput};
-    use crate::config::UserDiscoveryConfig;
+    use crate::config::{PowerConfig, UserDiscoveryConfig};
     use fomalhaut_core::SessionCommand;
     use fomalhaut_web::{
         controller::TrustedSession,
@@ -346,9 +351,13 @@ mod tests {
             });
         });
 
-        let (worker, outputs) =
-            WorkerHandle::spawn(path.clone(), Vec::new(), UserDiscoveryConfig::disabled())
-                .expect("worker thread starts");
+        let (worker, outputs) = WorkerHandle::spawn(
+            path.clone(),
+            Vec::new(),
+            UserDiscoveryConfig::disabled(),
+            PowerConfig::default(),
+        )
+        .expect("worker thread starts");
         assert!(matches!(
             outputs
                 .recv_timeout(Duration::from_secs(2))
@@ -497,9 +506,13 @@ mod tests {
         )
         .expect("session command fixture is non-empty");
         let sessions = vec![TrustedSession::new(summary, command)];
-        let (worker, outputs) =
-            WorkerHandle::spawn(path.clone(), sessions, UserDiscoveryConfig::disabled())
-                .expect("session-start worker starts");
+        let (worker, outputs) = WorkerHandle::spawn(
+            path.clone(),
+            sessions,
+            UserDiscoveryConfig::disabled(),
+            PowerConfig::default(),
+        )
+        .expect("session-start worker starts");
         assert!(matches!(
             outputs
                 .recv_timeout(Duration::from_secs(2))

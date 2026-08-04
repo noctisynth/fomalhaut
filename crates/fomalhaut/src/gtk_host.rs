@@ -93,7 +93,7 @@ fn build_window(
     application: &gtk::Application,
     failed: Rc<Cell<bool>>,
 ) -> Result<gtk::ApplicationWindow, HostError> {
-    let (theme_directory, discovery, user_discovery) = AppConfig::load()
+    let (theme_directory, discovery, user_discovery, power) = AppConfig::load()
         .map_err(|_| HostError::Configuration)?
         .into_parts();
     let theme = Rc::new(match theme_directory {
@@ -104,7 +104,7 @@ fn build_window(
     });
     let socket_path = greetd_socket_path()?;
     let sessions = discover_trusted_sessions(&discovery)?;
-    let (worker, outputs) = WorkerHandle::spawn(socket_path, sessions, user_discovery)
+    let (worker, outputs) = WorkerHandle::spawn(socket_path, sessions, user_discovery, power)
         .map_err(|_| HostError::WorkerSpawn)?;
     let worker = Rc::new(worker);
     let avatars = Rc::new(RefCell::new(Vec::new()));

@@ -11,9 +11,10 @@ use crate::{
     bridge::{event_dispatch_script, response_json},
     protocol::{
         AuthMessage, AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
-        FrontendRequest, MAX_AUTH_MESSAGES, MessageLevel, Prompt, PromptId, PromptKind,
-        ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope, ResponseResult,
-        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot, UserSummary,
+        FrontendRequest, MAX_AUTH_MESSAGES, MessageLevel, PowerAction, Prompt, PromptId,
+        PromptKind, ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope,
+        ResponseResult, SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot,
+        UserSummary,
     },
 };
 
@@ -78,6 +79,41 @@ pub struct TrustedSession {
     command: SessionCommand,
 }
 
+/// Sanitized failure returned by a trusted host power backend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PowerControlError;
+
+impl fmt::Display for PowerControlError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("the power backend could not complete the operation")
+    }
+}
+
+impl Error for PowerControlError {}
+
+/// Trusted host boundary for enumerated power operations.
+pub trait PowerControl: Send {
+    /// Returns actions allowed by both administrator policy and the active backend.
+    fn capabilities(&self) -> Capabilities;
+
+    /// Requests one previously advertised power operation without interactive authorization.
+    fn request(&mut self, action: PowerAction) -> Result<(), PowerControlError>;
+}
+
+/// Power backend used when the host has no enabled operations.
+#[derive(Default)]
+pub struct DisabledPowerControl;
+
+impl PowerControl for DisabledPowerControl {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::disabled()
+    }
+
+    fn request(&mut self, _action: PowerAction) -> Result<(), PowerControlError> {
+        Err(PowerControlError)
+    }
+}
+
 impl TrustedSession {
     /// Pairs public metadata with its trusted launch command.
     #[must_use]
@@ -95,6 +131,7 @@ pub struct HostController<T> {
     messages: VecDeque<AuthMessage>,
     sessions: Vec<TrustedSession>,
     users: Vec<UserSummary>,
+    power: Box<dyn PowerControl>,
     selected_session: Option<usize>,
     sequences: EventSequence,
 }
@@ -119,6 +156,17 @@ impl<T> HostController<T> {
         sessions: Vec<TrustedSession>,
         users: Vec<UserSummary>,
     ) -> Self {
+        Self::with_power_control(client, sessions, users, DisabledPowerControl)
+    }
+
+    /// Wraps a connected core client with trusted catalogs and a host power backend.
+    #[must_use]
+    pub fn with_power_control(
+        client: GreeterClient<T>,
+        sessions: Vec<TrustedSession>,
+        users: Vec<UserSummary>,
+        power: impl PowerControl + 'static,
+    ) -> Self {
         let authentication = map_state(client.state());
         let selected_session = (!sessions.is_empty()).then_some(0);
         Self {
@@ -129,6 +177,7 @@ impl<T> HostController<T> {
             messages: VecDeque::new(),
             sessions,
             users,
+            power: Box::new(power),
             selected_session,
             sequences: EventSequence::default(),
         }
@@ -148,7 +197,7 @@ impl<T> HostController<T> {
             self.selected_session
                 .and_then(|index| self.sessions.get(index))
                 .map(|session| session.summary.id().to_owned()),
-            Capabilities::disabled(),
+            self.power.capabilities(),
         )
         .map_err(|_| ControllerError::new("the controller public state is invalid"))
     }
@@ -301,13 +350,37 @@ impl<T: Transport> HostController<T> {
                 Ok(Vec::new())
             }
             FrontendRequest::SessionSelect(params) => self.select_session(params.session_id()),
-            FrontendRequest::PowerRequest(_) => Err(ProtocolErrorBody::new(
-                ProtocolErrorCode::MethodDisabled,
-                "power operations are disabled",
-                false,
-            )),
+            FrontendRequest::PowerRequest(params) => self.request_power(params.action()).await,
             FrontendRequest::StateGet(_) => Ok(Vec::new()),
         }
+    }
+
+    async fn request_power(
+        &mut self,
+        action: PowerAction,
+    ) -> Result<Vec<Event>, ProtocolErrorBody> {
+        if !self.power.capabilities().power().contains(&action) {
+            return Err(ProtocolErrorBody::new(
+                ProtocolErrorCode::MethodDisabled,
+                "the requested power operation is disabled",
+                false,
+            ));
+        }
+        self.cancel_for_lifecycle().await.map_err(|_| {
+            ProtocolErrorBody::new(
+                ProtocolErrorCode::Internal,
+                "authentication could not be cancelled before the power operation",
+                true,
+            )
+        })?;
+        self.power.request(action).map_err(|_| {
+            ProtocolErrorBody::new(
+                ProtocolErrorCode::Internal,
+                "the power service could not complete the operation",
+                true,
+            )
+        })?;
+        Ok(Vec::new())
     }
 
     fn select_session(&mut self, session_id: &str) -> Result<Vec<Event>, ProtocolErrorBody> {
@@ -521,18 +594,41 @@ mod tests {
     use std::{
         collections::VecDeque,
         future::{Future, ready},
+        sync::{Arc, Mutex},
     };
 
     use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
     use serde_json::Value;
 
-    use super::{HostController, Transport, TrustedSession};
-    use crate::protocol::{ProtocolErrorCode, SessionKind, SessionSummary, decode_request};
+    use super::{HostController, PowerControl, PowerControlError, Transport, TrustedSession};
+    use crate::protocol::{
+        Capabilities, PowerAction, ProtocolErrorCode, SessionKind, SessionSummary, decode_request,
+    };
     use fomalhaut_core::{GreeterClient, SessionCommand, TransportError};
 
     struct ScriptedTransport {
         responses: VecDeque<Result<Response, TransportError>>,
         exchanges: usize,
+    }
+
+    struct RecordingPower {
+        capabilities: Capabilities,
+        calls: Arc<Mutex<Vec<PowerAction>>>,
+        succeeds: bool,
+    }
+
+    impl PowerControl for RecordingPower {
+        fn capabilities(&self) -> Capabilities {
+            self.capabilities.clone()
+        }
+
+        fn request(&mut self, action: PowerAction) -> Result<(), PowerControlError> {
+            self.calls
+                .lock()
+                .expect("recording power mutex is not poisoned")
+                .push(action);
+            self.succeeds.then_some(()).ok_or(PowerControlError)
+        }
     }
 
     impl ScriptedTransport {
@@ -591,6 +687,78 @@ mod tests {
 
         assert_eq!(json(response)["result"]["authentication"], "idle");
         assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn enabled_power_request_cancels_authentication_before_dispatch() {
+        let transport = ScriptedTransport::new([
+            Response::AuthMessage {
+                auth_message_type: AuthMessageType::Secret,
+                auth_message: "Password:".to_owned(),
+            },
+            Response::Success,
+        ]);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let power = RecordingPower {
+            capabilities: Capabilities::with_power(&[PowerAction::Poweroff]),
+            calls: Arc::clone(&calls),
+            succeeds: true,
+        };
+        let client = GreeterClient::with_transport(transport);
+        let mut controller =
+            HostController::with_power_control(client, Vec::new(), Vec::new(), power);
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":1,"method":"auth.begin","params":{"username":"alice"}}"#,
+            ))
+            .await
+            .expect("authentication reaches a prompt");
+
+        let batch = controller
+            .handle(request(
+                r#"{"protocol":1,"id":2,"method":"power.request","params":{"action":"poweroff"}}"#,
+            ))
+            .await
+            .expect("power request maintains controller state");
+        let (response, events) = batch.into_parts();
+
+        assert_eq!(json(response)["ok"], true);
+        assert_eq!(json(events)[0]["event"], "state.changed");
+        assert_eq!(
+            calls
+                .lock()
+                .expect("recording power mutex is readable")
+                .as_slice(),
+            &[PowerAction::Poweroff]
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_power_request_is_rejected_without_dispatch() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let power = RecordingPower {
+            capabilities: Capabilities::with_power(&[PowerAction::Suspend]),
+            calls: Arc::clone(&calls),
+            succeeds: true,
+        };
+        let client = GreeterClient::with_transport(ScriptedTransport::new([]));
+        let mut controller =
+            HostController::with_power_control(client, Vec::new(), Vec::new(), power);
+        let batch = controller
+            .handle(request(
+                r#"{"protocol":1,"id":1,"method":"power.request","params":{"action":"reboot"}}"#,
+            ))
+            .await
+            .expect("disabled request returns a protocol response");
+        let (response, _) = batch.into_parts();
+
+        assert_eq!(json(response)["error"]["code"], "method_disabled");
+        assert!(
+            calls
+                .lock()
+                .expect("recording power mutex is readable")
+                .is_empty()
+        );
     }
 
     #[tokio::test]

@@ -72,6 +72,25 @@ WebKit bridge 时会拒绝登录请求。
 本地路径。用户列表可能为空，主题必须始终保留手工用户名输入；选择用户摘要后仍应将其
 `username` 传给 `auth.begin`，最终认证结果只由 greetd/PAM 决定。
 
+## 电源管理
+
+电源操作默认全部关闭。管理员可以显式允许固定枚举中的动作：
+
+```toml
+[power]
+actions = ["poweroff", "reboot", "suspend"]
+```
+
+数组只接受上述三个值且不得重复；显式空数组关闭全部动作。Fomalhaut 会通过系统 D-Bus 查询
+systemd-logind，`state.get` 的 `capabilities.power` 只包含同时出现在配置中且对应 `Can*` 方法
+返回 `yes` 的动作。`no`、`na`、`challenge` 或 logind 不可用都不会向主题发布能力，因此
+greeter 不依赖 Polkit 交互 agent。
+
+主题只能用 `power.request` 请求 capability 中存在的枚举动作。宿主会先取消进行中的 greetd
+认证，再调用 logind 的非交互 `PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)`；不会
+执行 shell 命令或回退到 `systemctl`。发行版的 Polkit/logind 策略仍须允许 `greeter` 用户执行
+相应操作，否则该动作不会显示或会返回脱敏错误。
+
 ## 用户发现
 
 默认配置等价于：

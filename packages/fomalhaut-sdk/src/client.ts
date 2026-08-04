@@ -9,6 +9,7 @@ import type { FomalhautEventListener, FomalhautEventName } from "./events.js";
 import type {
   EmptyResult,
   EventEnvelope,
+  PowerAction,
   PromptId,
   ProtocolErrorBody,
   RequestEnvelope,
@@ -61,6 +62,10 @@ export class FomalhautClient {
     cancel: (): Promise<void> => this.#authCancel(),
   };
 
+  public readonly power = {
+    request: (action: PowerAction): Promise<void> => this.#powerRequest(action),
+  };
+
   public constructor(transport: FomalhautTransport = new WebKitTransport()) {
     this.#transport = transport;
     this.#unsubscribeTransport = transport.subscribe((value) =>
@@ -110,6 +115,10 @@ export class FomalhautClient {
 
   async #authCancel(): Promise<void> {
     await this.#exchange({ method: "auth.cancel", params: {} });
+  }
+
+  async #powerRequest(action: PowerAction): Promise<void> {
+    await this.#exchange({ method: "power.request", params: { action } });
   }
 
   async #exchange(

@@ -298,7 +298,13 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 为“外部主题必须由管理员信任并审查”的当前安全前提编写运维警告，并评估主题打包、
       签名、来源验证或更强隔离机制；不得把 capability/CSP 描述为对恶意主题代码的完整沙箱。
 - [ ] 审计 desktop entry 到 `SessionCommand` 的转换。
-- [ ] 为电源操作建立枚举和管理员策略，不接受前端命令行。
+- [x] 实现默认关闭的电源 allowlist、systemd-logind `Can*` 能力交集和非交互
+      `PowerOff/Reboot/Suspend` 执行；认证中请求须先取消 greetd 会话，且不得回退到 shell。
+- [x] 在 SDK 暴露类型化 `power.request`，并在 Nocturne 主题只按 capability 渲染带确认步骤的
+      电源菜单。
+- [x] 覆盖配置校验、controller 策略/取消顺序、logind 能力映射、SDK 请求和主题交互测试。
+- [ ] 在真实 greeter 环境验证 poweroff、reboot、suspend、Polkit `challenge`、inhibitor 和
+      logind 不可用时的安全退化。
 - [ ] 评估剪贴板、拖放、文件选择器和自定义 URL handler。
 - [ ] 记录 JavaScript/WebView 无法保证 secret 清零的限制。
 - [ ] 在目标发行版验证 WebKit renderer sandbox。

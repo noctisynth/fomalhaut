@@ -153,4 +153,26 @@ describe("SPA authentication UI", () => {
 
     expect(screen.getByText("?")).toBeVisible();
   });
+
+  test("shows only advertised power actions and confirms before requesting", async () => {
+    const transport = new MockTransport(
+      snapshot([], null, ["reboot", "suspend"]),
+    );
+    await renderTheme(transport);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Power menu" }));
+    expect(
+      screen.queryByRole("button", { name: "Power off" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Suspend" }));
+
+    expect(transport.requests.at(-1)?.method).toBe("state.get");
+    await user.click(screen.getByRole("button", { name: "Confirm suspend" }));
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "power.request",
+      params: { action: "suspend" },
+    });
+  });
 });

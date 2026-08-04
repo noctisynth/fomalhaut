@@ -8,6 +8,10 @@ import { FomalhautClient } from "fomalhaut-sdk";
 const client = new FomalhautClient();
 const state = await client.state.get();
 
+if (state.capabilities.power.includes("suspend")) {
+  await client.power.request("suspend");
+}
+
 client.on("auth.prompt", async (prompt) => {
   const input = document.querySelector<HTMLInputElement>("#credential");
   if (!input) return;

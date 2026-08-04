@@ -663,8 +663,9 @@ Cancelling ─────────────────────► Id
 - `auth.respond`：接收当前 `promptId` 和 zeroizing 回答。
 - `auth.cancel`：无参数。
 - `session.select`：只接收不透明 session ID。
-- `power.request`：只接收 `poweroff`、`reboot` 或 `suspend` 枚举；在管理员策略完成前始终
-  返回 `method_disabled`。
+- `power.request`：只接收 `poweroff`、`reboot` 或 `suspend` 枚举。宿主只接受管理员配置
+  allowlist 与 systemd-logind 当前无交互授权能力的交集；不在 capability 中的动作返回
+  `method_disabled`，执行失败返回脱敏的 `internal` 错误。
 
 请求保持顶层 `{ protocol, id, method, params }` 形式。响应保持顶层
 `{ protocol, id, ok, result }` 或 `{ protocol, id, ok, error }` 形式，且只能通过构造器建立
@@ -674,7 +675,16 @@ success/error 不变量。无法解析出请求 ID 的畸形 JSON 不生成一�
 公开状态快照包含：认证状态、当前 prompt（如有）、有限数量的近期 info/error 消息、经过
 过滤的用户摘要、session 摘要、当前选择的 session ID 和 capability。用户摘要只有用户名、
 显示名和可选的不透明头像 URL；session 摘要只有 ID、显示名和 X11 / Wayland 类型。
-capability 中的 power action 列表在策略启用前为空。
+capability 中的 power action 列表由可信宿主生成。电源功能默认关闭；启用后，宿主通过系统
+D-Bus 查询 systemd-logind 的 `CanPowerOff`、`CanReboot` 和 `CanSuspend`。只有返回 `yes` 的
+动作才加入公开列表；`no`、`na`、`challenge`、D-Bus 不可用和查询失败都按不可用处理。
+Fomalhaut 不运行 Polkit agent，也不为 greeter 发起交互授权。
+
+收到已发布能力对应的请求时，controller 先取消仍在进行的 greetd 认证会话并清理 prompt，
+再通过 systemd-logind 的 `PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)` 执行动作。
+这里的 `false` 明确禁止 D-Bus 方法发起交互授权。电源后端故障不得使 greeter 启动失败：启动
+时退化为空 capability；请求与能力查询之间发生竞态时，调用失败只返回稳定、脱敏错误，不
+回退到 `systemctl`、shell 或任意命令执行。
 
 v1 事件至少包含：
 
@@ -764,8 +774,9 @@ Rust wire 类型仍是协议的唯一事实来源。`fomalhaut-web` 使用 `ts-r
   漂移。
 
 `fomalhaut-sdk` 在生成 wire types 上提供手写、框架无关的 Client。公开 API 至少覆盖
-`state.get`、`session.select`、`auth.begin`、`auth.respond`、`auth.cancel` 和带判别联合收窄的
-事件订阅；策略仍禁用时不提供高级 `power.request` 方法。Client 内部管理 request ID、验证
+`state.get`、`session.select`、`auth.begin`、`auth.respond`、`auth.cancel`、
+`power.request` 和带判别联合收窄的事件订阅。Client 的 `power.request` 只接受生成类型中的
+`PowerAction`；主题必须先读取 `state.get` 的 capability，只展示其中存在的动作。Client 内部管理 request ID、验证
 响应关联、协议版本和单调 event sequence，并把协议拒绝、bridge 失败和本地 busy 分成稳定
 错误类型。
 
@@ -1129,6 +1140,9 @@ path = "/etc/fomalhaut/themes/my-theme"
 wayland_dirs = ["/usr/local/share/wayland-sessions", "/usr/share/wayland-sessions"]
 x11_dirs = ["/usr/local/share/xsessions", "/usr/share/xsessions"]
 executable_search_paths = ["/usr/local/bin", "/usr/bin"]
+
+[power]
+actions = ["poweroff", "reboot", "suspend"]
 ```
 
 - `frontend` 缺失时选择内嵌 minimal theme；存在时只包含绝对主题目录，入口和协议版本由目录
@@ -1136,9 +1150,12 @@ executable_search_paths = ["/usr/local/bin", "/usr/bin"]
 - `sessions` 缺失时沿用固定默认目录。section 存在时，每个缺失字段仍继承对应默认值；显式
   空数组用于禁用该类目录。所有目录必须是无 NUL 的绝对路径，保持数组顺序作为优先级；
   至少要发现一个最终可用 session，否则启动失败。
+- `power` 缺失时所有电源动作关闭。`actions` 是至多三个互不重复的枚举 allowlist，只接受
+  `poweroff`、`reboot` 和 `suspend`；显式空数组等同关闭。配置顺序不影响 capability 的稳定
+  顺序，宿主固定按 poweroff、reboot、suspend 排列，并与 logind 当前返回 `yes` 的动作求交集。
 - 首个切片不加入可配置网络、CSP、开发者工具或任意 header。安全策略仍是编译期拒绝式常量，
   避免把主题配置扩展成降低宿主边界的权限开关。
-- 日志目标、记忆用户/session 和电源策略继续留作后续字段；在实现前未知字段会被拒绝，不能
+- 日志目标和记忆用户/session 继续留作后续字段；在实现前未知字段会被拒绝，不能
   提前依赖未承诺的配置键。
 
 配置与外部主题纵向切片已用自动化测试验证：配置缺失时安全回退、未知字段和相对路径拒绝、

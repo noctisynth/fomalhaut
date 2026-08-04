@@ -4,6 +4,7 @@ import {
   FomalhautBusyError,
   type FomalhautClient,
   FomalhautProtocolError,
+  type PowerAction,
   type Prompt,
   type StateSnapshot,
   type UserSummary,
@@ -31,6 +32,7 @@ export interface ThemeState {
   respondToPrompt(prompt: Prompt, response: string): Promise<boolean>;
   cancelAndReturn(): Promise<boolean>;
   selectSession(sessionId: string): Promise<boolean>;
+  requestPower(action: PowerAction): Promise<boolean>;
   clearError(): void;
 }
 
@@ -141,6 +143,7 @@ export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
         return true;
       },
       selectSession: (sessionId) => run(() => client.session.select(sessionId)),
+      requestPower: (action) => run(() => client.power.request(action)),
       clearError: () => set({ error: null }),
     };
   });

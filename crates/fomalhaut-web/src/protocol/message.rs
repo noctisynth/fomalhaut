@@ -213,6 +213,20 @@ impl Capabilities {
         Self { power: Vec::new() }
     }
 
+    /// Constructs capabilities from trusted host policy in stable protocol order.
+    #[must_use]
+    pub fn with_power(actions: &[PowerAction]) -> Self {
+        let power = [
+            PowerAction::Poweroff,
+            PowerAction::Reboot,
+            PowerAction::Suspend,
+        ]
+        .into_iter()
+        .filter(|action| actions.contains(action))
+        .collect();
+        Self { power }
+    }
+
     /// Returns allowed power actions.
     #[must_use]
     pub fn power(&self) -> &[PowerAction] {

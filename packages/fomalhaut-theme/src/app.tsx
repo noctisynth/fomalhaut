@@ -1,10 +1,13 @@
-import type { Prompt, UserSummary } from "fomalhaut-sdk";
+import type { PowerAction, Prompt, UserSummary } from "fomalhaut-sdk";
 import {
   ArrowLeft,
   ArrowRight,
   LoaderCircle,
   LockKeyhole,
   MonitorCog,
+  Moon,
+  Power,
+  RotateCcw,
   UserRound,
   UserRoundPlus,
 } from "lucide-react";
@@ -47,6 +50,7 @@ export function App() {
       </div>
 
       {phase === "ready" && snapshot && <SessionControl />}
+      {phase === "ready" && snapshot && <PowerMenu />}
     </main>
   );
 }
@@ -689,6 +693,129 @@ function SessionControl() {
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+const powerLabels: Record<PowerAction, string> = {
+  poweroff: "Power off",
+  reboot: "Restart",
+  suspend: "Suspend",
+};
+
+const powerIcons: Record<PowerAction, typeof Power> = {
+  poweroff: Power,
+  reboot: RotateCcw,
+  suspend: Moon,
+};
+
+function PowerMenu() {
+  const actions = useThemeStore(
+    (state) => state.snapshot?.capabilities.power ?? [],
+  );
+  const busy = useThemeStore((state) => state.busy);
+  const requestPower = useThemeStore((state) => state.requestPower);
+  const error = useThemeStore((state) => state.error);
+  const [open, setOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<PowerAction | null>(null);
+
+  if (actions.length === 0) {
+    return null;
+  }
+
+  const submit = async (): Promise<void> => {
+    if (!confirmation) {
+      return;
+    }
+    if (await requestPower(confirmation)) {
+      setConfirmation(null);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="absolute bottom-6 left-6 z-20 sm:bottom-9 sm:left-10">
+      {open && (
+        <div
+          className={cn(
+            "absolute bottom-12 left-0 w-64 rounded-2xl border border-white/10",
+            "bg-black/50 p-2 shadow-2xl backdrop-blur-2xl",
+          )}
+        >
+          {confirmation ? (
+            <div className="space-y-3 p-2">
+              <p className="text-sm font-medium">
+                {powerLabels[confirmation]} this device?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Active work in other sessions may be interrupted.
+              </p>
+              {error && (
+                <p className="text-xs text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setConfirmation(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => void submit()}
+                >
+                  {busy ? (
+                    <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+                  ) : null}
+                  Confirm {powerLabels[confirmation].toLocaleLowerCase()}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <fieldset className="grid gap-1" aria-label="Power actions">
+              {actions.map((action) => {
+                const Icon = powerIcons[action];
+                return (
+                  <Button
+                    key={action}
+                    className="justify-start"
+                    type="button"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => setConfirmation(action)}
+                  >
+                    <Icon aria-hidden="true" />
+                    {powerLabels[action]}
+                  </Button>
+                );
+              })}
+            </fieldset>
+          )}
+        </div>
+      )}
+      <Button
+        className="rounded-full border-white/10 bg-black/20 backdrop-blur-xl"
+        type="button"
+        size="icon"
+        variant="outline"
+        disabled={busy}
+        aria-label="Power menu"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((value) => !value);
+          setConfirmation(null);
+        }}
+      >
+        <Power aria-hidden="true" />
+      </Button>
     </div>
   );
 }

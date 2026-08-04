@@ -87,6 +87,21 @@ describe("FomalhautClient", () => {
     });
   });
 
+  test("sends an enumerated power request", async () => {
+    const transport = new MockTransport();
+    const client = new FomalhautClient(transport);
+
+    await expect(client.power.request("suspend")).resolves.toBeUndefined();
+    expect(transport.requests).toEqual([
+      {
+        protocol: 1,
+        id: 1,
+        method: "power.request",
+        params: { action: "suspend" },
+      },
+    ]);
+  });
+
   test("wraps transport and response-correlation failures", async () => {
     const transport = new MockTransport();
     transport.handler = async () => {
