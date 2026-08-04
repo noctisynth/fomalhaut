@@ -371,6 +371,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       `cargo publish` 获得 GTK 4.18+ 并验证最终 greeter crate。
 - [x] 在首次正式发布前对四个 crate 执行 `cargo package` payload 检查，并对 SDK 执行
       `npm pack --dry-run`。
+- [ ] 下次切换 Semifold release channel 时，同步修改并审核 npm publish 的显式 dist-tag，
+      不得沿用当前 `--tag alpha`。
 - [ ] 完成许可证、第三方依赖和资源归属检查。
 - [ ] 发布前执行完整安全检查和端到端测试。
 

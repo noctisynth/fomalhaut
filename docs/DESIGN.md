@@ -332,6 +332,11 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 - 所有 npm 发布 package 必须提供合法且非 private 的 `name`、SemVer `version`；同时维护
   `description`、`license`、`repository`、明确的 `exports` 和 `files` 白名单。根 workspace
   package 必须保持 private，不得发布。
+- npm CLI 发布 prerelease 时必须显式传入 dist-tag。当前 Semifold package channel 为
+  `alpha`，因此 Node.js resolver 的 `npm publish` 固定使用 `--tag alpha`，避免 prerelease
+  被拒绝或进入 `latest`。以后通过 `smif config channel` 切换 beta、rc 或 stable 通道时，
+  必须在同一变更中同步审核 npm publish 的 `--tag`；stable 发布应恢复适合正式版本的 tag
+  策略，不得把旧 `alpha` tag 隐式沿用到新通道。
 - `semifold-ci.yaml` 在运行 `semifold ci` 前必须使用 Bun frozen lockfile 安装依赖并构建
   `fomalhaut-sdk`，确保 npm `files = ["dist"]` 的发布内容在全新 runner 中真实存在。发布前可
   本地运行 `cargo package` 和 `npm pack --dry-run` 检查 payload，但仍严禁本地执行

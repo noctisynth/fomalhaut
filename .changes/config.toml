@@ -63,4 +63,6 @@ args = [
     "--provenance",
     "--access",
     "public",
+    "--tag",
+    "alpha",
 ]
