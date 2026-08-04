@@ -425,6 +425,15 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
 
 安装器遵守以下安全边界：
 
+- 真实系统模式只支持 Arch Linux。构建前通过 `pacman -T` 检查固定的构建与运行包集合，只安装
+  缺失项；包管理器严格按 `paru`、`yay`、`sudo pacman` 的顺序选择，安装命令使用 `--needed`
+  且保留交互确认，不隐式执行全系统升级。`--system-root` 是隔离安装验证，不得修改宿主包状态。
+- 自动依赖管理只负责 Arch 系统包，不安装、升级或检查 Rust/Bun 的发行通道；Cargo 与 Bun
+  由用户预先提供，安装器仅在构建前确认对应命令可执行。
+- 必需包集合覆盖 `base-devel`、构建辅助工具、greetd/Cage/DBus，以及当前直接链接所需的
+  GTK4、WebKitGTK 6.0、GLib、glibc、libgcc 和 libsoup3；AccountsService 仍是用户信息增强的
+  可选依赖，不由源码安装器强制安装。依赖安装结束后必须重新验证系统包、构建命令、运行时
+  绝对路径和 greeter 账户，验证失败时不得开始构建或写系统文件。
 - Cargo、Bun 安装与前端构建始终以调用者的普通用户身份执行；脚本拒绝直接由 root 启动，
   只在写系统目录、原子切换文件和可选重启 greetd 时调用 `sudo`。
 - 写真实系统前必须确认固定 greetd 命令引用的 `/usr/bin/dbus-run-session`、`/usr/bin/cage`

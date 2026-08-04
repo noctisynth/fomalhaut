@@ -21,6 +21,12 @@ session 默认目录；文件存在但无法读取、包含未知字段或验证
 源码构建所需的 Rust、Bun canary、GTK/WebKitGTK 开发环境必须已经可用；真实系统安装还会在写入
 前确认 `/usr/bin/cage`、`/usr/bin/dbus-run-session` 和指定的 greeter 账户存在。
 
+在 Arch Linux 上，安装器会先用 `pacman -T` 检查缺失的构建和运行包，并优先调用 `paru`，
+不存在时依次回退到 `yay` 和 `sudo pacman`。包安装保留交互确认且不会触发隐式全系统升级；
+Rust 与 Bun 工具链由用户自行提供，安装器不会通过系统包管理器安装、升级或检查其发布通道。
+AccountsService 是可选的用户资料增强，不会被强制安装。`--system-root` 测试模式从不修改
+宿主机的软件包状态。
+
 重复运行同一命令即可更新安装。既有二进制和普通主题目录会保留带时间戳的备份，主题 release
 不会自动删除。两个 TOML 文件会先解析和验证，只更新安装器负责的字段，并在同目录保留
 `*.bak.<时间戳>.<进程号>`；无效 TOML、重复目标字段或 symlink 配置会让安装器拒绝修改。

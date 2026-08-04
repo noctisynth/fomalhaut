@@ -332,6 +332,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 - [x] 添加根目录安全安装器：支持首次/更新构建、原子二进制与主题部署、TOML 备份验证更新、
       显式 greetd restart 和临时 system-root 集成测试。
+- [x] 让源码安装器在 Arch 上检查构建与运行包，按 `paru`、`yay`、`sudo pacman` 优先级安装
+      缺失的系统依赖；Rust 与 Bun 工具链由用户自行提供。
 - [ ] 确定 greetd、WebKit 和 Cage 的最低版本；Rust 继续跟随 stable。
 - [ ] 提供 systemd-tmpfiles 配置（如果需要状态或日志目录）。
 - [ ] 提供示例 greetd 配置和安装说明。

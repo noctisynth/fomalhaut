@@ -28,7 +28,8 @@ Options:
   -h, --help             Show this help.
 
 Existing TOML files are parsed, backed up, selectively updated, revalidated,
-and atomically replaced. Other sections are preserved.
+and atomically replaced. On Arch Linux, missing build and runtime packages are
+installed with paru, yay, or sudo pacman in that order.
 EOF
 }
 
@@ -89,8 +90,69 @@ done
 [[ "$cursor_size" =~ ^[0-9]+$ ]] || die "--cursor-size must be an integer"
 ((cursor_size >= 16 && cursor_size <= 256)) || die "--cursor-size must be between 16 and 256"
 
+install_arch_dependencies() {
+  [[ -f /etc/arch-release ]] || die "automatic dependency installation is supported only on Arch Linux"
+  command -v pacman >/dev/null 2>&1 || die "pacman is required on Arch Linux"
+  command -v sudo >/dev/null 2>&1 || die "sudo is required to install dependencies"
+
+  local package_manager
+  if command -v paru >/dev/null 2>&1; then
+    package_manager="paru"
+  elif command -v yay >/dev/null 2>&1; then
+    package_manager="yay"
+  else
+    package_manager="pacman"
+  fi
+
+  local -a required_packages=(
+    base-devel
+    cage
+    dbus
+    git
+    glib2
+    glibc
+    greetd
+    gtk4
+    libgcc
+    libsoup3
+    python
+    webkitgtk-6.0
+  )
+
+  local -a missing_packages=()
+  local package
+  for package in "${required_packages[@]}"; do
+    if ! pacman -T "$package" >/dev/null 2>&1; then
+      missing_packages+=("$package")
+    fi
+  done
+  if ((${#missing_packages[@]} == 0)); then
+    printf 'Arch build and runtime dependencies are already satisfied (preferred installer: %s).\n' \
+      "$package_manager"
+    return
+  fi
+
+  printf 'Installing missing dependencies with %s:\n' "$package_manager"
+  printf '  %s\n' "${missing_packages[@]}"
+  case "$package_manager" in
+    paru) paru -S --needed "${missing_packages[@]}" ;;
+    yay) yay -S --needed "${missing_packages[@]}" ;;
+    pacman) sudo pacman -S --needed "${missing_packages[@]}" ;;
+    *) die "internal package-manager selection is invalid" ;;
+  esac
+
+  hash -r
+  for package in "${required_packages[@]}"; do
+    pacman -T "$package" >/dev/null 2>&1 || die "dependency remains unsatisfied after installation: $package"
+  done
+}
+
+if [[ "$system_root" == "/" ]]; then
+  install_arch_dependencies
+fi
+
 for command in cargo bun python3 git install cp mv ln find grep chmod chown cat date; do
-  command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
+  command -v "$command" >/dev/null 2>&1 || die "required command is unavailable after dependency setup: $command"
 done
 
 if [[ -n "$display_scale" ]]; then
@@ -108,7 +170,6 @@ PY
 fi
 
 if [[ "$system_root" == "/" ]]; then
-  command -v sudo >/dev/null 2>&1 || die "sudo is required for a system installation"
   command -v getent >/dev/null 2>&1 || die "getent is required to validate the greeter account"
   [[ -x /usr/bin/dbus-run-session ]] || die "/usr/bin/dbus-run-session is required by the greetd command"
   [[ -x /usr/bin/cage ]] || die "/usr/bin/cage is required by the greetd command"
