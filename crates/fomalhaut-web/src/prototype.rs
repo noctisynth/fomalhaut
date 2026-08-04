@@ -91,6 +91,7 @@ fn prototype_state() -> Result<StateSnapshot, ProtocolErrorBody> {
         None,
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         None,
         Capabilities::disabled(),
     )

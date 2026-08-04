@@ -379,7 +379,9 @@ version，也不在本地执行 Semifold version/publish。自动任务发现 AU
 `dbus-run-session`，因此提供该命令的 `dbus` 同样是必需依赖。包同时依赖 Arch 的 `gtk4` 与
 `webkitgtk-6.0`。发布构建直接链接的 ABI 必须按当前 Arch 提供者显式声明；当前还包括
 `glib2`、`glibc`、`libgcc` 和 `libsoup3`，不得用聚合包或偶然的传递依赖替代。后续根据干净
-Arch 构建、ELF `NEEDED` 和 `namcap` 结果滚动维护；构建依赖使用 Arch 的 `cargo`。包安装
+Arch 构建、ELF `NEEDED` 和 `namcap` 结果滚动维护；构建依赖使用 Arch 的 `cargo`。
+`accountsservice` 只提供默认 `auto` 用户发现中的显示名和头像增强，缺失时仍能通过 glibc
+提供的 `/usr/bin/getent` 完成 NSS fallback，因此声明为 `optdepends` 而不是必需依赖。包安装
 `/usr/bin/fomalhaut`、上游许可证、配置文档和一份使用
 `/usr/bin/fomalhaut` 的 greetd/Cage 示例，但不得覆盖管理员的 `/etc/greetd/config.toml` 或
 `/etc/fomalhaut/config.toml`。
@@ -414,6 +416,61 @@ AUR 发布由独立的 GitHub Actions workflow 承担，并遵守以下边界：
   轮换主机密钥时，应先根据官方页面或公告核验新指纹，再通过普通代码评审更新 workflow，
   不需要额外维护 known-hosts secret。workflow 不在日志中输出私钥，不代表用户在本地创建
   AUR package，也不绕过 AUR 的 maintainer 审核责任。
+
+### 4.8 用户发现与头像资源
+
+用户发现是 Linux 宿主集成，不属于 greetd IPC core。首阶段在最终 `fomalhaut` crate 中以
+内部 provider trait 隔离系统来源，并把已经过滤、验证的公开摘要交给 `fomalhaut-web`
+controller；provider 稳定并出现其他宿主复用需求后，再评估提取独立 crate，不能为抽象而让
+`fomalhaut-core` 依赖 D-Bus、NSS 或文件系统。
+
+`/etc/fomalhaut/config.toml` 增加严格的 `[users]` 配置：
+
+```toml
+[users]
+provider = "auto"
+```
+
+provider 只接受 `auto`、`accounts_service`、`nss` 和 `none`，默认 `auto`。`auto` 优先调用
+system bus 上的 AccountsService `ListCachedUsers`；只有 system bus/服务不可用、无法激活、
+连接中断、调用超时、接口不兼容或顶层响应无法解析时才回退 NSS。明确的 D-Bus
+`AccessDenied` 不得回退，以免绕过管理员账户可见性策略；AccountsService 成功返回空列表、
+单个用户属性读取失败或全部条目被过滤时同样不得为了填充界面而回退。`accounts_service` 与
+`nss` 固定单一来源，`none` 禁用枚举。任何 provider 失败、超时或单个账户不合法都不能阻止
+greeter 启动：公开列表可以为空，手工用户名输入必须始终可用。整个发现任务在认证 worker
+初始化阶段的独立线程执行，并设有限时；GTK 主线程不得等待 D-Bus、NSS 或头像 I/O。
+
+AccountsService 只读取用户对象的 `Uid`、`UserName`、`RealName`、`IconFile`、
+`SystemAccount`、`Locked` 和可用于稳定排序的登录元数据。排除 system/locked account，跳过
+空、非 UTF-8、重复、越过协议上限的条目；显示名为空时回退到用户名。NSS fallback 固定以
+绝对路径、无 shell、固定参数执行 `/usr/bin/getent passwd`，让 NSS 的进程级枚举状态隔离在
+可终止的子进程中；前端和配置不得提供 executable、参数或环境。宿主清理继承环境，限制执行
+时间和标准输出总量，超时、超限、非零退出或非 UTF-8 输出时终止并回收子进程，且不得接受
+部分结果。解析结果使用 `/etc/login.defs` 的 `UID_MIN`/`UID_MAX`（读取失败时使用
+1000/60000 安全默认值）筛选普通账户，排除明确的 `nologin`/`false` shell，并把用户名同时
+作为显示名。最终列表去重、确定性排序并限制为 128 项。Fomalhaut 继续禁止生产代码中的
+`unsafe`，不得为进程内 `getpwent` 枚举放宽 workspace lint。
+
+前端公开用户类型为 `{ username, displayName, avatarUrl }`。用户列表是页面初始恢复状态的一
+部分，因此作为必填 `users` 数组直接加入 `state.get` 的 `StateSnapshot`，而不是引入独立
+`users.list` 请求。主题选择摘要后仍只通过既有 `auth.begin(username)` 开始认证；宿主不得因
+摘要存在就假定账户仍有效，greetd/PAM 继续是认证权威。
+
+AccountsService 的 `IconFile` 是宿主路径，绝不能直接作为 `file://`、原始路径或文件读取 API
+暴露给主题。头像代理遵守以下边界：
+
+- 使用不跟随最终 symlink 的只读文件句柄打开候选头像，随后基于该句柄检查普通文件、所有者、
+  长度和实际 `/proc/self/fd` 目标；只有文件属于对应 UID，或真实目标位于受信任的
+  `/var/lib/AccountsService/icons` 根内时才接受，避免把 greeter 可读的任意文件转成主题资源。
+- 单头像最多 2 MiB，只接受由固定 magic bytes 识别的 PNG、JPEG 或 WebP 栅格数据；拒绝 SVG、
+  HTML、扩展名推断和 AccountsService 提供的 MIME。读取使用打开后的同一文件描述符并再次
+  限长，避免检查与读取不同对象或无界增长。
+- 有效头像在宿主内存中映射为不透明、不可枚举文件路径的 `fomalhaut://avatar/<id>`；
+  `UserSummary.avatarUrl` 只有成功代理时才存在。现有 scheme handler 精确区分 `theme` 与
+  `avatar` host，只允许 GET 和已注册 ID，返回固定 MIME、`Cache-Control: no-store`，不开放
+  目录、原始路径、上传或任意读取。
+- NSS 用户、缺失头像和任何验证失败都返回 `avatarUrl = null`。失败日志只报告稳定类别，不
+  输出用户名、UID、IconFile、真实目标或图像内容。头像不是登录必要条件。
 
 ## 5. Core API
 
@@ -614,9 +671,10 @@ Cancelling ─────────────────────► Id
 success/error 不变量。无法解析出请求 ID 的畸形 JSON 不生成一个伪造 ID 的响应，由 bridge
 记录脱敏诊断并丢弃；已经解析出 ID 的错误必须关联原请求。
 
-公开状态快照包含：认证状态、当前 prompt（如有）、有限数量的近期 info/error 消息、可选
-session 摘要、当前选择的 session ID 和 capability。session 摘要只有 ID、显示名和 X11 /
-Wayland 类型。capability 中的 power action 列表在策略启用前为空。
+公开状态快照包含：认证状态、当前 prompt（如有）、有限数量的近期 info/error 消息、经过
+过滤的用户摘要、session 摘要、当前选择的 session ID 和 capability。用户摘要只有用户名、
+显示名和可选的不透明头像 URL；session 摘要只有 ID、显示名和 X11 / Wayland 类型。
+capability 中的 power action 列表在策略启用前为空。
 
 v1 事件至少包含：
 
@@ -634,7 +692,8 @@ v1 事件至少包含：
 展示的稳定类别文本，不透传 serde、greetd、PAM 或文件系统的原始错误内容。
 
 是否提供用户列表由系统配置决定。前端必须始终能够使用手工用户名输入，以兼容隐藏用户、
-网络用户以及无法从 NSS/AccountsService 枚举的账户。
+网络用户以及无法从 NSS/AccountsService 枚举的账户。用户摘要和头像不构成账户存在性、
+可登录性或认证成功的证明。
 
 ### 7.3 禁止开放的数据和能力
 
@@ -796,6 +855,8 @@ entrypoint = "index.html"
   CSS 和 JavaScript。
 - 启动时调用 `state.get`，展示可信 session 摘要并保持 host 给出的默认选择；用户改变选择时
   只发送 `session.select`。
+- 展示 `state.get` 中经过过滤的用户摘要和可选头像；选择摘要只填充其用户名，仍保留明确的
+  “其他用户”手工输入路径，头像加载失败使用主题自身的非个人化 fallback。
 - 一个表单先收集手工用户名，随后根据任意数量的 `auth.prompt` 动态切换 secret/visible
   输入。页面不假定 prompt 是密码，也不限制 PAM 轮数。
 - 每次提交认证回答都先从 DOM 读取值，立即清空输入框并释放页面侧引用，再等待
@@ -1098,6 +1159,10 @@ executable_search_paths = ["/usr/local/bin", "/usr/bin"]
 - Rust stable 或依赖升级引起的必要技术变动，仍须先更新本文和 `TODO.md` 再实施。
 - 第三方依赖跟随最新稳定版本，但通过 manifest 语义化约束和已提交 lockfile 保持构建可复现。
 - 前端协议单独维护整数主版本。
+- 在所有 package 仍处于 alpha release channel 期间，不承诺前端协议或 JSON Schema 向后
+  兼容；允许为了最佳结构直接修改同一协议主版本的字段、请求和约束，并同步 Rust、Schema、
+  SDK、内置主题与 changeset。进入 beta/rc/稳定通道前必须重新定义兼容承诺，此后不得沿用
+  该 alpha 例外。
 - 只修改手写 SDK Client 时只提升 `fomalhaut-sdk`；Rust wire 类型变化并改变生成产物时，
   changeset 必须同时包含 `fomalhaut-web` 和 `fomalhaut-sdk`。
 - 同一 host 至少支持其当前协议版本。
@@ -1113,7 +1178,6 @@ executable_search_paths = ["/usr/local/bin", "/usr/bin"]
 - 自定义 scheme 是否能在目标发行版上稳定提供所需 CSP 和 MIME 行为。
 - renderer sandbox 在不同发行版中的默认状态和配置方法。
 - 多显示器策略由 compositor 还是 Fomalhaut host 管理。
-- 用户发现使用 NSS、AccountsService，还是作为可选 provider。
 - session desktop entry 基本格式使用 `freedesktop-desktop-entry`，登录 session 的严格
   `Exec` 校验和安全策略由 `fomalhaut-session` 实现。
 - WebKitGTK、Cage 和 greetd 的最低兼容版本；Rust 工具链继续跟随 stable。当前开发依赖

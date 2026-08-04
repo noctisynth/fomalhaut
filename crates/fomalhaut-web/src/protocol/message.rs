@@ -5,10 +5,13 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use super::{
-    MAX_AUTH_MESSAGES, MAX_DISPLAY_TEXT_BYTES, MAX_SAFE_INTEGER, MAX_SESSION_ID_BYTES,
-    MAX_SESSION_NAME_BYTES, MAX_SESSIONS, PROTOCOL_VERSION, PromptId, ProtocolErrorBody,
+    MAX_AUTH_MESSAGES, MAX_AVATAR_URL_BYTES, MAX_DISPLAY_TEXT_BYTES, MAX_SAFE_INTEGER,
+    MAX_SESSION_ID_BYTES, MAX_SESSION_NAME_BYTES, MAX_SESSIONS, MAX_USER_DISPLAY_NAME_BYTES,
+    MAX_USERNAME_BYTES, MAX_USERS, PROTOCOL_VERSION, PromptId, ProtocolErrorBody,
     ProtocolValueError, RequestEnvelope, RequestId, value::validate_text,
 };
+
+const AVATAR_URL_PREFIX: &str = "fomalhaut://avatar/";
 
 /// Authentication lifecycle visible to the frontend.
 #[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
@@ -86,6 +89,66 @@ impl AuthMessage {
     pub fn new(level: MessageLevel, text: String) -> Result<Self, ProtocolValueError> {
         validate_text(&text, MAX_DISPLAY_TEXT_BYTES, true, false)?;
         Ok(Self { level, text })
+    }
+}
+
+/// Frontend-safe user metadata discovered by the trusted host.
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub struct UserSummary {
+    #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
+    username: String,
+    #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
+    display_name: String,
+    #[schemars(
+        inner(regex(pattern = r"^fomalhaut://avatar/[0-9]+$")),
+        extend("x-fomalhaut-maxUtf8Bytes" = 64)
+    )]
+    avatar_url: Option<String>,
+}
+
+impl UserSummary {
+    /// Constructs bounded public user metadata and validates a host-owned avatar URL.
+    pub fn new(
+        username: String,
+        display_name: String,
+        avatar_url: Option<String>,
+    ) -> Result<Self, ProtocolValueError> {
+        validate_text(&username, MAX_USERNAME_BYTES, false, true)?;
+        validate_text(&display_name, MAX_USER_DISPLAY_NAME_BYTES, false, true)?;
+        if let Some(url) = &avatar_url {
+            validate_text(url, MAX_AVATAR_URL_BYTES, false, true)?;
+            let Some(identifier) = url.strip_prefix(AVATAR_URL_PREFIX) else {
+                return Err(ProtocolValueError::InvalidCharacter);
+            };
+            if identifier.is_empty() || !identifier.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ProtocolValueError::InvalidCharacter);
+            }
+        }
+        Ok(Self {
+            username,
+            display_name,
+            avatar_url,
+        })
+    }
+
+    /// Returns the login name passed to `auth.begin` when this user is selected.
+    #[must_use]
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    /// Returns the human-readable label supplied by the trusted host.
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    /// Returns the optional opaque host-owned avatar URL.
+    #[must_use]
+    pub fn avatar_url(&self) -> Option<&str> {
+        self.avatar_url.as_deref()
     }
 }
 
@@ -167,6 +230,8 @@ pub struct StateSnapshot {
     #[schemars(length(max = 16))]
     messages: Vec<AuthMessage>,
     #[schemars(length(max = 128))]
+    users: Vec<UserSummary>,
+    #[schemars(length(max = 128))]
     sessions: Vec<SessionSummary>,
     #[schemars(extend("x-fomalhaut-maxUtf8Bytes" = 256))]
     selected_session_id: Option<String>,
@@ -179,11 +244,15 @@ impl StateSnapshot {
         authentication: AuthState,
         prompt: Option<Prompt>,
         messages: Vec<AuthMessage>,
+        users: Vec<UserSummary>,
         sessions: Vec<SessionSummary>,
         selected_session_id: Option<String>,
         capabilities: Capabilities,
     ) -> Result<Self, ProtocolValueError> {
-        if messages.len() > MAX_AUTH_MESSAGES || sessions.len() > MAX_SESSIONS {
+        if messages.len() > MAX_AUTH_MESSAGES
+            || users.len() > MAX_USERS
+            || sessions.len() > MAX_SESSIONS
+        {
             return Err(ProtocolValueError::TooManyItems);
         }
         if let Some(selected) = &selected_session_id {
@@ -196,6 +265,7 @@ impl StateSnapshot {
             authentication,
             prompt,
             messages,
+            users,
             sessions,
             selected_session_id,
             capabilities,
@@ -424,7 +494,7 @@ mod tests {
     use super::{
         AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
         ResponseEnvelope, ResponseResult, Sequence, SessionKind, SessionSelectedData,
-        SessionSummary, StateSnapshot,
+        SessionSummary, StateSnapshot, UserSummary,
     };
     use crate::protocol::{
         MAX_SAFE_INTEGER, ProtocolErrorBody, ProtocolErrorCode, ProtocolValueError, RequestId,
@@ -463,6 +533,14 @@ mod tests {
             AuthState::Idle,
             None,
             Vec::new(),
+            vec![
+                UserSummary::new(
+                    "alice".to_owned(),
+                    "Alice".to_owned(),
+                    Some("fomalhaut://avatar/1".to_owned()),
+                )
+                .expect("the user fixture is within bounds"),
+            ],
             vec![session],
             Some("wayland:sway".to_owned()),
             Capabilities::disabled(),
@@ -474,11 +552,38 @@ mod tests {
             None,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             Some("wayland:missing".to_owned()),
             Capabilities::disabled(),
         )
         .expect_err("a snapshot cannot select an absent session");
         assert_eq!(error, ProtocolValueError::UnknownSelection);
+    }
+
+    #[test]
+    fn user_summary_accepts_only_opaque_host_avatar_urls() {
+        assert!(
+            UserSummary::new(
+                "alice".to_owned(),
+                "Alice".to_owned(),
+                Some("fomalhaut://avatar/42".to_owned())
+            )
+            .is_ok()
+        );
+        for invalid in [
+            "file:///var/lib/AccountsService/icons/alice",
+            "fomalhaut://theme/avatar.png",
+            "fomalhaut://avatar/1?path=secret",
+        ] {
+            assert!(
+                UserSummary::new(
+                    "alice".to_owned(),
+                    "Alice".to_owned(),
+                    Some(invalid.to_owned())
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

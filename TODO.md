@@ -244,6 +244,25 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 编写前端协议快速入门。
 - [ ] 编写从纯 HTML 到框架构建产物的主题示例说明。
 
+## P1：用户发现与头像
+
+- [x] 在严格配置中加入 `auto`、`accounts_service`、`nss`、`none` 用户 provider，默认
+      AccountsService，只有整体不可用时回退 NSS；发现失败或超时不得阻止手工登录。
+- [x] 实现内部可替换 provider trait、AccountsService 只读 D-Bus provider 与固定执行
+      `/usr/bin/getent passwd` 的受限 NSS fallback；`AccessDenied`、成功空列表和逐项失败不得
+      触发 fallback，并覆盖超时、超限、失败、重复、越界与确定性排序测试。
+- [x] 为协议 `StateSnapshot` 增加最多 128 个 `UserSummary`，同步 Draft 2020-12 Schema、
+      ts-rs 生成类型、SDK 测试和所有 Rust controller 构造路径；alpha 阶段允许直接调整 v1。
+- [x] 实现不暴露原始路径的头像代理：nofollow 打开、文件所有权/AccountsService 根检查、
+      2 MiB 上限、PNG/JPEG/WebP magic allowlist、内存资源和精确
+      `fomalhaut://avatar/<id>` handler。
+- [x] 更新内置 minimal theme：展示用户、显示名和头像，同时始终保留“其他用户”手工输入与
+      头像失败 fallback。
+- [x] 更新配置、协议和主题作者文档；AUR 将 `accountsservice` 声明为显示名和头像的可选增强
+      依赖。
+- [ ] 在真实 greeter 环境验证 AccountsService 可用/不可用、NSS fallback、禁用枚举和无头像
+      场景。
+
 ## P2：安全加固
 
 - [ ] 编写正式 threat model。
@@ -316,7 +335,6 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
 ## P3：后续增强
 
-- [ ] 可插拔用户发现 provider（NSS、AccountsService 等）。
 - [ ] 可配置的用户头像 provider。
 - [ ] 记住上次用户和每用户上次 session。
 - [ ] 本地化 core 消息和示例主题。

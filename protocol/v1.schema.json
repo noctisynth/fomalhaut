@@ -713,6 +713,13 @@
             "$ref": "#/$defs/SessionSummary"
           },
           "maxItems": 128
+        },
+        "users": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UserSummary"
+          },
+          "maxItems": 128
         }
       },
       "additionalProperties": false,
@@ -720,6 +727,7 @@
         "authentication",
         "prompt",
         "messages",
+        "users",
         "sessions",
         "selectedSessionId",
         "capabilities"
@@ -752,6 +760,35 @@
         "id",
         "ok",
         "result"
+      ]
+    },
+    "UserSummary": {
+      "description": "Frontend-safe user metadata discovered by the trusted host.",
+      "type": "object",
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-fomalhaut-maxUtf8Bytes": 64
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "username",
+        "displayName",
+        "avatarUrl"
       ]
     }
   }

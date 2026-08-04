@@ -13,6 +13,7 @@ const EMPTY_STATE: StateSnapshot = {
   authentication: "idle",
   prompt: null,
   messages: [],
+  users: [],
   sessions: [],
   selectedSessionId: null,
   capabilities: { power: [] },

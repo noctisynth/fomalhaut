@@ -13,7 +13,7 @@ use crate::{
         AuthMessage, AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
         FrontendRequest, MAX_AUTH_MESSAGES, MessageLevel, Prompt, PromptId, PromptKind,
         ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope, ResponseResult,
-        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot,
+        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot, UserSummary,
     },
 };
 
@@ -94,6 +94,7 @@ pub struct HostController<T> {
     core_prompt: Option<CorePromptId>,
     messages: VecDeque<AuthMessage>,
     sessions: Vec<TrustedSession>,
+    users: Vec<UserSummary>,
     selected_session: Option<usize>,
     sequences: EventSequence,
 }
@@ -108,6 +109,16 @@ impl<T> HostController<T> {
     /// Wraps a connected core client with a host-resolved trusted session catalog.
     #[must_use]
     pub fn with_sessions(client: GreeterClient<T>, sessions: Vec<TrustedSession>) -> Self {
+        Self::with_catalogs(client, sessions, Vec::new())
+    }
+
+    /// Wraps a connected core client with trusted session and public user catalogs.
+    #[must_use]
+    pub fn with_catalogs(
+        client: GreeterClient<T>,
+        sessions: Vec<TrustedSession>,
+        users: Vec<UserSummary>,
+    ) -> Self {
         let authentication = map_state(client.state());
         let selected_session = (!sessions.is_empty()).then_some(0);
         Self {
@@ -117,6 +128,7 @@ impl<T> HostController<T> {
             core_prompt: None,
             messages: VecDeque::new(),
             sessions,
+            users,
             selected_session,
             sequences: EventSequence::default(),
         }
@@ -128,6 +140,7 @@ impl<T> HostController<T> {
             self.authentication,
             self.prompt.clone(),
             self.messages.iter().cloned().collect(),
+            self.users.clone(),
             self.sessions
                 .iter()
                 .map(|session| session.summary.clone())

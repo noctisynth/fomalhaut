@@ -24,6 +24,12 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
     <h1 id="title">Sign in</h1>
     <p class="introduction">Minimal example theme for the Fomalhaut frontend protocol.</p>
 
+    <section id="known-users" aria-labelledby="known-users-title" hidden>
+      <h2 id="known-users-title">Users</h2>
+      <div id="user-list"></div>
+      <button id="other-user" type="button">Other user</button>
+    </section>
+
     <form id="login-form">
       <label id="credential-label" for="credential">Username</label>
       <input id="credential" name="username" type="text" autocomplete="username"
@@ -81,6 +87,11 @@ h1 {
   margin: .15em 0;
 }
 
+h2 {
+  margin: 1.5rem 0 .65rem;
+  font-size: 1rem;
+}
+
 .introduction,
 .notice {
   color: #a8c4d3;
@@ -135,6 +146,40 @@ select:disabled {
   opacity: .55;
 }
 
+#user-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: .65rem;
+}
+
+.user-choice {
+  display: grid;
+  justify-items: center;
+  gap: .4rem;
+  color: #e6f5ff;
+  background: #0b202c;
+}
+
+.user-choice img,
+.user-fallback {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #183a4d;
+}
+
+.user-fallback {
+  display: grid;
+  place-items: center;
+}
+
+#other-user {
+  margin-top: .65rem;
+  color: #e6f5ff;
+  background: transparent;
+}
+
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -169,6 +214,9 @@ const APP_JS: &[u8] = br#"'use strict';
 const form = document.getElementById('login-form');
 const credentialLabel = document.getElementById('credential-label');
 const credential = document.getElementById('credential');
+const knownUsers = document.getElementById('known-users');
+const userList = document.getElementById('user-list');
+const otherUser = document.getElementById('other-user');
 const session = document.getElementById('session');
 const submit = document.getElementById('submit');
 const cancel = document.getElementById('cancel');
@@ -191,6 +239,10 @@ function updateControls() {
   session.disabled = disabled;
   submit.disabled = disabled;
   cancel.disabled = disabled;
+  otherUser.disabled = disabled || activePrompt !== null;
+  for (const button of userList.querySelectorAll('button')) {
+    button.disabled = disabled || activePrompt !== null;
+  }
 }
 
 function setBusy(value) {
@@ -210,6 +262,7 @@ function showUsernameInput() {
   if (!terminal) {
     credential.focus();
   }
+  updateControls();
 }
 
 function showPrompt(prompt) {
@@ -224,6 +277,7 @@ function showPrompt(prompt) {
   if (!terminal) {
     credential.focus();
   }
+  updateControls();
 }
 
 function addMessage(message) {
@@ -247,7 +301,47 @@ function setSessions(snapshot) {
   }
 }
 
+function selectKnownUser(username) {
+  if (busy || terminal || activePrompt) {
+    return;
+  }
+  credential.value = username;
+  credential.focus();
+}
+
+function setUsers(snapshot) {
+  userList.replaceChildren();
+  for (const user of snapshot.users) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'user-choice';
+    button.addEventListener('click', () => selectKnownUser(user.username));
+
+    const fallback = document.createElement('span');
+    fallback.className = 'user-fallback';
+    fallback.setAttribute('aria-hidden', 'true');
+    fallback.textContent = user.displayName.slice(0, 1).toLocaleUpperCase();
+    button.append(fallback);
+    if (user.avatarUrl) {
+      const avatar = document.createElement('img');
+      avatar.alt = '';
+      avatar.src = user.avatarUrl;
+      avatar.addEventListener('load', () => fallback.remove(), { once: true });
+      avatar.addEventListener('error', () => avatar.remove(), { once: true });
+      button.prepend(avatar);
+    }
+
+    const label = document.createElement('span');
+    label.textContent = user.displayName;
+    button.append(label);
+    userList.append(button);
+  }
+  knownUsers.hidden = snapshot.users.length === 0;
+  updateControls();
+}
+
 function applySnapshot(snapshot) {
+  setUsers(snapshot);
   setSessions(snapshot);
   messages.replaceChildren();
   for (const message of snapshot.messages) {
@@ -338,6 +432,13 @@ cancel.addEventListener('click', async () => {
   const response = await sendRequest('auth.cancel', {});
   if (response && !response.ok) {
     await refreshState();
+  }
+});
+
+otherUser.addEventListener('click', () => {
+  if (!busy && !terminal && !activePrompt) {
+    credential.value = '';
+    credential.focus();
   }
 });
 
@@ -480,6 +581,7 @@ mod tests {
 
         for control in [
             "id=\"login-form\"",
+            "id=\"known-users\"",
             "for=\"credential\"",
             "id=\"session\"",
             "aria-live=\"polite\"",
@@ -496,6 +598,8 @@ mod tests {
             assert!(script.contains(method));
         }
         assert!(script.contains("prompt.kind === 'secret'"));
+        assert!(script.contains("snapshot.users"));
+        assert!(script.contains("user.avatarUrl"));
         assert!(script.contains("message.sequence <= lastSequence"));
         assert!(!script.contains("innerHTML"));
         assert!(!script.contains("fetch("));

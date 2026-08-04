@@ -11,10 +11,12 @@ fomalhaut-core = { version = "0.1.0-alpha.0", path = "../fomalhaut-core" }
 fomalhaut-session = { version = "0.1.0-alpha.0", path = "../fomalhaut-session" }
 fomalhaut-web = { version = "0.1.0-alpha.0", path = "../fomalhaut-web" }
 gtk4 = "0.11.4"
+libc = "0.2.189"
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["net", "rt"] }
 toml = "1.1.4"
 webkit6 = { version = "0.6.1", features = ["gtk_v4_18"] }
+zbus = "5.18.0"
 
 [lints]
 workspace = true

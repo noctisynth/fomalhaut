@@ -24,6 +24,7 @@ const DEFAULT_X11_DIRS: [&str; 2] = ["/usr/local/share/xsessions", "/usr/share/x
 pub struct AppConfig {
     theme_directory: Option<PathBuf>,
     discovery: DiscoveryConfig,
+    users: UserDiscoveryConfig,
 }
 
 impl AppConfig {
@@ -32,11 +33,50 @@ impl AppConfig {
         load_from_path(Path::new(CONFIG_PATH))
     }
 
-    /// Consumes the configuration into its external theme and session discovery inputs.
+    /// Consumes the configuration into its theme, session, and user discovery inputs.
     #[must_use]
-    pub fn into_parts(self) -> (Option<PathBuf>, DiscoveryConfig) {
-        (self.theme_directory, self.discovery)
+    pub fn into_parts(self) -> (Option<PathBuf>, DiscoveryConfig, UserDiscoveryConfig) {
+        (self.theme_directory, self.discovery, self.users)
     }
+}
+
+/// Trusted user discovery policy selected by system configuration.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UserDiscoveryConfig {
+    provider: UserProvider,
+}
+
+impl UserDiscoveryConfig {
+    /// Returns the selected provider policy.
+    #[must_use]
+    pub const fn provider(self) -> UserProvider {
+        self.provider
+    }
+
+    /// Returns a policy that performs no system user enumeration.
+    #[must_use]
+    #[cfg(test)]
+    pub const fn disabled() -> Self {
+        Self {
+            provider: UserProvider::None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(provider: UserProvider) -> Self {
+        Self { provider }
+    }
+}
+
+/// Available system user discovery policies.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum UserProvider {
+    #[default]
+    Auto,
+    AccountsService,
+    Nss,
+    None,
 }
 
 #[derive(Default, Deserialize)]
@@ -44,6 +84,7 @@ impl AppConfig {
 struct RawConfig {
     frontend: Option<RawFrontend>,
     sessions: Option<RawSessions>,
+    users: Option<RawUsers>,
 }
 
 #[derive(Deserialize)]
@@ -58,6 +99,12 @@ struct RawSessions {
     wayland_dirs: Option<Vec<PathBuf>>,
     x11_dirs: Option<Vec<PathBuf>>,
     executable_search_paths: Option<Vec<PathBuf>>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawUsers {
+    provider: Option<UserProvider>,
 }
 
 /// Sanitized system configuration failure.
@@ -141,9 +188,13 @@ fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
         )
         .collect();
     let discovery = DiscoveryConfig::new(directories).with_executable_search_paths(executable);
+    let users = UserDiscoveryConfig {
+        provider: raw.users.unwrap_or_default().provider.unwrap_or_default(),
+    };
     Ok(AppConfig {
         theme_directory,
         discovery,
+        users,
     })
 }
 
@@ -173,9 +224,10 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("fomalhaut-missing-config-{}", std::process::id()));
         let config = load_from_path(&path).expect("an absent configuration uses defaults");
-        let (theme, discovery) = config.into_parts();
+        let (theme, discovery, users) = config.into_parts();
         assert_eq!(theme, None);
         assert_eq!(discovery.directories().len(), 4);
+        assert_eq!(users.provider(), super::UserProvider::Auto);
     }
 
     #[test]
@@ -193,11 +245,35 @@ mod tests {
         )
         .expect("configuration fixture is valid TOML");
         let config = validate(raw).expect("configuration fixture is semantically valid");
-        let (theme, discovery) = config.into_parts();
+        let (theme, discovery, _) = config.into_parts();
         assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/theme")));
         assert_eq!(discovery.directories().len(), 2);
         assert_eq!(discovery.directories()[0].path(), Path::new("/opt/first"));
         assert_eq!(discovery.directories()[1].path(), Path::new("/opt/second"));
+    }
+
+    #[test]
+    fn user_provider_is_strict_and_can_disable_enumeration() {
+        let raw = toml::from_str::<RawConfig>(
+            r#"
+                [users]
+                provider = "none"
+            "#,
+        )
+        .expect("user provider fixture is valid TOML");
+        let config = validate(raw).expect("user provider fixture is valid");
+        let (_, _, users) = config.into_parts();
+        assert_eq!(users.provider(), super::UserProvider::None);
+
+        assert!(
+            toml::from_str::<RawConfig>(
+                r#"
+                    [users]
+                    provider = "passwd"
+                "#,
+            )
+            .is_err()
+        );
     }
 
     #[test]

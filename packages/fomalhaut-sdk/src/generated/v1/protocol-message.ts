@@ -131,6 +131,7 @@ export type StateSnapshot = {
   authentication: AuthState;
   prompt: Prompt | null;
   messages: Array<AuthMessage>;
+  users: Array<UserSummary>;
   sessions: Array<SessionSummary>;
   selectedSessionId: string | null;
   capabilities: Capabilities;
@@ -141,6 +142,15 @@ export type SuccessResponse = {
   id: RequestId;
   ok: true;
   result: ResponseResult;
+};
+
+/**
+ * Frontend-safe user metadata discovered by the trusted host.
+ */
+export type UserSummary = {
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
 };
 
 /**

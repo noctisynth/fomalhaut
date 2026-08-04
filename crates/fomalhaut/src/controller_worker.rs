@@ -15,6 +15,11 @@ use fomalhaut_web::{
     protocol::RequestEnvelope,
 };
 
+use crate::{
+    config::UserDiscoveryConfig,
+    users::{AvatarAsset, discover_users},
+};
+
 const CHANNEL_CAPACITY: usize = 8;
 
 pub struct WorkerBatch {
@@ -25,7 +30,7 @@ pub struct WorkerBatch {
 }
 
 pub enum WorkerOutput {
-    Ready,
+    Ready(Vec<AvatarAsset>),
     Batch(WorkerBatch),
     Fatal(&'static str),
 }
@@ -69,12 +74,21 @@ impl WorkerHandle {
     pub fn spawn(
         socket_path: PathBuf,
         sessions: Vec<TrustedSession>,
+        users: UserDiscoveryConfig,
     ) -> Result<(Self, Receiver<WorkerOutput>), WorkerSpawnError> {
         let (command_sender, command_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         let (output_sender, output_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         let thread = thread::Builder::new()
             .name("fomalhaut-auth-controller".to_owned())
-            .spawn(move || run_worker(socket_path, sessions, command_receiver, output_sender))
+            .spawn(move || {
+                run_worker(
+                    socket_path,
+                    sessions,
+                    users,
+                    command_receiver,
+                    output_sender,
+                );
+            })
             .map_err(WorkerSpawnError)?;
 
         Ok((
@@ -122,9 +136,18 @@ impl Drop for WorkerHandle {
 fn run_worker(
     socket_path: PathBuf,
     sessions: Vec<TrustedSession>,
+    user_config: UserDiscoveryConfig,
     commands: Receiver<WorkerCommand>,
     outputs: SyncSender<WorkerOutput>,
 ) {
+    let discovered = match discover_users(user_config) {
+        Ok(discovered) => discovered,
+        Err(_) => {
+            eprintln!("Fomalhaut user discovery failed; manual login remains available");
+            Default::default()
+        }
+    };
+    let (users, avatars) = discovered.into_parts();
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .build()
@@ -146,8 +169,8 @@ fn run_worker(
             return;
         }
     };
-    let mut controller = HostController::with_sessions(client, sessions);
-    if outputs.send(WorkerOutput::Ready).is_err() {
+    let mut controller = HostController::with_catalogs(client, sessions, users);
+    if outputs.send(WorkerOutput::Ready(avatars)).is_err() {
         let _ = runtime.block_on(controller.cancel_for_lifecycle());
         return;
     }
@@ -225,6 +248,7 @@ mod tests {
     };
 
     use super::{WorkerHandle, WorkerOutput};
+    use crate::config::UserDiscoveryConfig;
     use fomalhaut_core::SessionCommand;
     use fomalhaut_web::{
         controller::TrustedSession,
@@ -323,12 +347,13 @@ mod tests {
         });
 
         let (worker, outputs) =
-            WorkerHandle::spawn(path.clone(), Vec::new()).expect("worker thread starts");
+            WorkerHandle::spawn(path.clone(), Vec::new(), UserDiscoveryConfig::disabled())
+                .expect("worker thread starts");
         assert!(matches!(
             outputs
                 .recv_timeout(Duration::from_secs(2))
                 .expect("worker reports readiness"),
-            WorkerOutput::Ready
+            WorkerOutput::Ready(avatars) if avatars.is_empty()
         ));
 
         let begin = decode_request(
@@ -473,12 +498,13 @@ mod tests {
         .expect("session command fixture is non-empty");
         let sessions = vec![TrustedSession::new(summary, command)];
         let (worker, outputs) =
-            WorkerHandle::spawn(path.clone(), sessions).expect("session-start worker starts");
+            WorkerHandle::spawn(path.clone(), sessions, UserDiscoveryConfig::disabled())
+                .expect("session-start worker starts");
         assert!(matches!(
             outputs
                 .recv_timeout(Duration::from_secs(2))
                 .expect("session-start worker reports readiness"),
-            WorkerOutput::Ready
+            WorkerOutput::Ready(avatars) if avatars.is_empty()
         ));
 
         let begin = decode_request(

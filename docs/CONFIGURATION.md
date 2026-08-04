@@ -50,6 +50,33 @@ window.addEventListener('fomalhaut:event', (event) => {
 `auth.*`/`session.*` 事件。主题可以读取其页面中输入的认证内容，因此管理员仍应只安装可信
 来源的主题。
 
+`state.get` 的 `users` 数组提供经过宿主过滤的 `username`、`displayName` 和可选
+`avatarUrl`。头像 URL 只会是宿主管理的 `fomalhaut://avatar/<id>`，主题不得尝试从用户名推导
+本地路径。用户列表可能为空，主题必须始终保留手工用户名输入；选择用户摘要后仍应将其
+`username` 传给 `auth.begin`，最终认证结果只由 greetd/PAM 决定。
+
+## 用户发现
+
+默认配置等价于：
+
+```toml
+[users]
+provider = "auto"
+```
+
+可选值如下：
+
+- `auto`：优先读取 AccountsService；服务整体不可用时通过固定的 `/usr/bin/getent passwd`
+  查询 NSS。AccountsService 明确拒绝访问、成功返回空列表或仅有无效条目时不会绕过其结果。
+- `accounts_service`：只读取 AccountsService，不执行 NSS fallback。
+- `nss`：只通过受限的 `getent passwd` 子进程读取 NSS。
+- `none`：完全禁用用户枚举。
+
+NSS 结果按照 `/etc/login.defs` 中的 `UID_MIN`/`UID_MAX` 和 login shell 过滤。AccountsService
+头像只有通过文件类型、所有权/可信目录、大小和 PNG/JPEG/WebP 内容检查后才会公开。任何发现
+失败都只产生空用户列表，不会阻止 greeter 启动或手工登录。需要显示名和头像时，应安装并启用
+AccountsService；NSS fallback 只提供用户名。
+
 ## Session 搜索目录
 
 可以覆盖 Wayland、X11 和相对 `TryExec` 的搜索目录：

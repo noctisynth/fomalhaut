@@ -34,6 +34,7 @@ use webkit6::{gio, glib, prelude::*};
 use crate::{
     config::AppConfig,
     controller_worker::{SubmitError, WorkerHandle, WorkerOutput},
+    users::AvatarAsset,
 };
 
 const APPLICATION_ID: &str = "org.fomalhautdm.Fomalhaut";
@@ -48,6 +49,14 @@ struct PendingReply {
     epoch: u64,
     context: javascriptcore::Context,
     reply: ScriptMessageReply,
+}
+
+struct WorkerOutputContext {
+    worker: Rc<WorkerHandle>,
+    page_epoch: Rc<Cell<u64>>,
+    pending_reply: Rc<RefCell<Option<PendingReply>>>,
+    failed: Rc<Cell<bool>>,
+    avatars: Rc<RefCell<Vec<AvatarAsset>>>,
 }
 
 /// Runs the native host until its GTK application exits.
@@ -84,7 +93,7 @@ fn build_window(
     application: &gtk::Application,
     failed: Rc<Cell<bool>>,
 ) -> Result<gtk::ApplicationWindow, HostError> {
-    let (theme_directory, discovery) = AppConfig::load()
+    let (theme_directory, discovery, user_discovery) = AppConfig::load()
         .map_err(|_| HostError::Configuration)?
         .into_parts();
     let theme = Rc::new(match theme_directory {
@@ -95,9 +104,10 @@ fn build_window(
     });
     let socket_path = greetd_socket_path()?;
     let sessions = discover_trusted_sessions(&discovery)?;
-    let (worker, outputs) =
-        WorkerHandle::spawn(socket_path, sessions).map_err(|_| HostError::WorkerSpawn)?;
+    let (worker, outputs) = WorkerHandle::spawn(socket_path, sessions, user_discovery)
+        .map_err(|_| HostError::WorkerSpawn)?;
     let worker = Rc::new(worker);
+    let avatars = Rc::new(RefCell::new(Vec::new()));
     let page_epoch = Rc::new(Cell::new(0));
     let pending_reply = Rc::new(RefCell::new(None));
 
@@ -105,7 +115,7 @@ fn build_window(
     context.set_automation_allowed(false);
     context.set_cache_model(CacheModel::DocumentViewer);
     context.set_spell_checking_enabled(false);
-    register_scheme(&context, Rc::clone(&theme))?;
+    register_scheme(&context, Rc::clone(&theme), Rc::clone(&avatars))?;
 
     let content_manager = UserContentManager::new();
     connect_bridge(
@@ -133,10 +143,13 @@ fn build_window(
         &web_view,
         application,
         outputs,
-        Rc::clone(&worker),
-        Rc::clone(&page_epoch),
-        Rc::clone(&pending_reply),
-        Rc::clone(&failed),
+        WorkerOutputContext {
+            worker: Rc::clone(&worker),
+            page_epoch: Rc::clone(&page_epoch),
+            pending_reply: Rc::clone(&pending_reply),
+            failed: Rc::clone(&failed),
+            avatars,
+        },
     );
     connect_web_view_policy(
         &web_view,
@@ -241,19 +254,27 @@ fn secure_settings() -> Settings {
         .build()
 }
 
-fn register_scheme(context: &WebContext, theme: Rc<ThemeSource>) -> Result<(), HostError> {
+fn register_scheme(
+    context: &WebContext,
+    theme: Rc<ThemeSource>,
+    avatars: Rc<RefCell<Vec<AvatarAsset>>>,
+) -> Result<(), HostError> {
     let security_manager = context
         .security_manager()
         .ok_or(HostError::MissingSecurityManager)?;
     security_manager.register_uri_scheme_as_secure("fomalhaut");
     security_manager.register_uri_scheme_as_display_isolated("fomalhaut");
     context.register_uri_scheme("fomalhaut", move |request| {
-        respond_to_scheme_request(request, &theme);
+        respond_to_scheme_request(request, &theme, &avatars.borrow());
     });
     Ok(())
 }
 
-fn respond_to_scheme_request(request: &URISchemeRequest, theme: &ThemeSource) {
+fn respond_to_scheme_request(
+    request: &URISchemeRequest,
+    theme: &ThemeSource,
+    avatars: &[AvatarAsset],
+) {
     if request.http_method().as_deref() != Some("GET") {
         finish_scheme_response(
             request,
@@ -265,7 +286,22 @@ fn respond_to_scheme_request(request: &URISchemeRequest, theme: &ThemeSource) {
         return;
     }
 
-    let asset = request.uri().as_deref().map(|uri| theme.resolve(uri));
+    let uri = request.uri();
+    if let Some(avatar) = uri
+        .as_deref()
+        .and_then(|uri| avatars.iter().find(|avatar| avatar.matches_uri(uri)))
+    {
+        finish_scheme_response(
+            request,
+            200,
+            "OK",
+            avatar.response_body(),
+            avatar.content_type(),
+        );
+        return;
+    }
+
+    let asset = uri.as_deref().map(|uri| theme.resolve(uri));
     match asset {
         Some(Ok(Some(asset))) => {
             let (body, content_type) = asset.into_parts();
@@ -436,17 +472,22 @@ fn connect_worker_outputs(
     web_view: &WebView,
     application: &gtk::Application,
     outputs: Receiver<WorkerOutput>,
-    worker: Rc<WorkerHandle>,
-    page_epoch: Rc<Cell<u64>>,
-    pending_reply: Rc<RefCell<Option<PendingReply>>>,
-    failed: Rc<Cell<bool>>,
+    context: WorkerOutputContext,
 ) {
+    let WorkerOutputContext {
+        worker,
+        page_epoch,
+        pending_reply,
+        failed,
+        avatars,
+    } = context;
     let web_view = web_view.downgrade();
     let application = application.downgrade();
     glib::timeout_add_local(CONTROLLER_POLL_INTERVAL, move || {
         loop {
             match outputs.try_recv() {
-                Ok(WorkerOutput::Ready) => {
+                Ok(WorkerOutput::Ready(discovered_avatars)) => {
+                    avatars.replace(discovered_avatars);
                     eprintln!("Fomalhaut authentication controller connected to greetd")
                 }
                 Ok(WorkerOutput::Batch(batch)) => {
