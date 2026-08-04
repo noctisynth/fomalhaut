@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.0"
 dependencies = [
  "fomalhaut-core",
  "fomalhaut-session",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-core"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.0"
 dependencies = [
  "greetd_ipc",
  "tokio",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-session"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.0"
 dependencies = [
  "fomalhaut-core",
  "freedesktop-desktop-entry",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-web"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.0"
 dependencies = [
  "cap-std",
  "fomalhaut-core",

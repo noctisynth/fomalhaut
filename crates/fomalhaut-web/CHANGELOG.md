@@ -1,0 +1,21 @@
+# Changelog
+
+## v0.1.0-alpha.0
+
+### Bug Fixes
+
+- [`2539c27`](https://github.com/noctisynth/fomalhaut/commit/2539c2726b8da516c9f856bf6c24548eafd730d2): Add required registry metadata and build the TypeScript SDK before Semifold publishes package artifacts.
+
+### Chores
+
+- [`a691626`](https://github.com/noctisynth/fomalhaut/commit/a69162609d734f4888af9da97ccf514ac439e874): Define frontend protocol v1 with strict bounded request decoding, zeroizing authentication responses, sequenced events, state snapshots, and generated JSON Schema.
+- [`b4089d9`](https://github.com/noctisynth/fomalhaut/commit/b4089d93828cf3d6b9b0780af2444b91023131bb): Prepare every workspace crate for the initial alpha release.
+
+### New Features
+
+- [`d413148`](https://github.com/noctisynth/fomalhaut/commit/d413148f6557a508b73ee3146742979116413d42): Replace the embedded bridge probe with an accessible, framework-free minimal login theme supporting trusted session selection, usernames, arbitrary PAM prompts, cancellation, bounded messages, busy states, and immediate credential input clearing.
+- [`777d95a`](https://github.com/noctisynth/fomalhaut/commit/777d95acf40e5d5284e1ecd2a065deedeacd1dfb): Connect the WebKitGTK bridge to a toolkit-independent authentication controller backed by the real greetd IPC transport, with bounded worker channels, page lifecycle isolation, sanitized failures, and stub coverage.
+- [`c83b998`](https://github.com/noctisynth/fomalhaut/commit/c83b9985975f8e4275cbd67d0071b82e8236544f): Add strict system configuration, capability-confined external theme loading, and configurable trusted session discovery paths.
+- [`184d0c6`](https://github.com/noctisynth/fomalhaut/commit/184d0c611786a65972478d5fb3f10097fe357dbe): Discover trusted desktop sessions, expose only bounded session metadata, validate frontend selection against the host catalog, automatically start the selected greetd session after authentication, and exit the WebKitGTK host on successful handoff.
+- [`af8105c`](https://github.com/noctisynth/fomalhaut/commit/af8105c738f1afc73bc67ac6e76f468db985ef0a): Generate module-aligned TypeScript protocol bindings and provide a typed WebKit client SDK with Bun-based validation and tests.
+- [`ef12f1b`](https://github.com/noctisynth/fomalhaut/commit/ef12f1b6544f6b9567950eeb4aee3c091b701b26): Add the native GTK4 and WebKitGTK host prototype with an isolated custom resource scheme, a protocol v1 bridge, hardened WebView policies, and embedded validation assets.
