@@ -283,7 +283,21 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 提供 systemd-tmpfiles 配置（如果需要状态或日志目录）。
 - [ ] 提供示例 greetd 配置和安装说明。
 - [ ] 提供 shell completions 和 man page（如 CLI 稳定）。
-- [ ] 准备 Arch、Nix 或其他首批目标发行版的打包方案。
+- [ ] 准备 Nix 或其他后续目标发行版的打包方案。
+- [x] 添加 `greetd-fomalhaut` AUR 源码包模板：将上游预发布 SemVer 映射为合法 Arch
+      `pkgver`，以 `pkgrel` 表达纯打包修订，并把 greetd、Cage、D-Bus、GTK4 和 WebKitGTK
+      6.0 声明为必需运行时依赖；按 ELF `NEEDED` 显式声明当前 Arch 的直接 ABI 提供者。
+- [x] 让 AUR 包安装 `/usr/bin/fomalhaut`、AGPL-3.0-only 许可证、配置文档和不覆盖系统配置的
+      greetd/Cage 示例；AUR 打包元数据单独使用 0BSD，并明确其不重新许可上游软件。
+- [x] 添加由成功 `Semifold CI` 和手动调度触发的 AUR workflow，只跟踪
+      `fomalhaut-v*`：校验 crates.io 可见性、避免重复版本、计算源码 SHA-256，并在干净 Arch
+      环境执行 frozen 构建、测试、`.SRCINFO` 生成和 `namcap`；自动发布不得降低已有
+      `pkgrel`，手动打包修订只接受严格递增值。
+- [x] 使用受保护的 `aur-production` Environment、人工审批和专用 SSH key 推送独立
+      `greetd-fomalhaut` AUR Git 仓库。
+- [ ] 在 GitHub 配置 AUR maintainer variables、`AUR_SSH_PRIVATE_KEY`、经过核验的
+      `AUR_SSH_KNOWN_HOSTS` secrets 和 `aur-production` 审批规则；最终应用标签产生后完成首次
+      clean Arch build、`namcap`、人工审批和 AUR 推送验证。
 - [ ] 编写升级和前端协议兼容说明。
 - [x] 使用 Semifold 生成的 status 与 CI workflow，由 GitHub Actions 独占 version 和
       publish。

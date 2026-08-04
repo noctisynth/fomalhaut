@@ -357,6 +357,61 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 `version = "0.1.0-alpha"`。初始化完成后，正常版本变更必须交给 Semifold，不再手工修改
 版本号。
 
+### 4.7 Arch Linux 与 AUR 发布
+
+Arch Linux 的首个发行版包名为 `greetd-fomalhaut`，由 AUR 从 Fomalhaut 的正式源码标签构建。
+它是版本化源码包，不使用 `-git` 或 `-bin` 后缀。AUR 发布只跟踪最终应用 package 的
+`fomalhaut-v*` 标签，不跟踪 `fomalhaut-core`、`fomalhaut-session`、`fomalhaut-web` 或
+`fomalhaut-sdk` 的独立标签；只有最终应用已经由 Semifold 完成发布并产生标签后，才能生成
+对应的 AUR 版本。
+
+上游 SemVer 与 Arch 版本分别保存：`_upstream_ver` 保留标签和 Cargo 使用的原始版本，例如
+`0.1.0-alpha.0`；`pkgver` 将其中 Arch 禁止的连字符转换为点，例如
+`0.1.0.alpha.0`。新上游版本从 `pkgrel=1` 开始。仅修复 AUR 打包而不发布新 Fomalhaut 版本
+时，通过手动触发发布流程、显式指定同一标签和更高 `pkgrel` 完成，不修改 Cargo package
+version，也不在本地执行 Semifold version/publish。自动任务发现 AUR 已有相同 `pkgver` 时，
+无论其当前 `pkgrel` 是多少都必须 no-op，避免把已经修订到更高 `pkgrel` 的包降级；手动任务
+对相同 `pkgver` 只接受严格高于 AUR 当前值的 `pkgrel`。
+
+`greetd-fomalhaut` 的标准部署以 greetd、Cage 和 Fomalhaut 组成完整图形登录链路。greetd
+不提供 Wayland compositor，而当前受支持且已经端到端验证的启动命令固定使用 Cage，因此
+`greetd` 与 `cage` 都是必需运行时依赖，不是 optional dependency。标准命令直接调用
+`dbus-run-session`，因此提供该命令的 `dbus` 同样是必需依赖。包同时依赖 Arch 的 `gtk4` 与
+`webkitgtk-6.0`。发布构建直接链接的 ABI 必须按当前 Arch 提供者显式声明；当前还包括
+`glib2`、`glibc`、`libgcc` 和 `libsoup3`，不得用聚合包或偶然的传递依赖替代。后续根据干净
+Arch 构建、ELF `NEEDED` 和 `namcap` 结果滚动维护；构建依赖使用 Arch 的 `cargo`。包安装
+`/usr/bin/fomalhaut`、上游许可证、配置文档和一份使用
+`/usr/bin/fomalhaut` 的 greetd/Cage 示例，但不得覆盖管理员的 `/etc/greetd/config.toml` 或
+`/etc/fomalhaut/config.toml`。
+
+许可证边界分为两层：Fomalhaut 源码和安装后的软件继续使用 `AGPL-3.0-only`，AUR
+`PKGBUILD` 的 `license` 字段也必须声明 `AGPL-3.0-only`；独立 AUR Git 仓库中的
+`PKGBUILD`、`.SRCINFO` 和随包提供的打包元数据使用 Arch 推荐的 `0BSD`，以保留未来进入
+官方仓库的资格。0BSD 只授权打包脚本，不重新许可 Fomalhaut 源码或二进制。上游仓库中的
+AUR 模板和随附的 0BSD 文件必须清楚标明这一作用范围。
+
+AUR 发布由独立的 GitHub Actions workflow 承担，并遵守以下边界：
+
+- workflow 在 `Semifold CI` 成功结束后运行，也允许管理员手动指定
+  `fomalhaut-v*` 标签与 `pkgrel` 重新发布打包修订。由于使用 `GITHUB_TOKEN` 的 workflow
+  所创建的标签不会可靠触发另一个 tag workflow，AUR 流程不得只依赖 tag push 事件。
+- 自动流程解析最新 `fomalhaut-v*` 标签，确认标签中的 `crates/fomalhaut` 版本一致且该版本
+  已经能从 crates.io 查询到；随后比较 AUR 当前 `greetd-fomalhaut` 版本，相同版本直接
+  no-op，不重复请求发布审批。
+- 发布前使用默认分支上的最新打包模板，在干净的 Arch Linux 环境渲染具体 `PKGBUILD`，
+  生成 `.SRCINFO`，使用锁文件和 `--frozen` 构建、运行测试，并使用 `namcap` 检查 recipe
+  与产物。实际被构建的源码仍严格来自选定的 `fomalhaut-v*` 标签 tarball，该 tarball 必须
+  使用计算出的 SHA-256，不允许 `SKIP`。这样打包修订可以修复旧上游版本的 recipe，而不要求
+  release tag 预先包含后来新增的发布工具。
+- 验证产物通过 artifact 传递给发布 job。发布 job 必须绑定受保护的
+  `aur-production` GitHub Environment，在人工批准后才使用专用 AUR SSH key 克隆并推送
+  `ssh://aur@aur.archlinux.org/greetd-fomalhaut.git`；AUR 仓库不作为主仓库 subtree 管理。
+- AUR maintainer 名称和邮箱使用 GitHub Environment/Repository variables 提供，SSH 私钥
+  与经过管理员核验的 `aur.archlinux.org` known-hosts 内容使用 Environment secrets 提供。
+  workflow 必须启用严格主机密钥检查，不得以运行时 `ssh-keyscan` 的未核验结果建立信任。
+  workflow 不在日志中输出私钥，不代表用户在本地创建 AUR package，也不绕过 AUR 的
+  maintainer 审核责任。
+
 ## 5. Core API
 
 以下 API 表达设计意图，具体命名可以在实现过程中调整：
