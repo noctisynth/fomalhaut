@@ -20,24 +20,28 @@ async function renderTheme(transport: MockTransport) {
 }
 
 describe("SPA authentication UI", () => {
-  test("keeps a single known user on the explicit selection screen", async () => {
+  test("skips selection and starts authentication for one known user", async () => {
     const transport = new MockTransport(
       snapshot([{ username: "alice", displayName: "Alice", avatarUrl: null }]),
     );
     await renderTheme(transport);
 
+    expect(screen.getByRole("heading", { name: "Alice" })).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Who’s signing in?" }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: /Alice/ })).toBeEnabled();
+      screen.queryByRole("heading", { name: "Who’s signing in?" }),
+    ).not.toBeInTheDocument();
     expect(transport.requests.map((request) => request.method)).toEqual([
       "state.get",
+      "auth.begin",
     ]);
   });
 
   test("opens known-user authentication after an explicit selection", async () => {
     const transport = new MockTransport(
-      snapshot([{ username: "alice", displayName: "Alice", avatarUrl: null }]),
+      snapshot([
+        { username: "alice", displayName: "Alice", avatarUrl: null },
+        { username: "bob", displayName: "Bob", avatarUrl: null },
+      ]),
     );
     await renderTheme(transport);
     const user = userEvent.setup();
@@ -47,6 +51,21 @@ describe("SPA authentication UI", () => {
     expect(screen.getByRole("heading", { name: "Alice" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Back to users" })).toBeVisible();
     expect(transport.requests.at(-1)).toMatchObject({ method: "auth.begin" });
+  });
+
+  test("centers all choices on a multi-user selection screen", async () => {
+    const transport = new MockTransport(
+      snapshot([
+        { username: "alice", displayName: "Alice", avatarUrl: null },
+        { username: "bob", displayName: "Bob", avatarUrl: null },
+      ]),
+    );
+    await renderTheme(transport);
+
+    expect(screen.getByTestId("account-list")).toHaveClass("justify-center");
+    expect(screen.getByRole("button", { name: /Alice/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Bob/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Other user/ })).toBeVisible();
   });
 
   test("shows username and disabled credential regions for another user", async () => {
@@ -107,7 +126,10 @@ describe("SPA authentication UI", () => {
 
   test("uses a non-personal fallback for an empty display name", async () => {
     const transport = new MockTransport(
-      snapshot([{ username: "alice", displayName: "", avatarUrl: null }]),
+      snapshot([
+        { username: "alice", displayName: "", avatarUrl: null },
+        { username: "bob", displayName: "Bob", avatarUrl: null },
+      ]),
     );
     await renderTheme(transport);
 

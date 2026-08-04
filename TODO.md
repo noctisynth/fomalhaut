@@ -253,9 +253,9 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 以可注入 `FomalhautClient`、runtime、Zustand vanilla store 和 React provider 实现
       `state.get`、全部 v1 事件、busy 背压、脱敏错误恢复以及选择/已知用户/其他用户/通用恢复
       SPA 状态，不持久化或记录 PAM 回答。
-- [x] 实现 Nocturne 设备登录界面：入口始终显式选择用户；已知用户进入大头像认证页并启动
-      PAM；“其他用户”页按顺序启用用户名和 prompt；取消成功后才能返回；同时覆盖时间日期、
-      可信 session、头像 fallback、任意轮 secret/visible prompt 和刷新恢复。
+- [x] 实现 Nocturne 设备登录界面：零/多用户使用整体居中的选择页，单用户跳过选择页并直接
+      启动 PAM；已知用户进入大头像认证页；“其他用户”页按顺序启用用户名和 prompt；取消成功
+      后才能返回；同时覆盖时间日期、可信 session、头像 fallback、任意轮 prompt 和刷新恢复。
 - [x] 实现仅 Vite DEV 动态加载的 `development-transport.ts`，生产缺少 WebKit bridge 时拒绝；
       源码审计禁止网络 API，构建检查不得包含 demo 标记、远程资源引用、inline script/style
       或越界资源；不对包含 ReactDOM 内部 stylesheet preload 的生产 bundle 使用字符串级

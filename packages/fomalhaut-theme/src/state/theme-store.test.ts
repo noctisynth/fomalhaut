@@ -11,7 +11,7 @@ const alice = {
 const bob = { username: "bob", displayName: "Bob", avatarUrl: null };
 
 describe("SPA identity selection", () => {
-  test.each([{ users: [] }, { users: [alice] }, { users: [alice, bob] }])(
+  test.each([{ users: [] }, { users: [alice, bob] }])(
     "always opens the selection screen for $users.length users",
     async ({ users }) => {
       const transport = new MockTransport(snapshot(users));
@@ -29,8 +29,25 @@ describe("SPA identity selection", () => {
     },
   );
 
-  test("starts authentication only after a known user is chosen", async () => {
+  test("skips selection and starts PAM for exactly one trusted user", async () => {
     const transport = new MockTransport(snapshot([alice]));
+    const client = new FomalhautClient(transport);
+    const runtime = createThemeStore(client);
+
+    await runtime.initialize();
+
+    expect(runtime.store.getState().screen).toEqual({
+      name: "known-user",
+      user: alice,
+    });
+    expect(transport.requests.map((request) => request.method)).toEqual([
+      "state.get",
+      "auth.begin",
+    ]);
+  });
+
+  test("starts authentication only after a known user is chosen", async () => {
+    const transport = new MockTransport(snapshot([alice, bob]));
     const client = new FomalhautClient(transport);
     const runtime = createThemeStore(client);
     await runtime.initialize();
@@ -144,7 +161,6 @@ test("cancels an active authentication before returning", async () => {
   const client = new FomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
-  await runtime.store.getState().chooseKnownUser(alice);
   transport.emit({
     protocol: 1,
     sequence: 1,
@@ -162,7 +178,6 @@ test("does not leave authentication when cancellation fails", async () => {
   const client = new FomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
-  await runtime.store.getState().chooseKnownUser(alice);
   transport.emit({
     protocol: 1,
     sequence: 1,
@@ -179,7 +194,7 @@ test("does not leave authentication when cancellation fails", async () => {
 });
 
 test("applies busy backpressure before requests reach the SDK", async () => {
-  const transport = new MockTransport(snapshot([alice]));
+  const transport = new MockTransport(snapshot([alice, bob]));
   transport.respondPromise = new Promise(() => undefined);
   const client = new FomalhautClient(transport);
   const runtime = createThemeStore(client);

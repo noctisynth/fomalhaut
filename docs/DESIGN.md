@@ -903,10 +903,11 @@ localStorage/sessionStorage，不保存或记录 PAM 回答。认证输入使用
 仍然成立。
 
 主题是单文档、无 URL router 的内存 SPA。Zustand 使用判别状态在用户选择页、已知用户认证页、
-其他用户认证页和身份未知的认证恢复页之间切换，不调用 history 或产生新的顶层导航。入口页
-始终只负责身份选择：零个摘要时只显示“其他用户”，一个或多个摘要时都不会自动进入认证页，
-已知用户与“其他用户”都是显式入口。用户点击已知摘要后才切换到以大头像、显示名、用户名和
-当前 session 为中心的认证页，并立即以其可信 `username` 调用 `auth.begin`。
+其他用户认证页和身份未知的认证恢复页之间切换，不调用 history 或产生新的顶层导航。零个摘要
+时入口页只显示“其他用户”；多个摘要时入口页将全部已知用户与“其他用户”作为一个整体水平
+居中，用户显式点击已知摘要后才进入认证页。恰好一个可信摘要时跳过选择页，直接进入以大头像、
+显示名、用户名和当前 session 为中心的已知用户认证页，并以其可信 `username` 调用
+`auth.begin`。多个用户的显式选择采用相同的认证页和 `auth.begin` 流程。
 
 “其他用户”页保持标准用户名与认证凭据的双区域布局，但受 greetd/PAM 顺序约束：初始只有
 用户名输入可用，凭据区域保留位置但禁用；用户确认用户名并完成 `auth.begin` 后，收到的
@@ -939,11 +940,11 @@ script/style、form navigation 或绝对资源 URL，并确认所有资源小于
 自身包含 stylesheet preload 的内部 `fetch` 实现；它不是主题发起网络访问的授权边界。网络
 隔离仍由主题源码审查、静态资源引用检查以及宿主 CSP/WebKit policy 共同强制执行。
 
-测试至少覆盖 store 初始恢复和事件转换、零/单/多用户均停留选择页、已知用户与其他用户分支、
-身份未知的活动认证恢复、session 选择、secret/visible 多轮 prompt、回答在异步请求完成前已从
-DOM 清空、busy 背压、取消失败不离开认证页、头像 fallback、文件命名和生产构建契约。CI 通过
-Bun 运行 Biome、TypeScript、Vitest 和 Vite build；最终还必须在 WebKitGTK 自定义 scheme 中
-验证 module script、CSS 与分块资源加载。
+测试至少覆盖 store 初始恢复和事件转换、零/多用户选择页、单用户跳过选择页并启动 PAM、居中
+用户集合、已知用户与其他用户分支、身份未知的活动认证恢复、session 选择、secret/visible
+多轮 prompt、回答在异步请求完成前已从 DOM 清空、busy 背压、取消失败不离开认证页、头像
+fallback、文件命名和生产构建契约。CI 通过 Bun 运行 Biome、TypeScript、Vitest 和 Vite build；
+最终还必须在 WebKitGTK 自定义 scheme 中验证 module script、CSS 与分块资源加载。
 
 ## 9. WebView 运行环境
 

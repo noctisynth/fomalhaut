@@ -188,14 +188,21 @@ export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
     initialize: async () => {
       try {
         const snapshot = await client.state.get();
+        const singleUser =
+          snapshot.users.length === 1 ? snapshot.users[0] : undefined;
         store.setState({
           phase: "ready",
           snapshot,
           screen: authenticationIsActive(snapshot.authentication)
             ? { name: "authentication-recovery" }
-            : { name: "user-selection" },
+            : singleUser
+              ? { name: "known-user", user: singleUser }
+              : { name: "user-selection" },
           error: null,
         });
+        if (!authenticationIsActive(snapshot.authentication) && singleUser) {
+          await store.getState().chooseKnownUser(singleUser);
+        }
       } catch (error) {
         store.setState({ phase: "failed", error: displayError(error) });
       }

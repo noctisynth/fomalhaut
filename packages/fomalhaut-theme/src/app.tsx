@@ -164,9 +164,10 @@ function UserSelectionView() {
 
       <div
         className={cn(
-          "mx-auto mt-10 grid max-w-3xl grid-cols-1 gap-3",
-          "sm:grid-cols-2 lg:grid-cols-3",
+          "mx-auto mt-10 flex max-w-4xl flex-wrap justify-center gap-3",
+          "[&>*]:w-full sm:[&>*]:w-64",
         )}
+        data-testid="account-list"
       >
         {users.map((user) => (
           <AccountTile
