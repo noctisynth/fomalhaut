@@ -406,11 +406,14 @@ AUR 发布由独立的 GitHub Actions workflow 承担，并遵守以下边界：
 - 验证产物通过 artifact 传递给发布 job。发布 job 必须绑定受保护的
   `aur-production` GitHub Environment，在人工批准后才使用专用 AUR SSH key 克隆并推送
   `ssh://aur@aur.archlinux.org/greetd-fomalhaut.git`；AUR 仓库不作为主仓库 subtree 管理。
-- AUR maintainer 名称和邮箱使用 GitHub Environment/Repository variables 提供，SSH 私钥
-  与经过管理员核验的 `aur.archlinux.org` known-hosts 内容使用 Environment secrets 提供。
-  workflow 必须启用严格主机密钥检查，不得以运行时 `ssh-keyscan` 的未核验结果建立信任。
-  workflow 不在日志中输出私钥，不代表用户在本地创建 AUR package，也不绕过 AUR 的
-  maintainer 审核责任。
+- AUR maintainer 名称和邮箱使用 GitHub Environment/Repository variables 提供，专用 SSH
+  私钥使用 Environment secret 提供。`aur.archlinux.org` 的官方 Ed25519 主机密钥指纹固定在
+  受代码审查的 workflow 中；运行时可以用 `ssh-keyscan` 自动取得完整公钥，但必须先计算
+  SHA-256 指纹并与固定值进行唯一匹配，匹配成功后才能把扫描结果用作 `known_hosts`。扫描
+  失败、出现多个不同指纹或指纹不匹配都必须 fail closed，不能禁用严格主机密钥检查。AUR
+  轮换主机密钥时，应先根据官方页面或公告核验新指纹，再通过普通代码评审更新 workflow，
+  不需要额外维护 known-hosts secret。workflow 不在日志中输出私钥，不代表用户在本地创建
+  AUR package，也不绕过 AUR 的 maintainer 审核责任。
 
 ## 5. Core API
 

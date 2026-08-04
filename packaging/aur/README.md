@@ -21,8 +21,13 @@ The protected `aur-production` environment needs these secrets:
 
 - `AUR_SSH_PRIVATE_KEY`: a dedicated, revocable key registered with the AUR
   account.
-- `AUR_SSH_KNOWN_HOSTS`: administrator-verified OpenSSH known-hosts entries for
-  `aur.archlinux.org`.
+
+The workflow obtains the current `aur.archlinux.org` Ed25519 host key with
+`ssh-keyscan`, then verifies that its unique SHA-256 fingerprint matches the
+official fingerprint pinned in the reviewed workflow before using it as
+`known_hosts`. A host-key rotation therefore fails closed until the new
+fingerprint is independently verified and committed; no known-hosts secret is
+needed.
 
 Configure required reviewers on `aur-production`. Automatic runs publish a new
 `fomalhaut-v*` application tag with `pkgrel=1`. Use the workflow's manual `tag`

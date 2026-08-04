@@ -19,6 +19,9 @@ on:
 permissions:
   contents: read
 
+env:
+  AUR_SSH_ED25519_FINGERPRINT: "SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4"
+
 concurrency:
   group: aur-greetd-fomalhaut
   cancel-in-progress: false
@@ -193,18 +196,35 @@ jobs:
       - name: Configure dedicated AUR SSH identity
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${AUR_SSH_PRIVATE_KEY}" || -z "${AUR_SSH_KNOWN_HOSTS}" ]]; then
-            echo "AUR SSH secrets are not configured" >&2
+          if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
+            echo "AUR SSH private key is not configured" >&2
             exit 1
           fi
 
           install -d -m 700 "${HOME}/.ssh"
           printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" >"${HOME}/.ssh/aur"
-          printf '%s\n' "${AUR_SSH_KNOWN_HOSTS}" >"${HOME}/.ssh/known_hosts"
+          ssh-keyscan -t ed25519 aur.archlinux.org >"${HOME}/.ssh/known_hosts"
+          if [[ ! -s "${HOME}/.ssh/known_hosts" ]]; then
+            echo "AUR SSH host key scan returned no keys" >&2
+            exit 1
+          fi
+
+          mapfile -t fingerprints < <(
+            ssh-keygen -E sha256 -lf "${HOME}/.ssh/known_hosts" |
+              awk '{print $2}' |
+              sort -u
+          )
+          if [[ ${#fingerprints[@]} -ne 1 ||
+            "${fingerprints[0]:-}" != "${AUR_SSH_ED25519_FINGERPRINT}" ]]; then
+            echo "AUR SSH host fingerprint mismatch" >&2
+            printf 'Expected: %s\n' "${AUR_SSH_ED25519_FINGERPRINT}" >&2
+            printf 'Received: %s\n' "${fingerprints[*]:-none}" >&2
+            exit 1
+          fi
+
           chmod 600 "${HOME}/.ssh/aur" "${HOME}/.ssh/known_hosts"
       - name: Push AUR repository
         env:

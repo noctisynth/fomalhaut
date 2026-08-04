@@ -295,9 +295,9 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       `pkgrel`，手动打包修订只接受严格递增值。
 - [x] 使用受保护的 `aur-production` Environment、人工审批和专用 SSH key 推送独立
       `greetd-fomalhaut` AUR Git 仓库。
-- [ ] 在 GitHub 配置 AUR maintainer variables、`AUR_SSH_PRIVATE_KEY`、经过核验的
-      `AUR_SSH_KNOWN_HOSTS` secrets 和 `aur-production` 审批规则；最终应用标签产生后完成首次
-      clean Arch build、`namcap`、人工审批和 AUR 推送验证。
+- [ ] 在 GitHub 配置 AUR maintainer variables、`AUR_SSH_PRIVATE_KEY` secret 和
+      `aur-production` 审批规则；最终应用标签产生后完成首次 clean Arch build、`namcap`、
+      自动扫描并核验固定的 AUR Ed25519 主机指纹、人工审批和 AUR 推送验证。
 - [ ] 编写升级和前端协议兼容说明。
 - [x] 使用 Semifold 生成的 status 与 CI workflow，由 GitHub Actions 独占 version 和
       publish。
