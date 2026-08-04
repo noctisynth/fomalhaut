@@ -19,6 +19,6 @@ pub enum GreeterState {
     Started,
     /// Waiting for greetd to cancel the active session.
     Cancelling,
-    /// Greetd rejected the operation and automatically cancelled its session.
+    /// Greetd rejected authentication and the client released its session.
     Failed,
 }

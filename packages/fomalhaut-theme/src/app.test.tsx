@@ -50,6 +50,9 @@ describe("SPA authentication UI", () => {
 
     expect(screen.getByRole("heading", { name: "Alice" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Back to users" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Back to users" }).closest("section"),
+    ).not.toHaveClass("zoom-in-95");
     expect(transport.requests.at(-1)).toMatchObject({ method: "auth.begin" });
   });
 
@@ -173,6 +176,58 @@ describe("SPA authentication UI", () => {
     expect(transport.requests.at(-1)).toMatchObject({
       method: "power.request",
       params: { action: "suspend" },
+    });
+  });
+
+  test("retries the same user after authentication failure", async () => {
+    const transport = new MockTransport(
+      snapshot([
+        { username: "alice", displayName: "Alice", avatarUrl: null },
+        { username: "bob", displayName: "Bob", avatarUrl: null },
+      ]),
+    );
+    await renderTheme(transport);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Alice/ }));
+
+    act(() => {
+      transport.emit({
+        protocol: 1,
+        sequence: 1,
+        event: "state.changed",
+        data: { state: "failed" },
+      });
+      transport.emit({
+        protocol: 1,
+        sequence: 2,
+        event: "auth.failed",
+        data: {},
+      });
+    });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "auth.begin",
+      params: { username: "alice" },
+    });
+  });
+
+  test("selects a session through the shadcn select popup", async () => {
+    const state = snapshot();
+    state.sessions = [
+      { id: "wayland", name: "Wayland", kind: "wayland" },
+      { id: "x11", name: "X11", kind: "x11" },
+    ];
+    const transport = new MockTransport(state);
+    await renderTheme(transport);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("combobox", { name: "Session" }));
+    await user.click(screen.getByRole("option", { name: "X11 · x11" }));
+
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "session.select",
+      params: { sessionId: "x11" },
     });
   });
 });

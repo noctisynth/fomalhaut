@@ -320,6 +320,7 @@ async fn authentication_failure_can_be_retried() {
             ExpectedRequest::Create("alice"),
             server_error(ErrorType::AuthError, "entered password was secret"),
         ),
+        step(ExpectedRequest::Cancel, Response::Success),
         step(ExpectedRequest::Create("alice"), Response::Success),
     ]);
     let mut client = GreeterClient::with_transport(transport);
@@ -337,7 +338,7 @@ async fn authentication_failure_can_be_retried() {
     client
         .create_session("alice".to_owned())
         .await
-        .expect("greetd automatically cancelled the failed attempt");
+        .expect("the failed greetd attempt was explicitly cancelled");
     assert_eq!(
         client
             .next_event()

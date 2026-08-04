@@ -61,7 +61,7 @@ pub enum GreeterEvent {
     Authenticated,
     /// The requested user session started successfully.
     SessionStarted,
-    /// Authentication failed. Greetd has already cancelled the session.
+    /// Authentication failed after the client cancelled the rejected greetd session.
     AuthenticationFailed,
     /// An active authentication session was cancelled.
     Cancelled,

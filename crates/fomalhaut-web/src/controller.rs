@@ -1033,6 +1033,7 @@ mod tests {
                 error_type: ErrorType::AuthError,
                 description: "raw PAM detail".to_owned(),
             },
+            Response::Success,
             Response::AuthMessage {
                 auth_message_type: AuthMessageType::Secret,
                 auth_message: "Password:".to_owned(),

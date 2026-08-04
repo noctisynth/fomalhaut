@@ -15,6 +15,7 @@ enum Operation {
     Authenticate,
     StartSession,
     Cancel,
+    CancelAfterAuthenticationFailure,
 }
 
 struct ScrubbedRequest(Request);
@@ -182,7 +183,7 @@ impl<T: Transport> GreeterClient<T> {
         self.drive(Request::CancelSession, Operation::Cancel).await
     }
 
-    async fn drive(&mut self, request: Request, operation: Operation) -> Result<(), CoreError> {
+    async fn drive(&mut self, request: Request, mut operation: Operation) -> Result<(), CoreError> {
         let mut request = ScrubbedRequest::new(request);
 
         loop {
@@ -203,6 +204,14 @@ impl<T: Transport> GreeterClient<T> {
                     mut description,
                 } => {
                     description.zeroize();
+                    if matches!(operation, Operation::Authenticate)
+                        && matches!(&error_type, ErrorType::AuthError)
+                    {
+                        self.state = GreeterState::Cancelling;
+                        request.replace(Request::CancelSession);
+                        operation = Operation::CancelAfterAuthenticationFailure;
+                        continue;
+                    }
                     return self.handle_server_error(error_type, operation);
                 }
                 Response::AuthMessage {
@@ -279,6 +288,11 @@ impl<T: Transport> GreeterClient<T> {
                 self.events.push_back(GreeterEvent::Cancelled);
                 Ok(())
             }
+            Operation::CancelAfterAuthenticationFailure => {
+                self.state = GreeterState::Failed;
+                self.events.push_back(GreeterEvent::AuthenticationFailed);
+                Ok(())
+            }
         }
     }
 
@@ -291,10 +305,6 @@ impl<T: Transport> GreeterClient<T> {
         self.active_prompt = None;
 
         match (operation, error_type) {
-            (Operation::Authenticate, ErrorType::AuthError) => {
-                self.events.push_back(GreeterEvent::AuthenticationFailed);
-                Ok(())
-            }
             (_, ErrorType::AuthError) => Err(CoreError::Server(ServerErrorKind::Authentication)),
             (_, ErrorType::Error) => Err(CoreError::Server(ServerErrorKind::General)),
         }
@@ -334,6 +344,9 @@ const fn operation_name(operation: Operation) -> &'static str {
         Operation::Authenticate => "authenticate",
         Operation::StartSession => "start session",
         Operation::Cancel => "cancel session",
+        Operation::CancelAfterAuthenticationFailure => {
+            "cancel session after authentication failure"
+        }
     }
 }
 

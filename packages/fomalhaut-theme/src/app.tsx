@@ -23,6 +23,13 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ThemeScreen } from "@/state/theme-store";
 import { useThemeStore } from "@/state/theme-store-provider";
@@ -341,7 +348,7 @@ function AuthenticationLayout({
     <section
       className={cn(
         "flex w-full max-w-md flex-col items-center gap-6",
-        "animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none",
+        "animate-in fade-in duration-200 motion-reduce:animate-none",
       )}
     >
       <Button
@@ -672,27 +679,32 @@ function SessionControl() {
       <Label className="sr-only" htmlFor="session">
         Session
       </Label>
-      <select
-        id="session"
-        className={cn(
-          "h-9 max-w-48 rounded-full border border-white/10 bg-black/20 px-4 text-sm",
-          "text-starlight backdrop-blur-xl outline-none transition",
-          "focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-        )}
-        value={snapshot.selectedSessionId ?? ""}
+      <Select
+        value={snapshot.selectedSessionId}
         disabled={busy}
-        onChange={(event) => void selectSession(event.currentTarget.value)}
+        onValueChange={(value) => {
+          if (value) {
+            void selectSession(value);
+          }
+        }}
       >
-        {!snapshot.selectedSessionId && (
-          <option value="">Choose session</option>
-        )}
-        {snapshot.sessions.map((session) => (
-          <option key={session.id} value={session.id}>
-            {session.name} · {session.kind}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger
+          id="session"
+          className={cn(
+            "max-w-52 border-white/10 bg-black/20 text-starlight backdrop-blur-xl",
+            "focus-visible:border-primary/60 focus-visible:ring-primary/30",
+          )}
+        >
+          <SelectValue placeholder="Choose session" />
+        </SelectTrigger>
+        <SelectContent side="top" align="end">
+          {snapshot.sessions.map((session) => (
+            <SelectItem key={session.id} value={session.id}>
+              {session.name} · {session.kind}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

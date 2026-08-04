@@ -551,7 +551,7 @@ Authenticating
     ├── AuthMessage::Secret  ──► WaitingForSecret
     ├── AuthMessage::Visible ──► WaitingForVisible
     ├── AuthMessage::Info/Error ─► 自动确认并继续
-    ├── Error::AuthError ───────► Failed
+    ├── Error::AuthError ───────► Cancelling ── CancelSession::Success ──► Failed
     └── Success ────────────────► Authenticated
 
 WaitingForSecret / WaitingForVisible
@@ -876,7 +876,8 @@ entrypoint = "index.html"
   `auth.message`、`auth.failed`、`auth.cancelled`、协议错误和 bridge 失败都以文本方式展示，
   不把消息作为 HTML 插入。
 - 使用原生 label、form、input、select、button、`aria-live` 和键盘提交提供最小无障碍能力。
-  登录失败或取消后恢复用户名输入；session 启动成功由 host 退出，不由页面导航处理。
+  greetd 返回认证错误后，Core 必须先发送 `CancelSession` 并确认旧会话释放，再向前端发布失败
+  状态；登录失败或取消后恢复用户名输入，session 启动成功由 host 退出，不由页面导航处理。
 
 该嵌入式主题已在真实 WebKitGTK/Wayland 实例中验证：allowlist 依次加载 HTML、CSS 和外部
 JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源不需要网络、内联脚本或
@@ -895,9 +896,10 @@ JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源�
 Zustand。依赖和脚本继续只由 Bun canary 管理；Vite 使用官方 React 与 Tailwind Vite plugin，
 并设置 `base = "./"`，确保所有构建资源相对于 `fomalhaut://theme/` 加载。项目不引入 router、
 SSR、服务端数据获取、CSS Modules、Sass、CSS-in-JS、远程字体或网络资源。shadcn 组件使用
-CSS variables 和 Luma 的圆角、柔和层级与宽松布局基础；首阶段只采用不依赖浮层定位和内联
-style 的 Button、Input、Label、Avatar、Alert、Separator 等组件，session 选择使用
-Tailwind/Luma token 修饰的原生 `select`，避免 portal/positioning 组件触碰当前严格 CSP。
+CSS variables 和 Luma 的圆角、柔和层级与宽松布局基础。session 选择使用 shadcn/ui Luma
+`Select`，不使用浏览器原生 `select`，避免 WebKit 与普通浏览器的 UA 样式差异。该组件允许
+使用 Base UI 自身的 portal/positioner；浮层仍只能存在于当前可信主题文档中，不允许新窗口、
+导航或放宽宿主 CSP。项目源码继续禁止手写 `style` prop 和内联 `<style>`。
 
 所有项目自有文件与目录使用 ASCII `kebab-case`；`package.json`、`components.json`、
 `tsconfig.json`、`index.html` 等生态固定单词文件名继续保持小写，Vite 配置显式命名为
@@ -919,6 +921,9 @@ localStorage/sessionStorage，不保存或记录 PAM 回答。认证输入使用
 居中，用户显式点击已知摘要后才进入认证页。恰好一个可信摘要时跳过选择页，直接进入以大头像、
 显示名、用户名和当前 session 为中心的已知用户认证页，并以其可信 `username` 调用
 `auth.begin`。多个用户的显式选择采用相同的认证页和 `auth.begin` 流程。
+
+认证页返回动作固定相对 viewport 定位，不得位于具有 transform/zoom 动画的祖先中；页面切换
+只使用不会改变 fixed containing block 的过渡，避免返回按钮在首帧从内容中心跳到屏幕角落。
 
 “其他用户”只作为选择页动作，不在认证页伪装成带头像和显示名的虚构账号。进入后直接显示
 标题为 “Sign in” 的标准手工登录表单，同时渲染用户名与认证凭据两个输入区域。两个区域统一
