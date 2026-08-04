@@ -334,9 +334,10 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
   `fomalhaut-sdk`，确保 npm `files = ["dist"]` 的发布内容在全新 runner 中真实存在。发布前可
   本地运行 `cargo package` 和 `npm pack --dry-run` 检查 payload，但仍严禁本地执行
   `cargo publish`、`npm publish`、`smif version` 或 `smif publish`。
-- `semifold-ci.yaml` 必须安装 `libwebkitgtk-6.0-dev`，让 `cargo publish` 对最终
-  `fomalhaut` crate 的 tarball 验证能够发现 GLib、GTK4 与 WebKitGTK pkg-config metadata；
-  不得通过跳过 Cargo verification 掩盖缺失的系统构建依赖。
+- `semifold-ci.yaml` 必须与基础 CI 一样固定使用 `ubuntu-26.04` 并安装
+  `libwebkitgtk-6.0-dev`，让 `cargo publish` 对最终 `fomalhaut` crate 的 tarball 验证能够
+  获得 GTK 4.18+ 以及对应的 GLib、WebKitGTK pkg-config metadata；`ubuntu-latest` 当前提供的
+  GTK 4.14 不满足 `webkit6/gtk_v4_18`，不得通过跳过 Cargo verification 掩盖构建基线不匹配。
 - Semifold 配置必须通过 `smif init`、`smif config` 等 CLI 维护，不手工模拟其输出。
 - Semifold 的 base branch 为 `main`，release branch 为 `release`。
 - `semifold-status.yaml` 在面向 `main` 的 pull request 上报告 changeset 状态。

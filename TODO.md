@@ -293,7 +293,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       并为 `fomalhaut-sdk` 补齐 npm repository metadata。
 - [x] 在 Semifold CI 发布前使用 frozen `bun.lock` 安装依赖并构建 SDK，确保 npm payload
       包含 `dist`。
-- [x] 在 Semifold CI 安装 WebKitGTK 开发包，使 `cargo publish` 可以验证最终 greeter crate。
+- [x] 将 Semifold CI runner 与基础 CI 对齐到 `ubuntu-26.04` 并安装 WebKitGTK 开发包，使
+      `cargo publish` 获得 GTK 4.18+ 并验证最终 greeter crate。
 - [x] 在首次正式发布前对四个 crate 执行 `cargo package` payload 检查，并对 SDK 执行
       `npm pack --dry-run`。
 - [ ] 完成许可证、第三方依赖和资源归属检查。
