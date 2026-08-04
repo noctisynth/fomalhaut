@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.0-alpha.1
+
+### Bug Fixes
+
+- [`6b88bac`](https://github.com/noctisynth/fomalhaut/commit/6b88bacc8e5d43ceafc88623f4fb2ce9a1549488): Accept trusted session entries that omit Type while rejecting explicit non-application types.
+
 ## v0.1.0-alpha.0
 
 ### Bug Fixes
