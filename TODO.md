@@ -17,6 +17,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
       由 GitHub Actions 执行。
 - [x] 统一使用英文编写 Semifold changeset。
 - [x] 添加基础 CI：格式检查、Clippy、单元测试和文档构建。
+- [x] 将基础 CI job 缩短为 `Checks`，并为 Rust 构建与 Bun package 下载配置 lockfile-aware
+      cache；Bun 依赖仍由 frozen lockfile 重建。
 - [x] 编写贡献说明和基础 README。
 
 ### Core 状态机

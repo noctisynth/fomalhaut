@@ -102,6 +102,12 @@ lint 或行为变化应作为正常维护工作及时修复，而不是通过固
 - 依赖升级必须通过格式、Clippy、测试和文档构建；如果升级需要改变技术方案，仍须先更新
   本文和 `TODO.md`。
 
+基础 GitHub Actions workflow 使用简短的 `Checks` job 名称，避免 check-run 名称重复罗列
+内部步骤。Rust 构建通过 `Swatinem/rust-cache@v2` 缓存 Cargo registry、Git 依赖和 workspace
+target；Bun canary 可执行文件由 `oven-sh/setup-bun@v2` 自身缓存，npm package 下载缓存则由
+`actions/cache@v5` 单独缓存 `~/.bun/install/cache`，并以 OS 与 `bun.lock` 内容生成 key。
+不得缓存整个 `node_modules`，依赖树仍必须由 `bun install --frozen-lockfile` 从 lockfile 重建。
+
 ```text
 fomalhaut/
 ├── Cargo.toml

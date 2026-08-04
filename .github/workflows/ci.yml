@@ -12,54 +12,65 @@ env:
 
 jobs:
   quality:
-    name: Format, lint, test, and document
+    name: Checks
     runs-on: ubuntu-26.04
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install native dependencies
+      - name: Install native packages
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends libwebkitgtk-6.0-dev
 
-      - name: Install stable Rust
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      - name: Install Bun canary
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: canary
 
-      - name: Record Bun canary revision
+      - name: Cache Bun packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Show Bun revision
         run: |
           bun --version
           bun --revision
 
-      - name: Install TypeScript dependencies
+      - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
-      - name: Check formatting
+      - name: Rustfmt
         run: cargo fmt --all --check
 
-      - name: Run Clippy
+      - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::unwrap_used
 
-      - name: Run tests
+      - name: Rust tests
         run: cargo test --workspace --all-targets
 
-      - name: Check generated TypeScript and SDK
+      - name: Check SDK
         run: bun run check:sdk
 
-      - name: Test TypeScript SDK
+      - name: SDK tests
         run: bun run --cwd packages/fomalhaut-sdk test
 
-      - name: Build TypeScript SDK
+      - name: Build SDK
         run: bun run --cwd packages/fomalhaut-sdk build
 
-      - name: Build documentation
+      - name: Rustdoc
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps
