@@ -14,6 +14,8 @@ use serde::Deserialize;
 
 const CONFIG_PATH: &str = "/etc/fomalhaut/config.toml";
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
+const MIN_DISPLAY_SCALE: f64 = 0.5;
+const MAX_DISPLAY_SCALE: f64 = 4.0;
 const DEFAULT_EXECUTABLE_DIRS: [&str; 2] = ["/usr/local/bin", "/usr/bin"];
 const DEFAULT_WAYLAND_DIRS: [&str; 2] = [
     "/usr/local/share/wayland-sessions",
@@ -27,6 +29,7 @@ pub struct AppConfig {
     discovery: DiscoveryConfig,
     users: UserDiscoveryConfig,
     power: PowerConfig,
+    display: DisplayConfig,
 }
 
 impl AppConfig {
@@ -44,8 +47,35 @@ impl AppConfig {
         DiscoveryConfig,
         UserDiscoveryConfig,
         PowerConfig,
+        DisplayConfig,
     ) {
-        (self.theme_directory, self.discovery, self.users, self.power)
+        (
+            self.theme_directory,
+            self.discovery,
+            self.users,
+            self.power,
+            self.display,
+        )
+    }
+}
+
+/// Validated WebKit presentation settings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplayConfig {
+    scale: f64,
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self { scale: 1.0 }
+    }
+}
+
+impl DisplayConfig {
+    /// Returns the page-content zoom multiplier.
+    #[must_use]
+    pub const fn scale(self) -> f64 {
+        self.scale
     }
 }
 
@@ -109,6 +139,7 @@ struct RawConfig {
     sessions: Option<RawSessions>,
     users: Option<RawUsers>,
     power: Option<RawPower>,
+    display: Option<RawDisplay>,
 }
 
 #[derive(Deserialize)]
@@ -137,6 +168,12 @@ struct RawPower {
     actions: Option<Vec<PowerAction>>,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawDisplay {
+    scale: Option<f64>,
+}
+
 /// Sanitized system configuration failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigError {
@@ -145,6 +182,7 @@ pub enum ConfigError {
     Parse,
     InvalidPath,
     InvalidPowerPolicy,
+    InvalidDisplayScale,
 }
 
 impl fmt::Display for ConfigError {
@@ -155,6 +193,9 @@ impl fmt::Display for ConfigError {
             Self::Parse => "the system configuration is invalid TOML",
             Self::InvalidPath => "the system configuration contains an invalid path",
             Self::InvalidPowerPolicy => "the system configuration contains an invalid power policy",
+            Self::InvalidDisplayScale => {
+                "the system configuration contains an invalid display scale"
+            }
         })
     }
 }
@@ -242,11 +283,21 @@ fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
         .filter(|action| configured_power.contains(action))
         .collect(),
     };
+    let display_scale = raw.display.unwrap_or_default().scale.unwrap_or(1.0);
+    if !display_scale.is_finite()
+        || !(MIN_DISPLAY_SCALE..=MAX_DISPLAY_SCALE).contains(&display_scale)
+    {
+        return Err(ConfigError::InvalidDisplayScale);
+    }
+    let display = DisplayConfig {
+        scale: display_scale,
+    };
     Ok(AppConfig {
         theme_directory,
         discovery,
         users,
         power,
+        display,
     })
 }
 
@@ -278,11 +329,12 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("fomalhaut-missing-config-{}", std::process::id()));
         let config = load_from_path(&path).expect("an absent configuration uses defaults");
-        let (theme, discovery, users, power) = config.into_parts();
+        let (theme, discovery, users, power, display) = config.into_parts();
         assert_eq!(theme, None);
         assert_eq!(discovery.directories().len(), 4);
         assert_eq!(users.provider(), super::UserProvider::Auto);
         assert!(power.actions().is_empty());
+        assert_eq!(display.scale(), 1.0);
     }
 
     #[test]
@@ -300,7 +352,7 @@ mod tests {
         )
         .expect("configuration fixture is valid TOML");
         let config = validate(raw).expect("configuration fixture is semantically valid");
-        let (theme, discovery, _, _) = config.into_parts();
+        let (theme, discovery, _, _, _) = config.into_parts();
         assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/theme")));
         assert_eq!(discovery.directories().len(), 2);
         assert_eq!(discovery.directories()[0].path(), Path::new("/opt/first"));
@@ -317,7 +369,7 @@ mod tests {
         )
         .expect("user provider fixture is valid TOML");
         let config = validate(raw).expect("user provider fixture is valid");
-        let (_, _, users, _) = config.into_parts();
+        let (_, _, users, _, _) = config.into_parts();
         assert_eq!(users.provider(), super::UserProvider::None);
 
         assert!(
@@ -341,7 +393,7 @@ mod tests {
         )
         .expect("power policy fixture is valid TOML");
         let config = validate(raw).expect("power policy fixture is valid");
-        let (_, _, _, power) = config.into_parts();
+        let (_, _, _, power, _) = config.into_parts();
         assert_eq!(
             power.actions(),
             &[PowerAction::Poweroff, PowerAction::Suspend]
@@ -367,6 +419,26 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn display_scale_accepts_fractional_zoom_and_rejects_unsafe_values() {
+        let raw = toml::from_str::<RawConfig>(
+            r#"
+                [display]
+                scale = 1.5
+            "#,
+        )
+        .expect("fractional display scale is valid TOML");
+        let config = validate(raw).expect("fractional display scale is within bounds");
+        let (_, _, _, _, display) = config.into_parts();
+        assert_eq!(display.scale(), 1.5);
+
+        for scale in ["0.49", "4.01", "nan", "+inf", "-inf"] {
+            let raw = toml::from_str::<RawConfig>(&format!("[display]\nscale = {scale}\n"))
+                .expect("invalid display scale fixture is valid TOML");
+            assert_eq!(validate(raw).err(), Some(ConfigError::InvalidDisplayScale));
+        }
     }
 
     #[test]

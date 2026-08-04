@@ -320,6 +320,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 测试 host 被终止时 greetd session 的清理行为。
 - [ ] 测试主题缺失、损坏和协议版本不匹配。
 - [ ] 测试多显示器和高 DPI 的基本行为。
+- [x] 实现严格的 `[display].scale` 配置并应用 WebKit 页面 zoom，覆盖默认值、小数倍率和非法
+      浮点/边界测试；光标缩放继续由 Cage 管理。
 - [ ] 测试非 ASCII 用户名、prompt 和 session 名称。
 - [x] 建立依赖和 Rust stable 滚动更新策略。
 

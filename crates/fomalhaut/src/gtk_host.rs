@@ -93,7 +93,7 @@ fn build_window(
     application: &gtk::Application,
     failed: Rc<Cell<bool>>,
 ) -> Result<gtk::ApplicationWindow, HostError> {
-    let (theme_directory, discovery, user_discovery, power) = AppConfig::load()
+    let (theme_directory, discovery, user_discovery, power, display) = AppConfig::load()
         .map_err(|_| HostError::Configuration)?
         .into_parts();
     let theme = Rc::new(match theme_directory {
@@ -137,6 +137,7 @@ fn build_window(
         .network_session(&network_session)
         .user_content_manager(&content_manager)
         .settings(&settings)
+        .zoom_level(display.scale())
         .default_content_security_policy(THEME_CSP)
         .build();
     connect_worker_outputs(

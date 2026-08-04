@@ -91,6 +91,26 @@ greeter 不依赖 Polkit 交互 agent。
 执行 shell 命令或回退到 `systemctl`。发行版的 Polkit/logind 策略仍须允许 `greeter` 用户执行
 相应操作，否则该动作不会显示或会返回脱敏错误。
 
+## 页面缩放
+
+独立的 Cage greeter 会话不会继承 KDE/GNOME 的显示缩放配置。可以为 WebKit 页面显式设置支持
+小数的缩放倍率：
+
+```toml
+[display]
+scale = 1.5
+```
+
+默认值为 `1.0`，允许范围为 `0.5` 到 `4.0`。该倍率通过 WebKit 的 `zoom-level` 缩放整个主题，
+不会修改主题代码，也不影响 Cage 绘制的鼠标光标。光标大小可在 greetd 命令中独立设置，例如：
+
+```toml
+command = "dbus-run-session env XCURSOR_SIZE=48 cage -s -m last -d -- /usr/bin/fomalhaut"
+```
+
+配置 `[display].scale` 后不应再设置 `GDK_SCALE`，以免工具包缩放与页面 zoom 叠加。对于桌面环境
+使用 `150%` 缩放的输出，通常配置 `scale = 1.5`。
+
 ## 用户发现
 
 默认配置等价于：

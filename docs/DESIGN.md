@@ -1143,6 +1143,9 @@ executable_search_paths = ["/usr/local/bin", "/usr/bin"]
 
 [power]
 actions = ["poweroff", "reboot", "suspend"]
+
+[display]
+scale = 1.5
 ```
 
 - `frontend` 缺失时选择内嵌 minimal theme；存在时只包含绝对主题目录，入口和协议版本由目录
@@ -1153,13 +1156,17 @@ actions = ["poweroff", "reboot", "suspend"]
 - `power` 缺失时所有电源动作关闭。`actions` 是至多三个互不重复的枚举 allowlist，只接受
   `poweroff`、`reboot` 和 `suspend`；显式空数组等同关闭。配置顺序不影响 capability 的稳定
   顺序，宿主固定按 poweroff、reboot、suspend 排列，并与 logind 当前返回 `yes` 的动作求交集。
+- `display` 缺失时页面缩放倍率为 `1.0`。`scale` 是应用于 WebKit `zoom-level` 的有限浮点数，
+  允许范围为 `0.5..=4.0`；它缩放整个主题页面内容并支持小数倍率，不负责 Cage 光标大小，
+  也不尝试从不可靠的 EDID 物理尺寸自动推断 DPI。管理员应按照 greeter 所在输出显式配置，
+  例如与桌面环境的 `1.5` 倍缩放保持一致。
 - 首个切片不加入可配置网络、CSP、开发者工具或任意 header。安全策略仍是编译期拒绝式常量，
   避免把主题配置扩展成降低宿主边界的权限开关。
 - 日志目标和记忆用户/session 继续留作后续字段；在实现前未知字段会被拒绝，不能
   提前依赖未承诺的配置键。
 
 配置与外部主题纵向切片已用自动化测试验证：配置缺失时安全回退、未知字段和相对路径拒绝、
-显式 session 优先级、64 KiB 上限、清单 protocol/入口校验、URI 语法、MIME 白名单、顶层导航
+显示缩放边界、显式 session 优先级、64 KiB 上限、清单 protocol/入口校验、URI 语法、MIME 白名单、顶层导航
 限制、配置根 symlink、根内相对 symlink、根外 symlink 拒绝以及资源读取边界。完整 workspace
 测试同时继续覆盖真实 Unix socket greetd 流程；内嵌主题仍通过 Wayland/WebKitGTK 运行探针
 验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。
