@@ -580,6 +580,12 @@ npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockf
 执行 publish；该命令只能由 GitHub Actions 中的 `semifold ci` 间接调用。根 private package
 不登记为 Semifold 发布包，只同步 `packages/fomalhaut-sdk`。
 
+由于 npm trusted publishing 不能在 package 首次创建前完成关联，首次发布允许一个临时的
+bootstrap 凭据例外：`semifold-ci` 仅在 `Semifold CI` 步骤把 GitHub Actions Secret
+`NPM_TOKEN` 映射为 npm 识别的 `NODE_AUTH_TOKEN`。token 不得写入仓库、日志或其他步骤；
+`fomalhaut-sdk` 首次发布成功并完成 trusted publisher 配置后，必须删除该环境变量，恢复为
+仅使用 OIDC provenance 的发布流程。
+
 Fomalhaut 有意跟随 Bun 的滚动 canary，以使用稳定版尚未发布的 Rust 实现开发线；不把它写成
 尚不存在的稳定 `1.4.0`。本地工具链必须是 `bun upgrade --canary` 所选择的 canary，GitHub
 Actions 必须使用 `oven-sh/setup-bun@v2` 且显式设置 `bun-version: canary`，不得省略后回退到
