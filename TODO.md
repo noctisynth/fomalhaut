@@ -287,6 +287,7 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 编写升级和前端协议兼容说明。
 - [x] 使用 Semifold 生成的 status 与 CI workflow，由 GitHub Actions 独占 version 和
       publish。
+- [x] 将 status 与 CI workflow 的 Semifold CLI pin 到本地一致的 `0.3.0-rc.1`。
 - [ ] 完成许可证、第三方依赖和资源归属检查。
 - [ ] 发布前执行完整安全检查和端到端测试。
 

@@ -20,6 +20,8 @@ jobs:
         uses: actions/checkout@v6
       - name: Setup Semifold
         uses: noctisynth/setup-semifold@main
+        with:
+          version: 0.3.0-rc.1
       - name: Install Bun canary
         uses: oven-sh/setup-bun@v2
         with:

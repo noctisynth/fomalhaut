@@ -323,6 +323,10 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 - `semifold-ci.yaml` 在推送到 `main` 后运行 `semifold ci`，由 Semifold 编排 version 或
   publish 阶段。生成的 workflow 可以使用 CLI 的长命令名 `semifold`，本地文档统一使用
   短命令名 `smif`。
+- `semifold-status.yaml` 与 `semifold-ci.yaml` 必须通过 `setup-semifold` 的 `version` 输入
+  pin 到和仓库本地开发环境一致的 Semifold CLI 版本；当前统一使用 `0.3.0-rc.1`，不得依赖
+  action 的 latest release 默认值。升级 Semifold 时必须在同一变更中同步两处 workflow 并
+  验证本地版本。
 
 本地允许的 Semifold 操作限于 changeset 创建、只读状态查询和配置维护，例如
 `smif commit`、`smif status`、`smif config sync` 和 `smif config channel`。本地验证不得
