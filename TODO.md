@@ -46,6 +46,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 测试多轮 MFA 流程。
 - [x] 测试 visible、secret、info 和 error 的混合流程。
 - [x] 测试认证失败后重新认证。
+- [x] 复核错误密码的 `AuthError → CancelSession → Failed → auth.begin` 恢复链路，以及活动取消、
+      已释放失败会话返回和 PAM error 消息重试清理行为。
 - [x] 测试无密码账户。
 - [x] 测试 session 启动成功和失败。
 - [x] 测试 socket 断开及主动取消。
@@ -78,6 +80,7 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 解析 Wayland desktop session。
 - [x] 解析 X11 desktop session。
 - [x] 处理 `Hidden`、`NoDisplay`、无效布尔值、无效 `TryExec`、无效 `Exec` 和重复项。
+- [x] 兼容省略 `Type` 的 Plasma session desktop entry，同时继续拒绝显式非 Application 类型。
 - [x] 严格解析 `Exec` argv，拒绝除 `%%` 外的 field code，且不经 shell 执行。
 - [x] 配置 session 搜索目录及优先级。
 - [x] 将 session ID 映射为只在 Rust 内部可见的 `SessionCommand`。

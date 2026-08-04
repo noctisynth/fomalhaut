@@ -148,7 +148,7 @@ fn load_entry(
     if strict_bool(&entry, "NoDisplay")?.unwrap_or(false) {
         return Err(RejectionReason::NoDisplay);
     }
-    if entry.type_() != Some("Application") {
+    if entry.type_().is_some_and(|kind| kind != "Application") {
         return Err(RejectionReason::UnsupportedType);
     }
 
@@ -383,6 +383,10 @@ mod tests {
             &sessions.join("wrong-type.desktop"),
             "[Desktop Entry]\nType=Link\nName=Wrong Type\nExec=session\n",
         );
+        write(
+            &sessions.join("type-omitted.desktop"),
+            "[Desktop Entry]\nName=Plasma (Wayland)\nExec=startplasma-wayland\nDesktopNames=KDE\n",
+        );
 
         let report = discover(
             &DiscoveryConfig::new(vec![SessionDirectory::new(sessions, SessionKind::Wayland)])
@@ -390,7 +394,13 @@ mod tests {
         )
         .expect("readable fixtures can be discovered");
 
-        assert_eq!(report.catalog().len(), 1);
+        assert_eq!(report.catalog().len(), 2);
+        assert!(
+            report
+                .catalog()
+                .sessions()
+                .any(|session| session.name() == "Plasma (Wayland)")
+        );
         let reasons = report
             .rejections()
             .iter()

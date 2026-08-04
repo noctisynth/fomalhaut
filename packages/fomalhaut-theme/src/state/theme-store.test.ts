@@ -173,6 +173,69 @@ test("cancels an active authentication before returning", async () => {
   expect(runtime.store.getState().screen.name).toBe("user-selection");
 });
 
+test("does not cancel again after greetd has released a failed attempt", async () => {
+  const transport = new MockTransport(snapshot([alice, bob]));
+  const client = new FomalhautClient(transport);
+  const runtime = createThemeStore(client);
+  await runtime.initialize();
+  await runtime.store.getState().chooseKnownUser(alice);
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "state.changed",
+    data: { state: "failed" },
+  });
+  transport.emit({
+    protocol: 1,
+    sequence: 2,
+    event: "auth.failed",
+    data: {},
+  });
+  const requestsBeforeReturn = transport.requests.length;
+
+  expect(await runtime.store.getState().cancelAndReturn()).toBe(true);
+  expect(transport.requests).toHaveLength(requestsBeforeReturn);
+  expect(runtime.store.getState().screen.name).toBe("user-selection");
+});
+
+test("clears PAM failure feedback before retrying the same user", async () => {
+  const transport = new MockTransport(snapshot([alice, bob]));
+  const client = new FomalhautClient(transport);
+  const runtime = createThemeStore(client);
+  await runtime.initialize();
+  await runtime.store.getState().chooseKnownUser(alice);
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "auth.message",
+    data: {
+      level: "error",
+      text: "Authenticator could not perform the requested operation",
+    },
+  });
+  transport.emit({
+    protocol: 1,
+    sequence: 2,
+    event: "state.changed",
+    data: { state: "failed" },
+  });
+  transport.emit({
+    protocol: 1,
+    sequence: 3,
+    event: "auth.failed",
+    data: {},
+  });
+
+  expect(runtime.store.getState().snapshot?.messages).toHaveLength(1);
+  expect(await runtime.store.getState().retryAuthentication()).toBe(true);
+  expect(runtime.store.getState().snapshot?.messages).toEqual([]);
+  expect(runtime.store.getState().error).toBeNull();
+  expect(transport.requests.at(-1)).toMatchObject({
+    method: "auth.begin",
+    params: { username: "alice" },
+  });
+});
+
 test("does not leave authentication when cancellation fails", async () => {
   const transport = new MockTransport(snapshot([alice]));
   const client = new FomalhautClient(transport);

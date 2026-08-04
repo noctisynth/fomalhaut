@@ -205,7 +205,9 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
   不属于兼容 API，前端必须将其视为不透明值。ID 不包含绝对路径。
 - 相同 `SessionId` 只处理最高优先级目录中的第一个文件；即使该文件被隐藏或校验失败，
   也不回退到低优先级同 ID 文件，避免选择结果随错误类型产生意外变化。
-- 只接受 `Type=Application`、非空 `Name` 和非空且可解析的 `Exec`。`Hidden=true`、
+- session desktop entry 省略 `Type` 时兼容接受，显式存在时只接受 `Type=Application`；这是为
+  兼容 Plasma 等由发行版提供、语义明确但省略应用菜单字段的登录 session。仍要求非空 `Name`
+  和非空且可解析的 `Exec`。`Hidden=true`、
   `NoDisplay=true`、无效布尔值、无效 UTF-8、无效 `TryExec` 和不支持的 `Exec` field code
   均拒绝进入可选列表。
 - `Exec` 按 Desktop Entry 的双引号和反斜杠规则转换为 argv；登录 session 不需要文件或

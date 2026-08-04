@@ -69,7 +69,7 @@ pub enum RejectionReason {
     Hidden,
     /// `NoDisplay=true` suppresses this identifier.
     NoDisplay,
-    /// The entry is not `Type=Application`.
+    /// The entry has an explicit type other than `Type=Application`.
     UnsupportedType,
     /// The localized display name is absent or empty.
     MissingName,
