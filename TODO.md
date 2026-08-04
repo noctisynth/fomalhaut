@@ -338,6 +338,7 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 让源码安装器在 Arch 上检查构建与运行包，按 `paru`、`yay`、`sudo pacman` 优先级安装
       缺失的系统依赖；Rust 与 Bun 工具链由用户自行提供。
 - [x] 让源码安装器达到内容级幂等：连续相同安装不新增二进制/配置备份或主题 release。
+- [x] 为源码安装器添加遵守 TTY 与 `NO_COLOR` 的分级彩色输出。
 - [ ] 确定 greetd、WebKit 和 Cage 的最低版本；Rust 继续跟随 stable。
 - [ ] 提供 systemd-tmpfiles 配置（如果需要状态或日志目录）。
 - [ ] 提供示例 greetd 配置和安装说明。

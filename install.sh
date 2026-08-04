@@ -12,6 +12,63 @@ cursor_size="48"
 greeter_user="greeter"
 restart_greetd=false
 
+color_reset=""
+color_bold=""
+color_blue=""
+color_green=""
+color_cyan=""
+color_yellow=""
+color_red=""
+color_error_reset=""
+color_dim=""
+styled_output=false
+if [[ -t 1 && -z "${NO_COLOR+x}" && "${TERM:-dumb}" != "dumb" ]]; then
+  styled_output=true
+  color_reset=$'\033[0m'
+  color_bold=$'\033[1m'
+  color_blue=$'\033[34m'
+  color_green=$'\033[32m'
+  color_cyan=$'\033[36m'
+  color_yellow=$'\033[33m'
+  color_dim=$'\033[2m'
+fi
+if [[ -t 2 && -z "${NO_COLOR+x}" && "${TERM:-dumb}" != "dumb" ]]; then
+  color_red=$'\033[31m'
+  color_error_reset=$'\033[0m'
+fi
+
+log_title() {
+  printf '%s%s==>%s %s\n' "$color_bold" "$color_blue" "$color_reset" "$1"
+}
+
+log_step() {
+  printf '%s::%s %s\n' "$color_blue" "$color_reset" "$1"
+}
+
+log_success() {
+  printf '%s✓%s %s\n' "$color_green" "$color_reset" "$1"
+}
+
+log_unchanged() {
+  printf '%s=%s %s\n' "$color_cyan" "$color_reset" "$1"
+}
+
+log_warning() {
+  printf '%s!%s %s\n' "$color_yellow" "$color_reset" "$1"
+}
+
+log_note() {
+  printf '%s%s%s\n' "$color_dim" "$1" "$color_reset"
+}
+
+run_build_command() {
+  if $styled_output; then
+    "$@"
+  else
+    env NO_COLOR=1 CLICOLOR=0 CARGO_TERM_COLOR=never CI=1 "$@"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Build and install Fomalhaut and the Nocturne reference theme.
@@ -34,7 +91,7 @@ EOF
 }
 
 die() {
-  printf 'install.sh: %s\n' "$*" >&2
+  printf '%sinstall.sh: error:%s %s\n' "$color_red" "$color_error_reset" "$*" >&2
   exit 1
 }
 
@@ -90,6 +147,8 @@ done
 [[ "$cursor_size" =~ ^[0-9]+$ ]] || die "--cursor-size must be an integer"
 ((cursor_size >= 16 && cursor_size <= 256)) || die "--cursor-size must be between 16 and 256"
 
+log_title "Fomalhaut source installer"
+
 install_arch_dependencies() {
   [[ -f /etc/arch-release ]] || die "automatic dependency installation is supported only on Arch Linux"
   command -v pacman >/dev/null 2>&1 || die "pacman is required on Arch Linux"
@@ -128,13 +187,12 @@ install_arch_dependencies() {
     fi
   done
   if ((${#missing_packages[@]} == 0)); then
-    printf 'Arch build and runtime dependencies are already satisfied (preferred installer: %s).\n' \
-      "$package_manager"
+    log_success "Arch dependencies satisfied (preferred installer: $package_manager)"
     return
   fi
 
-  printf 'Installing missing dependencies with %s:\n' "$package_manager"
-  printf '  %s\n' "${missing_packages[@]}"
+  log_step "Installing missing dependencies with $package_manager"
+  printf '  %s•%s %s\n' "$color_dim" "$color_reset" "${missing_packages[@]}"
   case "$package_manager" in
     paru) paru -S --needed "${missing_packages[@]}" ;;
     yay) yay -S --needed "${missing_packages[@]}" ;;
@@ -152,7 +210,7 @@ if [[ "$system_root" == "/" ]]; then
   install_arch_dependencies
 fi
 
-for command in cargo bun python3 git install cp mv ln find grep chmod chown cat cmp diff readlink date; do
+for command in cargo bun python3 git install cp mv ln find grep chmod chown cat cmp diff readlink date env; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable after dependency setup: $command"
 done
 
@@ -201,7 +259,8 @@ update_toml() {
   shift
   ((${#@} % 4 == 0)) || die "internal TOML update arguments are malformed"
 
-  run_privileged python3 - "$path" "$@" <<'PY'
+  run_privileged python3 - "$path" "$color_green" "$color_cyan" "$color_yellow" \
+    "$color_reset" "$@" <<'PY'
 import json
 import math
 import os
@@ -214,7 +273,8 @@ import time
 import tomllib
 
 path = Path(sys.argv[1])
-raw_updates = sys.argv[2:]
+success_color, unchanged_color, warning_color, color_reset = sys.argv[2:6]
+raw_updates = sys.argv[6:]
 if len(raw_updates) % 4:
     raise SystemExit("TOML update arguments must be groups of four")
 if path.is_symlink():
@@ -306,7 +366,7 @@ for section, key, kind, raw in updates:
         raise SystemExit(f"generated TOML did not preserve [{section}].{key}")
 
 if path.exists() and new_text == old_text:
-    print(f"Unchanged {path}")
+    print(f"{unchanged_color}={color_reset} Unchanged {path}")
     raise SystemExit(0)
 
 path.parent.mkdir(parents=True, exist_ok=True)
@@ -316,7 +376,7 @@ if old_stat is not None:
     backup = path.with_name(f"{path.name}.bak.{stamp}.{os.getpid()}")
     shutil.copy2(path, backup)
     os.chown(backup, old_stat.st_uid, old_stat.st_gid)
-    print(f"Backed up {path} to {backup}")
+    print(f"{warning_color}!{color_reset} Backed up {path} to {backup}")
 
 descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
 temporary = Path(temporary_name)
@@ -340,7 +400,7 @@ finally:
     if temporary.exists():
         temporary.unlink()
 
-print(f"Updated {path}")
+print(f"{success_color}✓{color_reset} Updated {path}")
 PY
 }
 
@@ -369,14 +429,14 @@ PY
 cd -- "$SCRIPT_DIR"
 [[ -f Cargo.lock && -f bun.lock && -f package.json ]] || die "run from a complete Fomalhaut checkout"
 
-printf '%s\n' 'Building the release binary...'
-cargo build --release --locked -p fomalhaut
+log_step "Building the release binary"
+run_build_command cargo build --release --locked -p fomalhaut
 
-printf '%s\n' 'Installing frozen Bun dependencies...'
-bun install --frozen-lockfile
+log_step "Installing frozen Bun dependencies"
+run_build_command bun install --frozen-lockfile
 
-printf '%s\n' 'Building the Nocturne theme...'
-bun run build:theme
+log_step "Building the Nocturne theme"
+run_build_command bun run build:theme
 
 binary_source="$SCRIPT_DIR/target/release/fomalhaut"
 theme_source="$SCRIPT_DIR/packages/fomalhaut-theme/dist"
@@ -402,7 +462,7 @@ binary_temporary="$binary_directory/.fomalhaut.new.$install_id"
 
 if [[ -f "$binary_path" && ! -L "$binary_path" && -x "$binary_path" ]] \
   && run_privileged cmp -s -- "$binary_source" "$binary_path"; then
-  printf 'Unchanged %s\n' "$runtime_binary"
+  log_unchanged "Unchanged $runtime_binary"
 else
   run_privileged install -d -m 0755 -- "$binary_directory"
   if [[ -e "$binary_path" || -L "$binary_path" ]]; then
@@ -410,7 +470,7 @@ else
   fi
   run_privileged install -m 0755 -- "$binary_source" "$binary_temporary"
   run_privileged mv -fT -- "$binary_temporary" "$binary_path"
-  printf 'Installed %s\n' "$runtime_binary"
+  log_success "Installed $runtime_binary"
 fi
 
 readonly theme_runtime="/etc/fomalhaut/themes/nocturne"
@@ -434,7 +494,7 @@ if [[ -L "$theme_path" && -d "$theme_path" ]]; then
 fi
 
 if $theme_unchanged; then
-  printf 'Unchanged %s\n' "$theme_runtime"
+  log_unchanged "Unchanged $theme_runtime"
 else
   run_privileged install -d -m 0755 -- "$theme_parent" "$release_base" "$release_path"
   run_privileged cp -a -- "$theme_source/." "$release_path/"
@@ -452,11 +512,11 @@ else
       run_privileged mv -T -- "$legacy_path" "$theme_path"
       die "theme symlink switch failed; the previous directory was restored"
     fi
-    printf 'Preserved the previous theme directory at %s\n' "$legacy_path"
+    log_warning "Preserved the previous theme directory at $legacy_path"
   else
     run_privileged mv -fT -- "$theme_link_temporary" "$theme_path"
   fi
-  printf 'Installed theme release %s\n' "$theme_runtime"
+  log_success "Installed theme release $theme_runtime"
 fi
 
 run_privileged install -d -m 0755 -- "${fomalhaut_config%/*}" "${greetd_config%/*}"
@@ -479,7 +539,8 @@ update_toml "$greetd_config" "${greetd_updates[@]}"
 if $restart_greetd; then
   command -v systemctl >/dev/null 2>&1 || die "systemctl is required by --restart"
   run_privileged systemctl restart greetd
-  printf '%s\n' 'Restarted greetd.'
+  log_success "Restarted greetd"
 else
-  printf '%s\n' 'Installation complete. Run `sudo systemctl restart greetd` when it is safe to end the current greeter session.'
+  log_success "Installation complete"
+  log_note 'Run `sudo systemctl restart greetd` when it is safe to end the current greeter session.'
 fi
