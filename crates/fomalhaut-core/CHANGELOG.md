@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.0-alpha.1
+
+### Bug Fixes
+
+- [`fadd8c8`](https://github.com/noctisynth/fomalhaut/commit/fadd8c80dd9e79d7f9e6b019276476aad45ec560): Fix authentication retry cleanup, stabilize login navigation, and use the Luma Select for sessions.
+
 ## v0.1.0-alpha.0
 
 ### Bug Fixes

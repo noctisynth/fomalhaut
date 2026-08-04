@@ -1,13 +1,13 @@
 [package]
 name = "fomalhaut-session"
 edition = "2024"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 description = "Trusted desktop session discovery and launch resolution for Fomalhaut"
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-fomalhaut-core = { version = "0.1.0-alpha.0", path = "../fomalhaut-core" }
+fomalhaut-core = { version = "0.1.0-alpha.1", path = "../fomalhaut-core" }
 freedesktop-desktop-entry = { version = "0.8.1", default-features = false }
 
 [lints]
