@@ -227,6 +227,7 @@ describe("SPA authentication UI", () => {
     expect(trigger).toHaveTextContent("Wayland · wayland");
 
     await user.click(trigger);
+    expect(document.querySelector('[data-slot="select-group"]')).not.toBeNull();
     await user.click(screen.getByRole("option", { name: "X11 · x11" }));
 
     expect(transport.requests.at(-1)).toMatchObject({

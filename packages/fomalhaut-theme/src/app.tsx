@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -705,11 +706,13 @@ function SessionControl() {
           </SelectValue>
         </SelectTrigger>
         <SelectContent side="top" align="end">
-          {snapshot.sessions.map((session) => (
-            <SelectItem key={session.id} value={session.id}>
-              {session.name} · {session.kind}
-            </SelectItem>
-          ))}
+          <SelectGroup>
+            {snapshot.sessions.map((session) => (
+              <SelectItem key={session.id} value={session.id}>
+                {session.name} · {session.kind}
+              </SelectItem>
+            ))}
+          </SelectGroup>
         </SelectContent>
       </Select>
     </div>
