@@ -11,6 +11,50 @@ session 默认目录；文件存在但无法读取、包含未知字段或验证
 ./install.sh --display-scale 1.5
 ```
 
+### 显示缩放
+
+建议安装时显式传入 `--display-scale`。Fomalhaut 运行在独立的 Cage 会话中，不会继承 KDE、
+GNOME 等桌面环境的缩放设置；现在许多笔记本和 HiDPI 显示器需要 `1.5` 或 `2.0`。无需缩放的
+显示器通常使用 `1.0`，允许范围为 `0.5` 到 `4.0`。
+
+如果首次安装时省略该选项，新配置会使用 `1.0`；更新安装时省略则保留已有配置值。光标大小
+由独立的 `--cursor-size` 控制。
+
+### 全新安装
+
+使用适合显示器的缩放倍率运行安装器：
+
+```sh
+./install.sh --display-scale 1.5
+```
+
+安装器不会自动启用 greetd。请从文本控制台执行以下命令；如果当前仍在图形会话中，请先保存
+工作：
+
+```sh
+sudo systemctl enable --now greetd.service
+```
+
+### 从其他显示管理器迁移
+
+先运行安装器，不要使用 `--restart`：
+
+```sh
+./install.sh --display-scale 1.5
+```
+
+保存工作并切换到文本控制台。通过 `display-manager.service` 确认当前服务，先禁用并停止原显示
+管理器，然后再启用 greetd。以下示例从 SDDM 迁移：
+
+```sh
+systemctl status display-manager.service
+sudo systemctl disable --now sddm.service
+sudo systemctl enable --now greetd.service
+```
+
+请将 `sddm.service` 替换为实际服务，例如 `gdm.service` 或 `lightdm.service`。不要同时启用两个
+显示管理器。
+
 脚本必须由普通用户执行；构建阶段不使用 root，只在写系统目录时调用 `sudo`。默认安装结果为：
 
 - `/usr/local/bin/fomalhaut`
@@ -35,7 +79,9 @@ AccountsService 是可选的用户资料增强，不会被强制安装。`--syst
 主题 release 或配置替换；只有对应内容确实变化时才生成备份并原子切换。
 交互终端中，安装器使用颜色区分步骤、成功、未变化、备份和错误；设置 `NO_COLOR=1` 可以禁用
 颜色。输出被重定向或通过管道处理时会自动使用纯文本。
-安装成功后默认不重启 greetd，避免结束当前图形会话。确认可以退出当前会话时，可显式执行：
+安装器不检查 greetd 是否已经设为开机启动，也不检测或禁用其他显示管理器。`--restart` 只会
+执行 `systemctl restart greetd`，适用于已经使用 greetd 的系统更新，不会为全新安装启用服务。
+确认可以退出当前会话并且 greetd 已经启用时，可执行：
 
 ```sh
 ./install.sh --display-scale 1.5 --restart

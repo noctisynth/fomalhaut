@@ -1,19 +1,49 @@
-# 贡献指南
+# Contributing to Fomalhaut
 
-感谢你对 Fomalhaut 的关注。
+Thank you for helping improve Fomalhaut. Bug reports, design discussions,
+documentation, themes, tests, and code contributions are all welcome.
 
-## 开始之前
+## Before you start
 
-1. 阅读 [`docs/DESIGN.md`](docs/DESIGN.md)，了解当前技术方案和安全边界。
-2. 阅读 [`TODO.md`](TODO.md)，确认工作是否已经列入计划。
-3. 阅读 [`AGENTS.md`](AGENTS.md)，遵守仓库的实施、错误处理和 Cargo manifest 约定。
+Check [TODO.md](TODO.md) and the issue tracker to see whether the work is already
+planned or in progress. For substantial features, protocol changes, or changes
+to a security boundary, open a discussion or issue before investing in an
+implementation.
 
-如果实现需要改变架构、协议、安全边界、兼容性或依赖选择，应先更新 `docs/DESIGN.md`，
-再更新 `TODO.md`，然后再实现代码。
+The [technical design](docs/DESIGN.md) describes the architecture and trust
+model. The [configuration guide](docs/CONFIGURATION.md) covers installation,
+system configuration, and external themes.
 
-## 本地检查
+## Development environment
 
-提交变更前请运行：
+The project uses the latest stable Rust toolchain and Bun canary. Building the
+complete application also requires the GTK 4 and WebKitGTK 6.0 development
+libraries; the platform requirements are listed in the
+[installation guide](docs/CONFIGURATION.md).
+
+Clone the repository and install the JavaScript workspace dependencies:
+
+```sh
+git clone https://github.com/noctisynth/fomalhaut.git
+cd fomalhaut
+bun install --frozen-lockfile
+```
+
+Build the Rust workspace with:
+
+```sh
+cargo build --workspace
+```
+
+Build the Nocturne reference theme with:
+
+```sh
+bun run build:theme
+```
+
+## Checks
+
+Run the relevant checks before opening a pull request. For Rust changes:
 
 ```sh
 cargo fmt --all --check
@@ -22,21 +52,39 @@ cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-生产 Rust 代码不得使用可能 panic 的 `unwrap()`。可恢复失败必须通过调用方可以处理的错误
-传播。
+For the TypeScript SDK and reference theme:
 
-## Cargo manifest
+```sh
+bun run check:sdk
+bun run --cwd packages/fomalhaut-sdk test
+bun run check:theme
+bun run test:theme
+bun run build:theme
+```
 
-除初始化虚拟 workspace 时已经批准的根 manifest 外，不要手工编辑 Cargo manifest。
-依赖和 crate 变更应使用 `cargo add`、`cargo remove`、`cargo new` 或 `cargo init` 完成。
+The continuous integration workflow is the source of truth for the complete
+check suite.
 
-各 crate 独立维护版本。影响可发布 crate 的变更应使用 `smif commit` 创建 changeset，
-不要手工修改 package version，也不要在本地执行 `smif version` 或 `smif publish`。
-版本更新和发布仅由 GitHub Actions 中的 Semifold CI 执行。
+## Changesets
 
-## 提交
+Changes that affect a publishable crate or the TypeScript SDK normally need a
+Semifold changeset. Use `smif status` to inspect the current release state and
+`smif commit` to create the changeset included with your pull request. Package
+versioning and publishing are handled by CI.
 
-- 保持每个提交的目的单一。
-- 在提交说明中解释行为变化及原因。
-- 同时提交实现所需的测试和文档。
-- 不要提交构建产物或敏感信息。
+Pure documentation, CI, packaging, and repository-maintenance changes usually
+do not require a changeset.
+
+## Pull requests
+
+- Keep each pull request focused and explain the user-visible behavior and the
+  reason for the change.
+- Add tests for new behavior and regressions where practical.
+- Update user documentation when installation, configuration, or theme behavior
+  changes.
+- Keep [docs/DESIGN.md](docs/DESIGN.md) and [TODO.md](TODO.md) aligned with
+  architectural decisions and implementation status.
+- Do not include build artifacts, credentials, or unrelated formatting changes.
+
+By contributing, you agree that your contribution is licensed under the
+project's [AGPL-3.0-only license](LICENSE).
