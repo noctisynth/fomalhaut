@@ -17,6 +17,12 @@ commands, or arbitrary process execution capabilities.
 > path has been tested on real systems, but configuration, theme APIs, and
 > packaging may still change before the first stable release.
 
+## Preview
+
+| Account selection | Authentication |
+| :---: | :---: |
+| ![Nocturne account selection screen](docs/assets/nocturne-user-selection.png) | ![Nocturne authentication screen](docs/assets/nocturne-authentication.png) |
+
 ## What it provides
 
 - A polished Nocturne reference theme and a minimal built-in theme.

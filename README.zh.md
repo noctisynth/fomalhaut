@@ -15,6 +15,12 @@ Fomalhaut 不是 Web 服务器，也不实现 PAM。Rust 宿主负责与 greetd 
 > Fomalhaut 目前处于 alpha 阶段。greetd、Cage 和 Wayland 登录链路已经在真实系统中验证，
 > 但配置格式、主题 API 和打包方式仍可能在首个稳定版本前发生变化。
 
+## 效果预览
+
+| 用户选择 | 身份认证 |
+| :---: | :---: |
+| ![Nocturne 用户选择界面](docs/assets/nocturne-user-selection.png) | ![Nocturne 身份认证界面](docs/assets/nocturne-authentication.png) |
+
 ## 项目效果
 
 - 提供完整的 Nocturne 参考主题和内嵌的最小主题。
