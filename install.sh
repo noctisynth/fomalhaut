@@ -87,6 +87,8 @@ Options:
 Existing TOML files are parsed, backed up, selectively updated, revalidated,
 and atomically replaced. On Arch Linux, missing build and runtime packages are
 installed with paru, yay, or sudo pacman in that order.
+Fresh Fomalhaut configurations enable poweroff, reboot, and suspend; existing
+power policy is preserved during updates.
 EOF
 }
 
@@ -285,6 +287,11 @@ if path.exists() and not path.is_file():
 def typed_value(kind: str, raw: str):
     if kind == "string":
         return raw
+    if kind == "string-array":
+        value = json.loads(raw)
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError("string-array value must be an array of strings")
+        return value
     if kind == "integer":
         return int(raw)
     if kind == "float":
@@ -296,7 +303,7 @@ def typed_value(kind: str, raw: str):
 
 def encoded_value(kind: str, raw: str) -> str:
     value = typed_value(kind, raw)
-    if kind == "string":
+    if kind in ("string", "string-array"):
         return json.dumps(value, ensure_ascii=True)
     return str(value)
 
@@ -526,6 +533,9 @@ if [[ -n "$display_scale" ]]; then
   fomalhaut_updates+=(display scale float "$display_scale")
 elif [[ ! -e "$fomalhaut_config" ]]; then
   fomalhaut_updates+=(display scale float "1.0")
+fi
+if [[ ! -e "$fomalhaut_config" ]]; then
+  fomalhaut_updates+=(power actions string-array '["poweroff", "reboot", "suspend"]')
 fi
 update_toml "$fomalhaut_config" "${fomalhaut_updates[@]}"
 

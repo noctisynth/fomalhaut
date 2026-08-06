@@ -459,10 +459,13 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   symlink 或其他非普通文件时必须拒绝修改。两个配置目标的类型和现有 TOML 必须在切换二进制、
   主题或任一配置前完成 preflight；无法解析、重复目标 key 或验证失败必须 fail closed，不能留下
   已知可提前避免的部分安装。只有新旧 TOML 文本确实不同时才创建备份并原子替换。
-- Fomalhaut 配置只维护 `[frontend].path`，并在明确传入缩放参数或首次创建文件时维护
-  `[display].scale`；其他 section 和注释尽量原样保留。greetd 配置只维护
-  `[default_session].command` 与 `user`，命令使用绝对二进制路径、Cage 和独立
-  `XCURSOR_SIZE`，不再注入 `GDK_SCALE`。
+- Fomalhaut 配置始终维护 `[frontend].path`，并在明确传入缩放参数或首次创建文件时维护
+  `[display].scale`。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
+  `[power].actions = ["poweroff", "reboot", "suspend"]`，使标准源码安装立即提供经过 logind
+  能力过滤的电源菜单；已有配置无论是缺少 `[power]`、显式空数组还是自定义 allowlist，都视为
+  管理员策略并原样保留，重复安装和升级不得借机扩大权限。其他 section 和注释同样尽量原样
+  保留。greetd 配置只维护 `[default_session].command` 与 `user`，命令使用绝对二进制路径、
+  Cage 和独立 `XCURSOR_SIZE`，不再注入 `GDK_SCALE`。
 - 默认不重启 display manager，避免意外终止当前图形会话；只有显式 `--restart` 才调用
   `systemctl restart greetd`。`--system-root` 允许在临时根目录验证完整安装和配置更新而不写
   主机 `/etc` 或 `/usr`。
@@ -1214,6 +1217,8 @@ scale = 1.5
 - `power` 缺失时所有电源动作关闭。`actions` 是至多三个互不重复的枚举 allowlist，只接受
   `poweroff`、`reboot` 和 `suspend`；显式空数组等同关闭。配置顺序不影响 capability 的稳定
   顺序，宿主固定按 poweroff、reboot、suspend 排列，并与 logind 当前返回 `yes` 的动作求交集。
+  这是运行时和非标准部署的 fail-closed 默认；标准源码安装器首次创建配置时显式写入全部三个
+  动作，后续升级不改写既有电源策略。
 - `display` 缺失时页面缩放倍率为 `1.0`。`scale` 是应用于 WebKit `zoom-level` 的有限浮点数，
   允许范围为 `0.5..=4.0`；它缩放整个主题页面内容并支持小数倍率，不负责 Cage 光标大小，
   也不尝试从不可靠的 EDID 物理尺寸自动推断 DPI。管理员应按照 greeter 所在输出显式配置，

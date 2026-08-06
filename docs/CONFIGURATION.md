@@ -20,6 +20,9 @@ GNOME 等桌面环境的缩放设置；现在许多笔记本和 HiDPI 显示器�
 如果首次安装时省略该选项，新配置会使用 `1.0`；更新安装时省略则保留已有配置值。光标大小
 由独立的 `--cursor-size` 控制。
 
+首次创建 `/etc/fomalhaut/config.toml` 时，源码安装器还会默认允许 poweroff、reboot 和 suspend；
+更新安装不会新增、覆盖或扩大既有配置中的电源策略。
+
 ### 全新安装
 
 使用适合显示器的缩放倍率运行安装器：
@@ -161,14 +164,16 @@ WebKit bridge 时会拒绝登录请求。
 
 ## 电源管理
 
-电源操作默认全部关闭。管理员可以显式允许固定枚举中的动作：
+Fomalhaut 的运行时配置在缺少 `[power]` 时默认关闭全部电源操作。源码安装器首次创建配置时会
+显式允许固定枚举中的全部三个动作：
 
 ```toml
 [power]
 actions = ["poweroff", "reboot", "suspend"]
 ```
 
-数组只接受上述三个值且不得重复；显式空数组关闭全部动作。Fomalhaut 会通过系统 D-Bus 查询
+数组只接受上述三个值且不得重复；显式空数组关闭全部动作。对已有配置执行更新安装时，缺失的
+`[power]`、显式空数组和自定义 allowlist 都会原样保留。Fomalhaut 会通过系统 D-Bus 查询
 systemd-logind，`state.get` 的 `capabilities.power` 只包含同时出现在配置中且对应 `Can*` 方法
 返回 `yes` 的动作。`no`、`na`、`challenge` 或 logind 不可用都不会向主题发布能力，因此
 greeter 不依赖 Polkit 交互 agent。
