@@ -99,6 +99,11 @@ greetd/PAM 上由可用回归为密码提交后失败，以及 locker 电源请�
 controller 和主题测试没有覆盖安装后二进制的真实系统边界，以下回归项必须在再次部署和实机验证
 后才能关闭。
 
+再次部署后，当前 niri 设备在创建首个 monitor window 时触发 SIGSEGV；core dump 位于
+`gtk4-layer-shell` 销毁无效 `GdkSurface` 的路径。对照 `gtk4-session-lock` 官方示例确认，
+`assign_window_to_monitor()` 已负责 realize/map，宿主不得随后调用普通 GTK `present()`。
+实现已移除这次重复映射；在重建、重装和实机启动通过前，session-lock 启动回归仍保持未完成。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -319,6 +324,9 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
       完成 Wayland/GDK roundtrip 后才退出。
 - [x] 在异步 PAM 预热、请求 lock 和首个 monitor window 建立前持有 GTK
       `ApplicationHoldGuard`，覆盖零窗口启动回归，避免 `activate` 返回后静默成功退出。
+- [ ] 重新部署并在当前 niri session 验证 monitor window 只由
+      `assign_window_to_monitor()` 映射，不再因额外 `present()` 触发 `GdkSurface` SIGSEGV；
+      确认取得 lock、正常解锁和 compositor 销毁窗口的完整生命周期。
 
 ### 当前用户 PAM 重新认证
 

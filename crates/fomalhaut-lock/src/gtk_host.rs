@@ -123,7 +123,9 @@ impl LockHost {
                 host.remove_surface(identifier);
             }
         });
-        surface.window().present();
+        // `assign_window_to_monitor` realizes and maps the lock surface itself.
+        // Presenting it again would route the window through GTK's ordinary
+        // mapping lifecycle and can invalidate the session-lock GdkSurface.
         self.surfaces.borrow_mut().push(surface);
         Ok(())
     }
