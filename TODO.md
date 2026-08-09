@@ -3,6 +3,11 @@
 本清单按依赖关系和风险排序。`P0` 是构建可测试最小系统的阻塞项；`P1` 完成首个可用
 greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 
+2026 年 8 月 9 日按当前 `docs/DESIGN.md`、生产代码、自动化测试和用户文档完成一次状态
+审计。审计验证了 Rust workspace 的 116 个测试、SDK 的静态检查与 6 个测试、React 主题的
+静态检查与 23 个测试。没有新增实机验证证据；需要真实 greeter、Cage、WebKitGTK、logind、
+VT、X11 或多发行版环境的事项继续保持未完成。
+
 ## P0：项目基础与无 UI 核心
 
 ### 仓库和 workspace
@@ -20,6 +25,12 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 将基础 CI job 缩短为 `Checks`，并为 Rust 构建与 Bun package 下载配置 lockfile-aware
       cache；Bun 依赖仍由 frozen lockfile 重建。
 - [x] 编写贡献说明和基础 README。
+
+### 设计与实现同步
+
+- [ ] 修正 `docs/DESIGN.md` 中已经落后于实现的状态描述和 workspace 示例，包括配置驱动的
+      session 目录、真实 core/controller 接入、外部主题加载、用户发现、电源能力、真实
+      Cage/greetd 交接，以及已经由原型确认的决策；只同步既有事实，不借机改变技术边界。
 
 ### Core 状态机
 
@@ -141,8 +152,9 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 支持外部主题目录配置；入口和协议版本由必需的 `theme.toml` 提供。
 - [x] 支持 Wayland/X11 session 目录及 `TryExec` 搜索目录配置，并保持安全默认值。
 - [ ] 支持日志级别和日志目标。
-- [ ] 支持是否记住上次用户和上次 session。
-- [ ] 对安全相关配置提供拒绝式默认值。
+- [x] 对安全相关配置提供拒绝式默认值：配置缺失使用受限内嵌主题和固定 session 目录，未知
+      字段或无效值拒绝启动，电源操作默认关闭，网络、CSP、开发者工具和 header 不开放为
+      可降级的配置项。
 - [x] 为配置添加示例、schema 或完整字段文档。
 
 ### 主题资源加载
@@ -180,7 +192,8 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 验证 VT 切换和失败恢复。
 - [x] 验证 Wayland session 登录。
 - [ ] 验证至少一种 X11 session 登录方案。
-- [ ] 记录 compositor 和系统运行时依赖。
+- [x] 在 README、配置/安装文档和 AUR 元数据中记录 Cage、D-Bus、GTK4、WebKitGTK 6.0 及
+      当前 Arch 直接 ABI/runtime 依赖；最低兼容版本和非 Arch 包名继续单独验证。
 
 ## P1：TypeScript SDK
 
@@ -243,8 +256,10 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [ ] 在 demo mode 模拟密码、MFA、visible prompt、失败和取消。
 - [ ] 在 demo mode 禁用真实 session 和电源操作。
 - [ ] 在 UI 中明确标识 demo mode。
-- [ ] 提供主题开发命令和热重载方案评估。
-- [ ] 编写前端协议快速入门。
+- [x] 提供 `bun run dev` 的 Vite 主题开发命令和热重载路径，使用仅开发构建可达的模拟
+      transport，并确认生产构建不会回退到该 transport；它不替代宿主级 demo mode。
+- [x] 在配置文档提供原始 bridge 请求、事件监听、必需方法和 Schema 入口，并在 SDK README
+      提供类型化 Client 快速入门。
 - [ ] 编写从纯 HTML 到框架构建产物的主题示例说明。
 
 ## P1：React 参考主题
@@ -290,17 +305,26 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 ## P2：安全加固
 
 - [ ] 编写正式 threat model。
-- [ ] 对 bridge 的每个方法实施白名单和状态检查。
-- [ ] 对所有前端字符串、ID 和消息实施长度限制。
-- [ ] 检查日志、panic 和错误链中的敏感信息泄漏。
-- [ ] 禁用开发者工具、下载、弹窗、任意导航和不需要的 Web API。
-- [ ] 验证正式模式没有 TCP 监听端口。
-- [ ] 审计主题路径规范化和资源 scheme。
+- [x] 审计 bridge 方法白名单和状态检查：严格解码只接受六个 v1 方法，controller/core 对每个
+      操作继续执行状态、活动 prompt、可信 session 和电源 capability 检查。
+- [x] 审计所有前端字符串、ID、集合和消息限制：总消息、用户名、回答、prompt/message、
+      user/session 摘要、集合大小和 JavaScript-safe integer/sequence 均有 Rust 权威校验。
+- [x] 审计日志、生产 panic 路径和错误链中的敏感信息泄漏：认证回答使用脱敏且 zeroizing 的
+      wire/core 类型，PAM 文本和 greetd description 不进入日志或公开错误；生产代码只保留
+      一个由固定资源上限证明安全并带具体不变量说明的 `expect()`。
+- [x] 禁用开发者工具、下载、弹窗、任意导航及已枚举的媒体、存储和捕获能力；使用临时
+      NetworkSession、全拒绝 permission handler、严格 CSP 和 navigation/response policy。
+- [ ] 在真实正式运行的完整进程树中验证没有 TCP 监听端口；源码和依赖使用面审计未发现
+      Fomalhaut 生产代码创建 TCP listener。
+- [x] 审计主题路径规范化和资源 scheme：URI 语法、入口导航、固定 MIME、资源大小、清单、
+      method、CSP/header 和 capability 相对读取均采用拒绝式边界。
 - [ ] 独立审计 `cap-std` 目录 capability 的 symlink 与竞态保证，并保留根内允许、根外拒绝
       的回归测试。
-- [ ] 为“外部主题必须由管理员信任并审查”的当前安全前提编写运维警告，并评估主题打包、
-      签名、来源验证或更强隔离机制；不得把 capability/CSP 描述为对恶意主题代码的完整沙箱。
-- [ ] 审计 desktop entry 到 `SessionCommand` 的转换。
+- [x] 在设计、README 和配置文档中警告外部主题必须由管理员信任并审查，明确 capability、
+      CSP 和导航限制不构成对恶意主题代码的完整沙箱；打包、签名和来源验证评估保留在 P3。
+- [x] 审计 desktop entry 到 `SessionCommand` 的转换：目录优先级和 ID 由可信 host 决定，
+      `Exec` 不经 shell、拒绝 field code/保留字符/NUL，`TryExec` 只查可信目录，环境变量由
+      Rust 固定构造，前端只能选择 catalog 内的不透明 ID。
 - [x] 实现默认关闭的电源 allowlist、systemd-logind `Can*` 能力交集和非交互
       `PowerOff/Reboot/Suspend` 执行；认证中请求须先取消 greetd 会话，且不得回退到 shell。
 - [x] 在 SDK 暴露类型化 `power.request`，并在 Nocturne 主题只按 capability 渲染带确认步骤的
@@ -308,8 +332,13 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 覆盖配置校验、controller 策略/取消顺序、logind 能力映射、SDK 请求和主题交互测试。
 - [ ] 在真实 greeter 环境验证 poweroff、reboot、suspend、Polkit `challenge`、inhibitor 和
       logind 不可用时的安全退化。
-- [ ] 评估剪贴板、拖放、文件选择器和自定义 URL handler。
-- [ ] 记录 JavaScript/WebView 无法保证 secret 清零的限制。
+- [x] 审计剪贴板和自定义 URL handler：关闭 JavaScript clipboard access，拒绝 WebKit
+      permission request，自定义 `fomalhaut:` scheme 只注册 secure/display-isolated 并由精确
+      theme/avatar URI 白名单处理。
+- [ ] 显式取消 WebKit `run-file-chooser`，评估并拒绝向 WebView 拖放文件/URI 的入口，并添加
+      对应回归测试；通用 permission handler 不能替代这两个专用边界。
+- [ ] 在面向用户和主题作者的安全文档中记录 JavaScript/WebView 无法保证 secret 清零的限制；
+      `docs/DESIGN.md` 已记录该固有限制，但部署文档尚未完整同步。
 - [ ] 在目标发行版验证 WebKit renderer sandbox。
 - [ ] 对协议解析和状态机增加 fuzz/property tests。
 
@@ -319,12 +348,20 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 修复参考主题认证页返回按钮的 transform containing-block 首帧跳动。
 - [x] 将参考主题 session 控件替换为 shadcn/ui Luma `Select`，覆盖选择交互和构建产物测试。
 - [ ] 添加结构化 tracing，定义敏感字段过滤策略。
-- [ ] 实现明确的进程退出码。
-- [ ] 为不可恢复错误提供故障页面和诊断指引。
+- [x] 实现明确的成功/失败进程状态：session 启动成功沿用 GTK 零退出，初始化、worker、renderer
+      和页面 epoch 等致命失败统一设置非零退出。
+- [ ] 将初始化、worker、renderer、主题加载和协议不兼容等不可恢复错误接入内置故障页面，并
+      提供不泄漏敏感信息的诊断指引。
 - [ ] 添加 WebView 生命周期及页面刷新集成测试。
+- [ ] 为 greetd IPC exchange、取消和 worker shutdown 定义有界等待与恢复策略；当前
+      `UnixTransport` 没有超时，GTK 回调中的同步 `send`/`join` 在 greetd 停止响应时可能无限
+      阻塞主线程。该线程/清理边界须先在 `docs/DESIGN.md` 明确，再实施代码变更。
+- [ ] 验证并保证登录成功时关联 reply 和有序 `session.started` 事件在退出 GTK 主循环前完成
+      投递；当前 JavaScript evaluation 为异步调用，随后立即退出 application。
 - [ ] 添加 Cage 下的端到端登录测试。
 - [ ] 测试 host 被终止时 greetd session 的清理行为。
-- [ ] 测试主题缺失、损坏和协议版本不匹配。
+- [ ] 补齐主题缺失、损坏和协议版本不匹配的 host/WebView 故障页集成测试；资源层单元测试已
+      覆盖损坏入口、非法清单和协议版本不匹配。
 - [ ] 测试多显示器和高 DPI 的基本行为。
 - [x] 实现严格的 `[display].scale` 配置并应用 WebKit 页面 zoom，覆盖默认值、小数倍率和非法
       浮点/边界测试；光标缩放继续由 Cage 管理。
@@ -341,10 +378,14 @@ greeter；`P2` 用于加固和发行；`P3` 是后续增强。
 - [x] 让源码安装器首次创建 Fomalhaut 配置时默认允许 poweroff、reboot 和 suspend，并验证原地
       更新保留缺失、显式关闭或自定义的既有电源策略。
 - [x] 为源码安装器添加遵守 TTY 与 `NO_COLOR` 的分级彩色输出。
-- [ ] 确定 greetd、WebKit 和 Cage 的最低版本；Rust 继续跟随 stable。
-- [ ] 提供 systemd-tmpfiles 配置（如果需要状态或日志目录）。
-- [ ] 提供示例 greetd 配置和安装说明。
-- [ ] 提供 shell completions 和 man page（如 CLI 稳定）。
+- [ ] 确定 greetd、WebKitGTK 和 Cage 的最低版本；GTK 编译基线已是 4.18，Rust 继续跟随
+      stable，其余最低运行版本仍需发行版验证。
+- [ ] 完成日志目标和非敏感偏好存储设计后，判断是否需要状态/日志目录及 systemd-tmpfiles；
+      当前无持久状态目录。
+- [x] 在 README 和 `docs/CONFIGURATION.md` 提供源码安装、更新、显示管理器迁移及
+      greetd/Cage 配置示例，AUR 包也安装不覆盖系统配置的示例。
+- [x] 确认当前应用没有稳定的用户 CLI surface，首个发行版不需要 shell completions 或 man
+      page；安装器继续以 `--help` 记录其参数。
 - [ ] 准备 Nix 或其他后续目标发行版的打包方案。
 - [x] 添加 `greetd-fomalhaut` AUR 源码包模板：将上游预发布 SemVer 映射为合法 Arch
       `pkgver`，以 `pkgrel` 表达纯打包修订，并把 greetd、Cage、D-Bus、GTK4 和 WebKitGTK
