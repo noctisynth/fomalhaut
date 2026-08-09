@@ -34,6 +34,31 @@ path = "crates/fomalhaut-web"
 resolver = "rust"
 channel = "alpha"
 
+[packages.fomalhaut-config]
+path = "crates/fomalhaut-config"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-greetd]
+path = "crates/fomalhaut-greetd"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-gtk]
+path = "crates/fomalhaut-gtk"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-lock]
+path = "crates/fomalhaut-lock"
+resolver = "rust"
+channel = "alpha"
+
+[packages.fomalhaut-pam]
+path = "crates/fomalhaut-pam"
+resolver = "rust"
+channel = "alpha"
+
 [resolver.rust.pre-check]
 type = "http"
 url = "https://crates.io/api/v1/crates/{{ package.name }}/{{ package.version }}"

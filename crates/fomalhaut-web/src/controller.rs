@@ -3,8 +3,9 @@
 use std::{collections::VecDeque, error::Error, fmt};
 
 use fomalhaut_core::{
-    CoreError, GreeterClient, GreeterEvent, GreeterState, MessageLevel as CoreMessageLevel,
-    PromptId as CorePromptId, PromptKind as CorePromptKind, SessionCommand, Transport,
+    AuthEvent as CoreAuthEvent, AuthState as CoreAuthState, BackendError, CoreError, LoginBackend,
+    MessageLevel as CoreMessageLevel, PromptId as CorePromptId, PromptKind as CorePromptKind,
+    SessionCommand,
 };
 
 use crate::{
@@ -123,8 +124,8 @@ impl TrustedSession {
 }
 
 /// Serial authentication controller over an arbitrary core transport.
-pub struct HostController<T> {
-    client: GreeterClient<T>,
+pub struct HostController<B> {
+    client: B,
     authentication: AuthState,
     prompt: Option<Prompt>,
     core_prompt: Option<CorePromptId>,
@@ -136,23 +137,23 @@ pub struct HostController<T> {
     sequences: EventSequence,
 }
 
-impl<T> HostController<T> {
+impl<B: LoginBackend> HostController<B> {
     /// Wraps a connected core client and initializes its public state.
     #[must_use]
-    pub fn new(client: GreeterClient<T>) -> Self {
+    pub fn new(client: B) -> Self {
         Self::with_sessions(client, Vec::new())
     }
 
     /// Wraps a connected core client with a host-resolved trusted session catalog.
     #[must_use]
-    pub fn with_sessions(client: GreeterClient<T>, sessions: Vec<TrustedSession>) -> Self {
+    pub fn with_sessions(client: B, sessions: Vec<TrustedSession>) -> Self {
         Self::with_catalogs(client, sessions, Vec::new())
     }
 
     /// Wraps a connected core client with trusted session and public user catalogs.
     #[must_use]
     pub fn with_catalogs(
-        client: GreeterClient<T>,
+        client: B,
         sessions: Vec<TrustedSession>,
         users: Vec<UserSummary>,
     ) -> Self {
@@ -162,12 +163,12 @@ impl<T> HostController<T> {
     /// Wraps a connected core client with trusted catalogs and a host power backend.
     #[must_use]
     pub fn with_power_control(
-        client: GreeterClient<T>,
+        client: B,
         sessions: Vec<TrustedSession>,
         users: Vec<UserSummary>,
         power: impl PowerControl + 'static,
     ) -> Self {
-        let authentication = map_state(client.state());
+        let authentication = map_state(client.state(), client.session_started());
         let selected_session = (!sessions.is_empty()).then_some(0);
         Self {
             client,
@@ -203,7 +204,7 @@ impl<T> HostController<T> {
     }
 }
 
-impl<T: Transport> HostController<T> {
+impl<B: LoginBackend> HostController<B> {
     /// Handles one strictly decoded frontend request as a serial transaction.
     pub async fn handle(
         &mut self,
@@ -215,7 +216,7 @@ impl<T: Transport> HostController<T> {
             return Ok(ControllerBatch {
                 response: ResponseEnvelope::success(id, ResponseResult::State(snapshot)),
                 events: Vec::new(),
-                session_started: self.client.state() == GreeterState::Started,
+                session_started: self.client.session_started(),
             });
         }
 
@@ -235,7 +236,7 @@ impl<T: Transport> HostController<T> {
         detail_events.extend(core_events);
 
         if operation.is_ok()
-            && self.client.state() == GreeterState::Authenticated
+            && self.client.state() == CoreAuthState::Authenticated
             && !self.sessions.is_empty()
         {
             let Some(selected) = self.selected_session else {
@@ -251,8 +252,9 @@ impl<T: Transport> HostController<T> {
                 })?
                 .command
                 .clone();
-            if let Err(error) = self.client.start_session(command).await {
-                operation = Err(protocol_error(error));
+            match self.client.start_session(command).await {
+                Ok(()) => detail_events.push(Event::SessionStarted(EmptyResult {})),
+                Err(error) => operation = Err(protocol_error(error)),
             }
             let session_events = match self.drain_core_events().await {
                 Ok(events) => events,
@@ -264,7 +266,7 @@ impl<T: Transport> HostController<T> {
             detail_events.extend(session_events);
         }
 
-        self.authentication = map_state(self.client.state());
+        self.authentication = map_state(self.client.state(), self.client.session_started());
 
         self.finish_batch(id, previous_state, operation, detail_events)
     }
@@ -292,14 +294,14 @@ impl<T: Transport> HostController<T> {
         Ok(ControllerBatch {
             response,
             events,
-            session_started: self.client.state() == GreeterState::Started,
+            session_started: self.client.session_started(),
         })
     }
 
     /// Cancels an active greetd session after a page or host lifecycle boundary.
     pub async fn cancel_for_lifecycle(&mut self) -> Result<(), ControllerError> {
         if !self.client.needs_cancel() {
-            self.authentication = map_state(self.client.state());
+            self.authentication = map_state(self.client.state(), self.client.session_started());
             return Ok(());
         }
 
@@ -308,7 +310,7 @@ impl<T: Transport> HostController<T> {
             .await
             .map_err(|_| ControllerError::new("the controller could not cancel authentication"))?;
         self.discard_core_events().await?;
-        self.authentication = map_state(self.client.state());
+        self.authentication = map_state(self.client.state(), self.client.session_started());
         self.prompt = None;
         self.core_prompt = None;
         Ok(())
@@ -319,14 +321,14 @@ impl<T: Transport> HostController<T> {
             FrontendRequest::AuthBegin(params) => {
                 if matches!(
                     self.client.state(),
-                    GreeterState::Idle | GreeterState::Failed
+                    CoreAuthState::Idle | CoreAuthState::Failed
                 ) {
                     self.prompt = None;
                     self.core_prompt = None;
                     self.messages.clear();
                 }
                 self.client
-                    .create_session(params.username().to_owned())
+                    .begin_login(params.username().to_owned())
                     .await
                     .map_err(protocol_error)?;
                 Ok(Vec::new())
@@ -384,14 +386,17 @@ impl<T: Transport> HostController<T> {
     }
 
     fn select_session(&mut self, session_id: &str) -> Result<Vec<Event>, ProtocolErrorBody> {
-        if !matches!(
-            self.client.state(),
-            GreeterState::Idle
-                | GreeterState::Authenticating
-                | GreeterState::WaitingForPrompt
-                | GreeterState::Authenticated
-                | GreeterState::Failed
-        ) {
+        if self.client.session_started()
+            || !matches!(
+                self.client.state(),
+                CoreAuthState::Idle
+                    | CoreAuthState::Authenticating
+                    | CoreAuthState::WaitingForSecret
+                    | CoreAuthState::WaitingForVisible
+                    | CoreAuthState::Authenticated
+                    | CoreAuthState::Failed
+            )
+        {
             return Err(ProtocolErrorBody::new(
                 ProtocolErrorCode::InvalidState,
                 "session selection is invalid in the current authentication state",
@@ -421,7 +426,7 @@ impl<T: Transport> HostController<T> {
         loop {
             match self.client.next_event().await {
                 Ok(event) => events.push(self.apply_core_event(event)?),
-                Err(CoreError::NoPendingEvent) => return Ok(events),
+                Err(BackendError::Core(CoreError::NoPendingEvent)) => return Ok(events),
                 Err(_) => {
                     return Err(ControllerError::new(
                         "the controller could not consume a core event",
@@ -431,9 +436,9 @@ impl<T: Transport> HostController<T> {
         }
     }
 
-    fn apply_core_event(&mut self, event: GreeterEvent) -> Result<Event, ControllerError> {
+    fn apply_core_event(&mut self, event: CoreAuthEvent) -> Result<Event, ControllerError> {
         match event {
-            GreeterEvent::Prompt { id, kind, message } => {
+            CoreAuthEvent::Prompt { id, kind, message } => {
                 let prompt_id = PromptId::new(id.get())
                     .map_err(|_| ControllerError::new("the core prompt ID is not frontend-safe"))?;
                 let prompt_kind = match kind {
@@ -447,7 +452,7 @@ impl<T: Transport> HostController<T> {
                 self.prompt = Some(prompt.clone());
                 Ok(Event::AuthPrompt(prompt))
             }
-            GreeterEvent::Message { level, text } => {
+            CoreAuthEvent::Message { level, text } => {
                 let level = match level {
                     CoreMessageLevel::Info => MessageLevel::Info,
                     CoreMessageLevel::Error => MessageLevel::Error,
@@ -461,18 +466,17 @@ impl<T: Transport> HostController<T> {
                 self.messages.push_back(message.clone());
                 Ok(Event::AuthMessage(message))
             }
-            GreeterEvent::Authenticated => {
+            CoreAuthEvent::Authenticated(_) => {
                 self.prompt = None;
                 self.core_prompt = None;
                 Ok(Event::AuthSucceeded(EmptyResult {}))
             }
-            GreeterEvent::SessionStarted => Ok(Event::SessionStarted(EmptyResult {})),
-            GreeterEvent::AuthenticationFailed => {
+            CoreAuthEvent::AuthenticationFailed => {
                 self.prompt = None;
                 self.core_prompt = None;
                 Ok(Event::AuthFailed(EmptyResult {}))
             }
-            GreeterEvent::Cancelled => {
+            CoreAuthEvent::Cancelled => {
                 self.prompt = None;
                 self.core_prompt = None;
                 Ok(Event::AuthCancelled(EmptyResult {}))
@@ -499,7 +503,7 @@ impl<T: Transport> HostController<T> {
         loop {
             match self.client.next_event().await {
                 Ok(mut event) => event.zeroize_for_controller(),
-                Err(CoreError::NoPendingEvent) => return Ok(()),
+                Err(BackendError::Core(CoreError::NoPendingEvent)) => return Ok(()),
                 Err(_) => {
                     return Err(ControllerError::new(
                         "the controller could not discard a core event",
@@ -515,38 +519,45 @@ impl<T: Transport> HostController<T> {
         }
         self.prompt = None;
         self.core_prompt = None;
-        self.authentication = map_state(self.client.state());
+        self.authentication = map_state(self.client.state(), self.client.session_started());
     }
 }
 
-fn map_state(state: GreeterState) -> AuthState {
+fn map_state(state: CoreAuthState, session_started: bool) -> AuthState {
+    if session_started {
+        return AuthState::Started;
+    }
+
     match state {
-        GreeterState::Disconnected => AuthState::Disconnected,
-        GreeterState::Idle => AuthState::Idle,
-        GreeterState::Authenticating => AuthState::Authenticating,
-        GreeterState::WaitingForPrompt => AuthState::WaitingForPrompt,
-        GreeterState::Authenticated => AuthState::Authenticated,
-        GreeterState::StartingSession => AuthState::StartingSession,
-        GreeterState::Started => AuthState::Started,
-        GreeterState::Cancelling => AuthState::Cancelling,
-        GreeterState::Failed => AuthState::Failed,
+        CoreAuthState::Disconnected => AuthState::Disconnected,
+        CoreAuthState::Idle => AuthState::Idle,
+        CoreAuthState::Authenticating => AuthState::Authenticating,
+        CoreAuthState::WaitingForSecret | CoreAuthState::WaitingForVisible => {
+            AuthState::WaitingForPrompt
+        }
+        CoreAuthState::Authenticated => AuthState::Authenticated,
+        CoreAuthState::Cancelling => AuthState::Cancelling,
+        CoreAuthState::Failed => AuthState::Failed,
     }
 }
 
-fn protocol_error(error: CoreError) -> ProtocolErrorBody {
+fn protocol_error(error: BackendError) -> ProtocolErrorBody {
     match error {
-        CoreError::InvalidState { .. } => ProtocolErrorBody::new(
+        BackendError::Core(CoreError::InvalidState { .. }) => ProtocolErrorBody::new(
             ProtocolErrorCode::InvalidState,
             "operation is invalid in the current authentication state",
             false,
         ),
-        CoreError::StalePrompt { .. } => stale_prompt_error(),
-        CoreError::Transport(_)
-        | CoreError::NoPendingEvent
-        | CoreError::PromptIdExhausted
-        | CoreError::EmptySessionCommand
-        | CoreError::UnexpectedResponse { .. }
-        | CoreError::Server(_) => ProtocolErrorBody::new(
+        BackendError::Core(CoreError::StalePrompt { .. }) => stale_prompt_error(),
+        BackendError::Core(
+            CoreError::NoPendingEvent
+            | CoreError::PromptIdExhausted
+            | CoreError::EmptySessionCommand
+            | CoreError::EmptyIdentity,
+        )
+        | BackendError::Unavailable
+        | BackendError::Protocol
+        | BackendError::Service => ProtocolErrorBody::new(
             ProtocolErrorCode::Internal,
             "the authentication service could not complete the operation",
             false,
@@ -574,18 +585,9 @@ trait ZeroizeControllerEvent {
     fn zeroize_for_controller(&mut self);
 }
 
-impl ZeroizeControllerEvent for GreeterEvent {
+impl ZeroizeControllerEvent for CoreAuthEvent {
     fn zeroize_for_controller(&mut self) {
-        use zeroize::Zeroize;
-
-        match self {
-            Self::Prompt { message, .. } => message.zeroize(),
-            Self::Message { text, .. } => text.zeroize(),
-            Self::Authenticated
-            | Self::SessionStarted
-            | Self::AuthenticationFailed
-            | Self::Cancelled => {}
-        }
+        self.zeroize();
     }
 }
 
@@ -593,22 +595,34 @@ impl ZeroizeControllerEvent for GreeterEvent {
 mod tests {
     use std::{
         collections::VecDeque,
-        future::{Future, ready},
         sync::{Arc, Mutex},
     };
 
-    use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
     use serde_json::Value;
+    use zeroize::Zeroize;
 
-    use super::{HostController, PowerControl, PowerControlError, Transport, TrustedSession};
+    use super::{HostController, PowerControl, PowerControlError, TrustedSession};
     use crate::protocol::{
         Capabilities, PowerAction, ProtocolErrorCode, SessionKind, SessionSummary, decode_request,
     };
-    use fomalhaut_core::{GreeterClient, SessionCommand, TransportError};
+    use fomalhaut_core::{
+        AuthConversation, AuthEvent, AuthState, AuthenticatedIdentity, BackendError,
+        ConversationBackend, CoreError, LoginBackend, PromptId, PromptKind, Secret, SessionCommand,
+    };
 
-    struct ScriptedTransport {
-        responses: VecDeque<Result<Response, TransportError>>,
-        exchanges: usize,
+    enum ScriptStep {
+        Prompt { kind: PromptKind, message: String },
+        Success,
+        AuthenticationFailed,
+        ServiceFailure(String),
+        Unavailable(String),
+    }
+
+    struct ScriptedLoginBackend {
+        conversation: AuthConversation,
+        steps: VecDeque<ScriptStep>,
+        pending_identity: Option<AuthenticatedIdentity>,
+        session_started: bool,
     }
 
     struct RecordingPower {
@@ -631,26 +645,138 @@ mod tests {
         }
     }
 
-    impl ScriptedTransport {
-        fn new(responses: impl IntoIterator<Item = Response>) -> Self {
+    impl ScriptedLoginBackend {
+        fn new(steps: impl IntoIterator<Item = ScriptStep>) -> Self {
             Self {
-                responses: responses.into_iter().map(Ok).collect(),
-                exchanges: 0,
+                conversation: AuthConversation::new(),
+                steps: steps.into_iter().collect(),
+                pending_identity: None,
+                session_started: false,
             }
+        }
+
+        fn advance_authentication(&mut self) -> Result<(), BackendError> {
+            match self.next_step()? {
+                ScriptStep::Prompt { kind, message } => {
+                    self.conversation.emit_prompt(kind, message)?;
+                    Ok(())
+                }
+                ScriptStep::Success => {
+                    let identity = self.pending_identity.take().ok_or(BackendError::Protocol)?;
+                    self.conversation.authenticated(identity)?;
+                    Ok(())
+                }
+                ScriptStep::AuthenticationFailed => {
+                    self.pending_identity = None;
+                    self.conversation.authentication_failed()?;
+                    Ok(())
+                }
+                ScriptStep::ServiceFailure(mut detail) => {
+                    detail.zeroize();
+                    self.pending_identity = None;
+                    self.conversation.fail();
+                    Err(BackendError::Service)
+                }
+                ScriptStep::Unavailable(mut detail) => {
+                    detail.zeroize();
+                    self.pending_identity = None;
+                    self.conversation.disconnect();
+                    Err(BackendError::Unavailable)
+                }
+            }
+        }
+
+        fn next_step(&mut self) -> Result<ScriptStep, BackendError> {
+            self.steps.pop_front().ok_or(BackendError::Unavailable)
         }
     }
 
-    impl Transport for ScriptedTransport {
-        fn exchange(
+    impl ConversationBackend for ScriptedLoginBackend {
+        fn state(&self) -> AuthState {
+            self.conversation.state()
+        }
+
+        fn needs_cancel(&self) -> bool {
+            !self.session_started && self.conversation.needs_cancel()
+        }
+
+        async fn respond(
             &mut self,
-            _request: &Request,
-        ) -> impl Future<Output = Result<Response, TransportError>> + Send {
-            self.exchanges = self.exchanges.saturating_add(1);
-            ready(
-                self.responses
-                    .pop_front()
-                    .unwrap_or(Err(TransportError::Unavailable("test script exhausted"))),
-            )
+            prompt: PromptId,
+            _response: Secret,
+        ) -> Result<(), BackendError> {
+            self.conversation.begin_response(prompt)?;
+            self.advance_authentication()
+        }
+
+        async fn cancel(&mut self) -> Result<(), BackendError> {
+            self.conversation.begin_cancel()?;
+            self.pending_identity = None;
+            match self.next_step()? {
+                ScriptStep::Success => self.conversation.cancelled().map_err(BackendError::from),
+                ScriptStep::ServiceFailure(mut detail) => {
+                    detail.zeroize();
+                    self.conversation.fail();
+                    Err(BackendError::Service)
+                }
+                ScriptStep::Unavailable(mut detail) => {
+                    detail.zeroize();
+                    self.conversation.disconnect();
+                    Err(BackendError::Unavailable)
+                }
+                _ => {
+                    self.conversation.fail();
+                    Err(BackendError::Protocol)
+                }
+            }
+        }
+
+        async fn next_event(&mut self) -> Result<AuthEvent, BackendError> {
+            self.conversation.next_event().map_err(BackendError::from)
+        }
+    }
+
+    impl LoginBackend for ScriptedLoginBackend {
+        async fn begin_login(&mut self, username: String) -> Result<(), BackendError> {
+            let identity = AuthenticatedIdentity::new(username)?;
+            self.conversation.begin()?;
+            self.pending_identity = Some(identity);
+            self.session_started = false;
+            self.advance_authentication()
+        }
+
+        async fn start_session(&mut self, _command: SessionCommand) -> Result<(), BackendError> {
+            if self.conversation.state() != AuthState::Authenticated || self.session_started {
+                return Err(BackendError::Core(CoreError::InvalidState {
+                    operation: "start session",
+                    state: self.conversation.state(),
+                }));
+            }
+
+            match self.next_step()? {
+                ScriptStep::Success => {
+                    self.session_started = true;
+                    Ok(())
+                }
+                ScriptStep::ServiceFailure(mut detail) => {
+                    detail.zeroize();
+                    self.conversation.fail();
+                    Err(BackendError::Service)
+                }
+                ScriptStep::Unavailable(mut detail) => {
+                    detail.zeroize();
+                    self.conversation.disconnect();
+                    Err(BackendError::Unavailable)
+                }
+                _ => {
+                    self.conversation.fail();
+                    Err(BackendError::Protocol)
+                }
+            }
+        }
+
+        fn session_started(&self) -> bool {
+            self.session_started
         }
     }
 
@@ -675,7 +801,7 @@ mod tests {
 
     #[tokio::test]
     async fn state_get_returns_connected_idle_snapshot() {
-        let client = GreeterClient::with_transport(ScriptedTransport::new([]));
+        let client = ScriptedLoginBackend::new([]);
         let mut controller = HostController::new(client);
         let batch = controller
             .handle(request(
@@ -691,12 +817,12 @@ mod tests {
 
     #[tokio::test]
     async fn enabled_power_request_cancels_authentication_before_dispatch() {
-        let transport = ScriptedTransport::new([
-            Response::AuthMessage {
-                auth_message_type: AuthMessageType::Secret,
-                auth_message: "Password:".to_owned(),
+        let client = ScriptedLoginBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
             },
-            Response::Success,
+            ScriptStep::Success,
         ]);
         let calls = Arc::new(Mutex::new(Vec::new()));
         let power = RecordingPower {
@@ -704,7 +830,6 @@ mod tests {
             calls: Arc::clone(&calls),
             succeeds: true,
         };
-        let client = GreeterClient::with_transport(transport);
         let mut controller =
             HostController::with_power_control(client, Vec::new(), Vec::new(), power);
         controller
@@ -741,7 +866,7 @@ mod tests {
             calls: Arc::clone(&calls),
             succeeds: true,
         };
-        let client = GreeterClient::with_transport(ScriptedTransport::new([]));
+        let client = ScriptedLoginBackend::new([]);
         let mut controller =
             HostController::with_power_control(client, Vec::new(), Vec::new(), power);
         let batch = controller
@@ -763,14 +888,13 @@ mod tests {
 
     #[tokio::test]
     async fn password_flow_emits_prompt_and_success_with_monotonic_events() {
-        let transport = ScriptedTransport::new([
-            Response::AuthMessage {
-                auth_message_type: AuthMessageType::Secret,
-                auth_message: "Password:".to_owned(),
+        let client = ScriptedLoginBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
             },
-            Response::Success,
+            ScriptStep::Success,
         ]);
-        let client = GreeterClient::with_transport(transport);
         let mut controller = HostController::new(client);
 
         let begin = controller
@@ -804,11 +928,10 @@ mod tests {
 
     #[tokio::test]
     async fn stale_prompt_is_rejected_without_consuming_transport() {
-        let transport = ScriptedTransport::new([Response::AuthMessage {
-            auth_message_type: AuthMessageType::Visible,
-            auth_message: "Code:".to_owned(),
+        let client = ScriptedLoginBackend::new([ScriptStep::Prompt {
+            kind: PromptKind::Visible,
+            message: "Code:".to_owned(),
         }]);
-        let client = GreeterClient::with_transport(transport);
         let mut controller = HostController::new(client);
         controller
             .handle(request(
@@ -833,14 +956,13 @@ mod tests {
 
     #[tokio::test]
     async fn frontend_cancel_returns_idle_and_cancelled_event() {
-        let transport = ScriptedTransport::new([
-            Response::AuthMessage {
-                auth_message_type: AuthMessageType::Visible,
-                auth_message: "One-time code:".to_owned(),
+        let client = ScriptedLoginBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Visible,
+                message: "One-time code:".to_owned(),
             },
-            Response::Success,
+            ScriptStep::Success,
         ]);
-        let client = GreeterClient::with_transport(transport);
         let mut controller = HostController::new(client);
         controller
             .handle(request(
@@ -864,7 +986,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_session_is_rejected_and_power_remains_disabled() {
-        let client = GreeterClient::with_transport(ScriptedTransport::new([]));
+        let client = ScriptedLoginBackend::new([]);
         let mut controller = HostController::new(client);
 
         let select = controller
@@ -890,15 +1012,14 @@ mod tests {
 
     #[tokio::test]
     async fn trusted_selection_is_public_and_authentication_starts_it() {
-        let transport = ScriptedTransport::new([
-            Response::AuthMessage {
-                auth_message_type: AuthMessageType::Secret,
-                auth_message: "Password:".to_owned(),
+        let client = ScriptedLoginBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
             },
-            Response::Success,
-            Response::Success,
+            ScriptStep::Success,
+            ScriptStep::Success,
         ]);
-        let client = GreeterClient::with_transport(transport);
         let sessions = vec![
             trusted_session("wayland:first", "first", SessionKind::Wayland),
             trusted_session("wayland:second", "second", SessionKind::Wayland),
@@ -968,14 +1089,10 @@ mod tests {
 
     #[tokio::test]
     async fn trusted_session_start_failure_is_sanitized() {
-        let transport = ScriptedTransport::new([
-            Response::Success,
-            Response::Error {
-                error_type: ErrorType::Error,
-                description: "private session failure".to_owned(),
-            },
+        let client = ScriptedLoginBackend::new([
+            ScriptStep::Success,
+            ScriptStep::ServiceFailure("private session failure".to_owned()),
         ]);
-        let client = GreeterClient::with_transport(transport);
         let sessions = vec![trusted_session(
             "wayland:first",
             "first",
@@ -999,13 +1116,8 @@ mod tests {
 
     #[tokio::test]
     async fn transport_failure_is_sanitized_and_disconnects_public_state() {
-        let transport = ScriptedTransport {
-            responses: [Err(TransportError::Unavailable("private stub detail"))]
-                .into_iter()
-                .collect(),
-            exchanges: 0,
-        };
-        let client = GreeterClient::with_transport(transport);
+        let client =
+            ScriptedLoginBackend::new([ScriptStep::Unavailable("private stub detail".to_owned())]);
         let mut controller = HostController::new(client);
 
         let batch = controller
@@ -1024,23 +1136,18 @@ mod tests {
 
     #[tokio::test]
     async fn auth_failure_and_lifecycle_cancel_are_observable() {
-        let transport = ScriptedTransport::new([
-            Response::AuthMessage {
-                auth_message_type: AuthMessageType::Secret,
-                auth_message: "Password:".to_owned(),
+        let client = ScriptedLoginBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
             },
-            Response::Error {
-                error_type: ErrorType::AuthError,
-                description: "raw PAM detail".to_owned(),
+            ScriptStep::AuthenticationFailed,
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
             },
-            Response::Success,
-            Response::AuthMessage {
-                auth_message_type: AuthMessageType::Secret,
-                auth_message: "Password:".to_owned(),
-            },
-            Response::Success,
+            ScriptStep::Success,
         ]);
-        let client = GreeterClient::with_transport(transport);
         let mut controller = HostController::new(client);
 
         controller

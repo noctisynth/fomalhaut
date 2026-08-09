@@ -1,70 +1,20 @@
-//! Structured errors that do not expose authentication responses.
+//! Sanitized backend-neutral authentication errors.
 
-use std::{error::Error, fmt, io};
+use std::{error::Error, fmt};
 
-use greetd_ipc::codec;
+use crate::{AuthState, PromptId};
 
-use crate::{GreeterState, PromptId};
-
-/// Transport-level failure while communicating with greetd.
-#[derive(Debug)]
-pub enum TransportError {
-    /// The greetd Unix socket could not be opened.
-    Connect(io::Error),
-    /// A request or response failed greetd IPC encoding or I/O.
-    Codec(codec::Error),
-    /// A test or alternate transport became unavailable.
-    Unavailable(&'static str),
-}
-
-impl fmt::Display for TransportError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Connect(error) => write!(formatter, "failed to connect to greetd: {error}"),
-            Self::Codec(error) => write!(formatter, "greetd IPC transport failed: {error}"),
-            Self::Unavailable(reason) => write!(formatter, "transport unavailable: {reason}"),
-        }
-    }
-}
-
-impl Error for TransportError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Connect(error) => Some(error),
-            Self::Codec(error) => Some(error),
-            Self::Unavailable(_) => None,
-        }
-    }
-}
-
-impl From<codec::Error> for TransportError {
-    fn from(error: codec::Error) -> Self {
-        Self::Codec(error)
-    }
-}
-
-/// Sanitized category of an error returned by greetd.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ServerErrorKind {
-    /// Authentication failed.
-    Authentication,
-    /// Greetd reported a general error.
-    General,
-}
-
-/// Failure while driving the authentication state machine.
+/// Invalid authentication-domain operation.
 #[derive(Debug)]
 pub enum CoreError {
-    /// Communication with greetd failed.
-    Transport(TransportError),
     /// The requested operation is invalid in the current state.
     InvalidState {
         /// Attempted operation.
         operation: &'static str,
         /// State in which it was attempted.
-        state: GreeterState,
+        state: AuthState,
     },
-    /// The response targets an old or otherwise inactive prompt.
+    /// The response targets an old or inactive prompt.
     StalePrompt {
         /// Prompt that is currently active.
         expected: Option<PromptId>,
@@ -77,23 +27,18 @@ pub enum CoreError {
     PromptIdExhausted,
     /// A session command must contain at least one argument.
     EmptySessionCommand,
-    /// Greetd returned a response that is invalid for the active operation.
-    UnexpectedResponse {
-        /// Operation being processed.
-        operation: &'static str,
-        /// Sanitized response category.
-        response: &'static str,
-    },
-    /// Greetd rejected an operation. Its raw description is intentionally omitted.
-    Server(ServerErrorKind),
+    /// An authenticated identity must contain an account name.
+    EmptyIdentity,
 }
 
 impl fmt::Display for CoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Transport(error) => error.fmt(formatter),
             Self::InvalidState { operation, state } => {
-                write!(formatter, "cannot {operation} while greeter is {state:?}")
+                write!(
+                    formatter,
+                    "cannot {operation} while authentication is {state:?}"
+                )
             }
             Self::StalePrompt { expected, received } => write!(
                 formatter,
@@ -101,45 +46,53 @@ impl fmt::Display for CoreError {
                 received.get(),
                 expected.map_or_else(|| "none".to_owned(), |id| id.get().to_string())
             ),
-            Self::NoPendingEvent => formatter.write_str("no greeter event is pending"),
+            Self::NoPendingEvent => formatter.write_str("no authentication event is pending"),
             Self::PromptIdExhausted => formatter.write_str("prompt identifier space exhausted"),
             Self::EmptySessionCommand => {
                 formatter.write_str("session command must contain at least one argument")
             }
-            Self::UnexpectedResponse {
-                operation,
-                response,
-            } => write!(
-                formatter,
-                "greetd returned {response} while attempting to {operation}"
-            ),
-            Self::Server(ServerErrorKind::Authentication) => {
-                formatter.write_str("greetd rejected authentication")
-            }
-            Self::Server(ServerErrorKind::General) => {
-                formatter.write_str("greetd reported a general error")
-            }
+            Self::EmptyIdentity => formatter.write_str("authenticated identity cannot be empty"),
         }
     }
 }
 
-impl Error for CoreError {
+impl Error for CoreError {}
+
+/// Sanitized failure shared by login and reauthentication backends.
+#[derive(Debug)]
+pub enum BackendError {
+    /// The request violated the common authentication state machine.
+    Core(CoreError),
+    /// The backend transport or worker is unavailable.
+    Unavailable,
+    /// The backend returned an invalid protocol response.
+    Protocol,
+    /// The authentication service rejected a non-authentication operation.
+    Service,
+}
+
+impl fmt::Display for BackendError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Core(error) => error.fmt(formatter),
+            Self::Unavailable => formatter.write_str("authentication backend is unavailable"),
+            Self::Protocol => formatter.write_str("authentication backend protocol failed"),
+            Self::Service => formatter.write_str("authentication service failed"),
+        }
+    }
+}
+
+impl Error for BackendError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Transport(error) => Some(error),
-            Self::InvalidState { .. }
-            | Self::StalePrompt { .. }
-            | Self::NoPendingEvent
-            | Self::PromptIdExhausted
-            | Self::EmptySessionCommand
-            | Self::UnexpectedResponse { .. }
-            | Self::Server(_) => None,
+            Self::Core(error) => Some(error),
+            Self::Unavailable | Self::Protocol | Self::Service => None,
         }
     }
 }
 
-impl From<TransportError> for CoreError {
-    fn from(error: TransportError) -> Self {
-        Self::Transport(error)
+impl From<CoreError> for BackendError {
+    fn from(error: CoreError) -> Self {
+        Self::Core(error)
     }
 }

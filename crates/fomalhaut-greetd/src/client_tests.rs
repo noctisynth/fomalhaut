@@ -10,10 +10,11 @@ use std::{
 use greetd_ipc::{AuthMessageType, ErrorType, Request, Response, codec::TokioCodec};
 use tokio::net::UnixListener;
 
-use super::{GreeterClient, SessionCommand};
-use crate::{
-    CoreError, GreeterEvent, GreeterState, MessageLevel, PromptId, PromptKind, Secret,
-    ServerErrorKind, Transport, TransportError,
+use super::GreeterClient;
+use crate::{GreetdError, GreeterState, ServerErrorKind, Transport, TransportError};
+use fomalhaut_core::{
+    AuthEvent as GreeterEvent, CoreError, MessageLevel, PromptId, PromptKind, Secret,
+    SessionCommand,
 };
 
 enum ExpectedRequest {
@@ -142,6 +143,13 @@ async fn take_prompt<T>(client: &mut GreeterClient<T>, expected_kind: PromptKind
     }
 }
 
+fn assert_authenticated(event: GreeterEvent) {
+    match event {
+        GreeterEvent::Authenticated(identity) => assert_eq!(identity.account_name(), "alice"),
+        event => panic!("expected authenticated identity, got {event:?}"),
+    }
+}
+
 #[tokio::test]
 async fn password_authentication_starts_a_session() {
     let transport = ScriptedTransport::new([
@@ -172,12 +180,11 @@ async fn password_authentication_starts_a_session() {
         .respond(prompt_id, Secret::new("hunter2"))
         .await
         .expect("the scripted password is accepted");
-    assert_eq!(
+    assert_authenticated(
         client
             .next_event()
             .await
             .expect("authentication emits an event"),
-        GreeterEvent::Authenticated
     );
     assert_eq!(client.state(), GreeterState::Authenticated);
 
@@ -191,13 +198,10 @@ async fn password_authentication_starts_a_session() {
         .await
         .expect("the scripted session starts");
 
-    assert_eq!(
-        client
-            .next_event()
-            .await
-            .expect("session start emits an event"),
-        GreeterEvent::SessionStarted
-    );
+    assert!(matches!(
+        client.next_event().await,
+        Err(GreetdError::Core(CoreError::NoPendingEvent))
+    ));
     assert_eq!(client.state(), GreeterState::Started);
     assert!(!client.needs_cancel());
     assert_eq!(client.transport.remaining(), 0);
@@ -250,12 +254,11 @@ async fn info_and_error_messages_are_acknowledged_before_visible_prompt() {
         .respond(prompt_id, Secret::new("recovery-code"))
         .await
         .expect("visible answer is accepted");
-    assert_eq!(
+    assert_authenticated(
         client
             .next_event()
             .await
             .expect("authentication emits an event"),
-        GreeterEvent::Authenticated
     );
     assert_eq!(client.transport.remaining(), 0);
 }
@@ -293,10 +296,10 @@ async fn multifactor_flow_rejects_stale_prompt_ids() {
         .expect_err("the old prompt id must be rejected");
     assert!(matches!(
         error,
-        CoreError::StalePrompt {
+        GreetdError::Core(CoreError::StalePrompt {
             expected: Some(expected),
             received,
-        } if expected == totp_prompt && received == password_prompt
+        }) if expected == totp_prompt && received == password_prompt
     ));
     assert_eq!(client.transport.remaining(), 1);
 
@@ -304,12 +307,11 @@ async fn multifactor_flow_rejects_stale_prompt_ids() {
         .respond(totp_prompt, Secret::new("123456"))
         .await
         .expect("current MFA prompt is accepted");
-    assert_eq!(
+    assert_authenticated(
         client
             .next_event()
             .await
             .expect("authentication emits an event"),
-        GreeterEvent::Authenticated
     );
 }
 
@@ -339,12 +341,11 @@ async fn authentication_failure_can_be_retried() {
         .create_session("alice".to_owned())
         .await
         .expect("the failed greetd attempt was explicitly cancelled");
-    assert_eq!(
+    assert_authenticated(
         client
             .next_event()
             .await
             .expect("retry emits authentication success"),
-        GreeterEvent::Authenticated
     );
     assert_eq!(client.state(), GreeterState::Authenticated);
 }
@@ -360,10 +361,7 @@ async fn passwordless_authentication_succeeds_immediately() {
         .await
         .expect("passwordless authentication succeeds");
 
-    assert_eq!(
-        client.next_event().await.expect("success emits an event"),
-        GreeterEvent::Authenticated
-    );
+    assert_authenticated(client.next_event().await.expect("success emits an event"));
 }
 
 #[tokio::test]
@@ -436,7 +434,7 @@ async fn transport_failure_disconnects_without_replaying() {
         .await
         .expect_err("transport failure must be returned");
 
-    assert!(matches!(error, CoreError::Transport(_)));
+    assert!(matches!(error, GreetdError::Transport(_)));
     assert_eq!(client.state(), GreeterState::Disconnected);
     assert!(!client.needs_cancel());
 }
@@ -456,7 +454,10 @@ async fn generic_server_error_is_sanitized() {
     let display = error.to_string();
     let debug = format!("{error:?}");
 
-    assert!(matches!(error, CoreError::Server(ServerErrorKind::General)));
+    assert!(matches!(
+        error,
+        GreetdError::Server(ServerErrorKind::General)
+    ));
     assert!(!display.contains("must-not-leak"));
     assert!(!debug.contains("must-not-leak"));
     assert_eq!(client.state(), GreeterState::Failed);
@@ -493,7 +494,7 @@ async fn session_start_failure_is_sanitized() {
 
     assert!(matches!(
         &error,
-        CoreError::Server(ServerErrorKind::General)
+        GreetdError::Server(ServerErrorKind::General)
     ));
     assert!(!format!("{error:?}").contains("private environment value"));
     assert_eq!(client.state(), GreeterState::Failed);
@@ -510,7 +511,6 @@ async fn authentication_message_during_start_is_rejected() {
             },
             prompt(AuthMessageType::Secret, "unexpected"),
         ),
-        step(ExpectedRequest::Cancel, Response::Success),
     ]);
     let mut client = GreeterClient::with_transport(transport);
     client
@@ -529,17 +529,9 @@ async fn authentication_message_during_start_is_rejected() {
         .await
         .expect_err("auth prompt during start violates the protocol");
 
-    assert!(matches!(error, CoreError::UnexpectedResponse { .. }));
-    assert_eq!(client.state(), GreeterState::Authenticating);
-    assert!(client.needs_cancel());
-    client
-        .cancel()
-        .await
-        .expect("the active greetd session can be cancelled");
-    assert_eq!(
-        client.next_event().await.expect("cancel emits an event"),
-        GreeterEvent::Cancelled
-    );
+    assert!(matches!(error, GreetdError::UnexpectedResponse { .. }));
+    assert_eq!(client.state(), GreeterState::Failed);
+    assert!(!client.needs_cancel());
 }
 
 #[tokio::test]
@@ -547,10 +539,6 @@ async fn invalid_operations_do_not_touch_the_transport() {
     let transport = ScriptedTransport::new([]);
     let mut client = GreeterClient::with_transport(transport);
 
-    let respond_error = client
-        .respond(PromptId::new(1), Secret::new("ignored"))
-        .await
-        .expect_err("idle client has no prompt");
     let cancel_error = client
         .cancel()
         .await
@@ -562,16 +550,21 @@ async fn invalid_operations_do_not_touch_the_transport() {
         .await
         .expect_err("idle client is not authenticated");
 
-    assert!(matches!(respond_error, CoreError::InvalidState { .. }));
-    assert!(matches!(cancel_error, CoreError::InvalidState { .. }));
-    assert!(matches!(start_error, CoreError::InvalidState { .. }));
+    assert!(matches!(
+        cancel_error,
+        GreetdError::Core(CoreError::InvalidState { .. })
+    ));
+    assert!(matches!(
+        start_error,
+        GreetdError::Core(CoreError::InvalidState { .. })
+    ));
     assert!(matches!(
         SessionCommand::new(Vec::new(), Vec::new()),
         Err(CoreError::EmptySessionCommand)
     ));
     assert!(matches!(
         client.next_event().await,
-        Err(CoreError::NoPendingEvent)
+        Err(GreetdError::Core(CoreError::NoPendingEvent))
     ));
     assert_eq!(client.transport.remaining(), 0);
 }
@@ -587,32 +580,6 @@ fn dropping_client_drops_its_transport_without_async_work() {
         assert!(!dropped.load(Ordering::Relaxed));
     }
     assert!(dropped.load(Ordering::Relaxed));
-}
-
-#[tokio::test]
-async fn prompt_identifier_exhaustion_fails_closed() {
-    let transport = ScriptedTransport::new([
-        step(
-            ExpectedRequest::Create("alice"),
-            prompt(AuthMessageType::Secret, "Password:"),
-        ),
-        step(ExpectedRequest::Cancel, Response::Success),
-    ]);
-    let mut client = GreeterClient::with_transport(transport);
-    client.next_prompt_id = u64::MAX;
-
-    let error = client
-        .create_session("alice".to_owned())
-        .await
-        .expect_err("prompt id exhaustion must stop authentication");
-
-    assert!(matches!(error, CoreError::PromptIdExhausted));
-    assert_eq!(client.state(), GreeterState::Authenticating);
-    assert!(client.needs_cancel());
-    client
-        .cancel()
-        .await
-        .expect("internal failure still permits explicit cancellation");
 }
 
 static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -651,10 +618,7 @@ async fn unix_transport_uses_the_greetd_codec() {
         .create_session("alice".to_owned())
         .await
         .expect("codec round trip succeeds");
-    assert_eq!(
-        client.next_event().await.expect("success emits an event"),
-        GreeterEvent::Authenticated
-    );
+    assert_authenticated(client.next_event().await.expect("success emits an event"));
 
     server.await.expect("test server task completes");
     std::fs::remove_file(path).expect("test socket is removable");

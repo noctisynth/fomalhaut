@@ -1,24 +1,22 @@
-//! Observable states of a greeter client.
+//! Backend-neutral authentication states.
 
-/// Current state of the greetd authentication and session lifecycle.
+/// Current state of a serial authentication conversation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GreeterState {
-    /// The transport is no longer usable.
+pub enum AuthState {
+    /// The backend transport or worker is no longer usable.
     Disconnected,
-    /// Connected to greetd with no active session.
+    /// No authentication transaction is active.
     Idle,
-    /// Waiting for greetd to advance authentication.
+    /// The authentication service is advancing the conversation.
     Authenticating,
-    /// Waiting for the caller to answer the current PAM prompt.
-    WaitingForPrompt,
-    /// Authentication succeeded and a trusted session may be started.
+    /// The backend is waiting for a hidden response.
+    WaitingForSecret,
+    /// The backend is waiting for a visible response.
+    WaitingForVisible,
+    /// Authentication completed successfully.
     Authenticated,
-    /// Waiting for greetd to start the user session.
-    StartingSession,
-    /// The user session started successfully.
-    Started,
-    /// Waiting for greetd to cancel the active session.
+    /// The backend is cancelling the active transaction.
     Cancelling,
-    /// Greetd rejected authentication and the client released its session.
+    /// Authentication or its backing service failed.
     Failed,
 }

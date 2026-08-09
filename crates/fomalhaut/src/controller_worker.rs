@@ -9,7 +9,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use fomalhaut_core::GreeterClient;
+use fomalhaut_greetd::GreeterClient;
 use fomalhaut_web::{
     controller::{HostController, TrustedSession},
     protocol::RequestEnvelope,

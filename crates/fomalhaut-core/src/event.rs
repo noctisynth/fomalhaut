@@ -1,8 +1,10 @@
-//! Events emitted by the greetd state machine.
+//! Backend-neutral authentication events.
 
 use std::fmt;
 
 use zeroize::Zeroize;
+
+use crate::AuthenticatedIdentity;
 
 /// Identifies the authentication prompt that may currently be answered.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -29,7 +31,7 @@ pub enum PromptKind {
     Visible,
 }
 
-/// Severity of a PAM message that does not request input.
+/// Severity of a conversation message that does not request input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageLevel {
     /// Informational message.
@@ -38,36 +40,34 @@ pub enum MessageLevel {
     Error,
 }
 
-/// UI-independent events produced by the greeter state machine.
+/// UI-independent events produced by an authentication backend.
 #[derive(Eq, PartialEq)]
-pub enum GreeterEvent {
-    /// PAM is waiting for a response.
+pub enum AuthEvent {
+    /// The backend is waiting for a response.
     Prompt {
         /// Identifier that must be echoed when responding.
         id: PromptId,
         /// Whether the response is secret or visible.
         kind: PromptKind,
-        /// Prompt text supplied by PAM.
+        /// Prompt text supplied by the authentication service.
         message: String,
     },
-    /// PAM supplied a message that does not request input.
+    /// The authentication service supplied a message that needs no response.
     Message {
         /// Message severity.
         level: MessageLevel,
-        /// Message text supplied by PAM.
+        /// Message text supplied by the authentication service.
         text: String,
     },
-    /// Authentication completed successfully.
-    Authenticated,
-    /// The requested user session started successfully.
-    SessionStarted,
-    /// Authentication failed after the client cancelled the rejected greetd session.
+    /// Authentication completed successfully for a trusted identity.
+    Authenticated(AuthenticatedIdentity),
+    /// Authentication was rejected.
     AuthenticationFailed,
-    /// An active authentication session was cancelled.
+    /// An active authentication transaction was cancelled.
     Cancelled,
 }
 
-impl fmt::Debug for GreeterEvent {
+impl fmt::Debug for AuthEvent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Prompt { id, kind, .. } => formatter
@@ -81,39 +81,37 @@ impl fmt::Debug for GreeterEvent {
                 .field("level", level)
                 .field("text", &"[REDACTED]")
                 .finish(),
-            Self::Authenticated => formatter.write_str("Authenticated"),
-            Self::SessionStarted => formatter.write_str("SessionStarted"),
+            Self::Authenticated(_) => formatter.write_str("Authenticated([REDACTED])"),
             Self::AuthenticationFailed => formatter.write_str("AuthenticationFailed"),
             Self::Cancelled => formatter.write_str("Cancelled"),
         }
     }
 }
 
-impl GreeterEvent {
-    pub(crate) fn zeroize(&mut self) {
+impl AuthEvent {
+    /// Clears Rust-owned text retained by this event.
+    pub fn zeroize(&mut self) {
         match self {
             Self::Prompt { message, .. } => message.zeroize(),
             Self::Message { text, .. } => text.zeroize(),
-            Self::Authenticated
-            | Self::SessionStarted
-            | Self::AuthenticationFailed
-            | Self::Cancelled => {}
+            Self::Authenticated(identity) => identity.zeroize(),
+            Self::AuthenticationFailed | Self::Cancelled => {}
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GreeterEvent, MessageLevel, PromptId, PromptKind};
+    use super::{AuthEvent, MessageLevel, PromptId, PromptKind};
 
     #[test]
-    fn debug_redacts_pam_text() {
-        let prompt = GreeterEvent::Prompt {
+    fn debug_redacts_conversation_text() {
+        let prompt = AuthEvent::Prompt {
             id: PromptId::new(1),
             kind: PromptKind::Secret,
             message: "Password containing secret".to_owned(),
         };
-        let message = GreeterEvent::Message {
+        let message = AuthEvent::Message {
             level: MessageLevel::Error,
             text: "entered token was 123456".to_owned(),
         };

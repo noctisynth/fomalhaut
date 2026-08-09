@@ -14,7 +14,11 @@ impl Secret {
         Self(value.into())
     }
 
-    pub(crate) fn take(&mut self) -> String {
+    /// Consumes the wrapper and transfers its allocation to a trusted backend.
+    ///
+    /// The receiver becomes responsible for clearing every controllable copy.
+    #[must_use]
+    pub fn into_inner(mut self) -> String {
         std::mem::take(&mut self.0)
     }
 }

@@ -20,27 +20,44 @@ backend-neutral Rust crate 边界写入设计。下方已完成项仍只证明�
 子进程 worker、限定 API、有界 IPC、secret 生命周期和 PAM fixture 仍是未完成门槛，
 当前 manifest 尚未增加 PAM 依赖。
 
+同日开始首个 P0 实现切片：`fomalhaut-core` 已改为 backend-neutral 认证领域层，现有 greetd
+client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web greeter controller
+已改为只依赖该能力 trait 并使用 fake backend 测试。五个目标 crate 已由 Cargo CLI 创建并
+通过 Semifold CLI 登记为独立 `0.1.0-alpha`/`alpha` package；其中 `fomalhaut-config`、
+`fomalhaut-gtk`、`fomalhaut-pam` 和 `fomalhaut-lock` 仍只是明确失败或无功能的骨架，不代表
+对应功能完成。该切片通过 workspace 编译、Clippy 和 118 个测试。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
 
 - [x] 在 `docs/DESIGN.md` 记录 greeter/locker 一等产品、backend 分权、统一宿主、
       session-lock 失败关闭和未来 `fomalhautd` seam。
-- [ ] 将 `fomalhaut-core` 重构为不依赖 greetd/PAM 的认证领域层，定义
+- [x] 将 `fomalhaut-core` 重构为不依赖 greetd/PAM 的认证领域层，定义
       `ConversationBackend`、`LoginBackend`、`ReauthBackend`、`AuthEvent`、
       `AuthenticatedIdentity`、`Secret` 和 `SessionCommand`。
-- [ ] 用 Cargo CLI 创建 `fomalhaut-greetd`、`fomalhaut-pam`、`fomalhaut-config`、
+- [x] 用 Cargo CLI 创建 `fomalhaut-greetd`、`fomalhaut-pam`、`fomalhaut-config`、
       `fomalhaut-gtk` 和 `fomalhaut-lock` crate；在创建前确认每个发布包的元数据和依赖方向。
-- [ ] 将现有 greetd client、Unix transport 和 greetd-specific lifecycle 迁入
+- [x] 将现有 greetd client、Unix transport 和 greetd-specific lifecycle 迁入
       `fomalhaut-greetd`，由其实现 `LoginBackend`，保持当前 greeter 行为和测试全绿。
 - [ ] 将严格 TOML 解析/角色化视图迁入 `fomalhaut-config`，将 GTK4/WebKitGTK
       application、WebView、scheme、bridge 和安全 policy 迁入 `fomalhaut-gtk`。
-- [ ] 将 `fomalhaut-web` controller 拆成公共 auth、greeter lifecycle 和 locker lifecycle，
-      并用 fake `LoginBackend`/`ReauthBackend` 覆盖权能分离与全部状态转换。
-- [ ] 让现有 `fomalhaut` 仅组合 greeter 权能，让 `fomalhaut-lock` 仅组合
-      reauth/session-lock 权能；两个宿主不得通过运行时布尔开关共享越权 API。
-- [ ] 用 `smif commit` 为受影响的发布 crate 建立联合 changeset，并用 Semifold CLI
-      同步 package 列表、CI、package payload 与已发布 crate 的兼容说明。
+- [x] 让现有 Web greeter controller 只依赖 `LoginBackend`，并用不依赖 greetd 类型的 fake
+      backend 覆盖当前 greeter 状态转换。
+- [ ] 将 `fomalhaut-web` controller 继续拆成公共 auth、greeter lifecycle 和 locker lifecycle，
+      并用 fake `ReauthBackend` 覆盖 locker 权能分离与全部状态转换。
+- [x] 让现有 `fomalhaut` 只组合 greetd `LoginBackend`，不再由 core 或 Web crate 直接依赖
+      greetd transport/type。
+- [ ] 让 `fomalhaut-lock` 只组合 reauth/session-lock 权能；两个宿主不得通过运行时布尔开关
+      共享越权 API。
+- [x] 用 Semifold CLI 同步新增 Rust package 列表并把 release channel 全部设置为 `alpha`。
+- [x] 用 `smif commit` 为首个 backend-neutral/greetd 迁移切片建立联合 changeset，覆盖
+      `fomalhaut-core`、`fomalhaut-greetd`、`fomalhaut-web` 和 `fomalhaut`。
+- [ ] 随后续 crate 实现同步 CI、package payload 与已发布 crate 的兼容说明；未实现的
+      `fomalhaut-config`、`fomalhaut-gtk`、`fomalhaut-pam` 和 `fomalhaut-lock` 不提前发布。
+- [ ] 在 Semifold CI 联合更新 `fomalhaut-core` 与 `fomalhaut-greetd` 版本/包间依赖后验证
+      `fomalhaut-greetd` 的最终发布 tarball；本地版本事务前的 `cargo package` 会按 registry
+      解析尚未包含新 core API 的已发布 `fomalhaut-core 0.1.0-alpha.1`，不能替代该验证。
 
 ### PAM wrapper 选择与实现门槛
 

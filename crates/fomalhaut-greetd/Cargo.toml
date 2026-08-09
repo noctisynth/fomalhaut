@@ -1,0 +1,19 @@
+[package]
+name = "fomalhaut-greetd"
+version = "0.1.0-alpha"
+edition = "2024"
+description = "greetd login backend for Fomalhaut"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fomalhaut-core = { version = "0.1.0-alpha.1", path = "../fomalhaut-core" }
+greetd_ipc = { version = "0.10.3", features = ["tokio-codec"] }
+tokio = { version = "1.53.1", features = ["net"] }
+zeroize = "1.9.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt"] }

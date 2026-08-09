@@ -1,0 +1,12 @@
+[package]
+name = "fomalhaut-lock"
+version = "0.1.0-alpha"
+edition = "2024"
+description = "Wayland session locker with a WebKitGTK interface for Fomalhaut"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

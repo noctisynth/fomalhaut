@@ -1,0 +1,12 @@
+[package]
+name = "fomalhaut-config"
+version = "0.1.0-alpha"
+edition = "2024"
+description = "Shared strict configuration for Fomalhaut greeter and locker"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
