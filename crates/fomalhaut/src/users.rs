@@ -16,6 +16,7 @@ use std::{
 };
 
 use fomalhaut_config::{UserDiscoveryConfig, UserProvider};
+use fomalhaut_gtk::ResourceAsset;
 use fomalhaut_web::protocol::{MAX_USERS, UserSummary};
 use zbus::{blocking::Proxy, zvariant::OwnedObjectPath};
 
@@ -23,7 +24,6 @@ const ACCOUNTS_DESTINATION: &str = "org.freedesktop.Accounts";
 const ACCOUNTS_PATH: &str = "/org/freedesktop/Accounts";
 const ACCOUNTS_INTERFACE: &str = "org.freedesktop.Accounts";
 const USER_INTERFACE: &str = "org.freedesktop.Accounts.User";
-const AVATAR_URI_PREFIX: &str = "fomalhaut://avatar/";
 const TRUSTED_AVATAR_ROOT: &str = "/var/lib/AccountsService/icons";
 const LOGIN_DEFS_PATH: &str = "/etc/login.defs";
 const GETENT_PATH: &str = "/usr/bin/getent";
@@ -39,40 +39,16 @@ const GETENT_TIMEOUT: Duration = Duration::from_millis(1500);
 const GETENT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const GETENT_READER_GRACE: Duration = Duration::from_millis(250);
 
-/// One validated in-memory avatar served by the trusted URI scheme.
-pub struct AvatarAsset {
-    uri: String,
-    body: Vec<u8>,
-    content_type: &'static str,
-}
-
-impl AvatarAsset {
-    /// Returns a copy suitable for one WebKit scheme response.
-    pub fn response_body(&self) -> Vec<u8> {
-        self.body.clone()
-    }
-
-    /// Returns the allowlisted media type detected from magic bytes.
-    pub const fn content_type(&self) -> &'static str {
-        self.content_type
-    }
-
-    /// Returns whether this asset owns the exact opaque URI.
-    pub fn matches_uri(&self, uri: &str) -> bool {
-        self.uri == uri
-    }
-}
-
 /// Public user summaries paired with any validated avatar resources.
 #[derive(Default)]
 pub struct DiscoveredUsers {
     summaries: Vec<UserSummary>,
-    avatars: Vec<AvatarAsset>,
+    avatars: Vec<ResourceAsset>,
 }
 
 impl DiscoveredUsers {
     /// Consumes discovery output for the controller and GTK resource host.
-    pub fn into_parts(self) -> (Vec<UserSummary>, Vec<AvatarAsset>) {
+    pub fn into_parts(self) -> (Vec<UserSummary>, Vec<ResourceAsset>) {
         (self.summaries, self.avatars)
     }
 }
@@ -401,7 +377,7 @@ fn build_public_users(mut raw: Vec<RawUser>) -> DiscoveredUsers {
             .icon_file
             .as_deref()
             .and_then(|path| read_avatar(path, user.uid, avatars.len() + 1));
-        let avatar_url = avatar.as_ref().map(|asset| asset.uri.clone());
+        let avatar_url = avatar.as_ref().map(|asset| asset.uri().to_owned());
         let Ok(summary) = UserSummary::new(user.username, user.display_name, avatar_url) else {
             continue;
         };
@@ -413,7 +389,7 @@ fn build_public_users(mut raw: Vec<RawUser>) -> DiscoveredUsers {
     DiscoveredUsers { summaries, avatars }
 }
 
-fn read_avatar(path: &Path, uid: u32, identifier: usize) -> Option<AvatarAsset> {
+fn read_avatar(path: &Path, uid: u32, identifier: usize) -> Option<ResourceAsset> {
     if !path.is_absolute() {
         return None;
     }
@@ -437,11 +413,7 @@ fn read_avatar(path: &Path, uid: u32, identifier: usize) -> Option<AvatarAsset> 
         return None;
     }
     let content_type = avatar_content_type(&body)?;
-    Some(AvatarAsset {
-        uri: format!("{AVATAR_URI_PREFIX}{identifier}"),
-        body,
-        content_type,
-    })
+    ResourceAsset::avatar(identifier, body, content_type).ok()
 }
 
 fn fd_is_in_trusted_avatar_root(fd: RawFd) -> bool {
@@ -670,7 +642,7 @@ mod tests {
             .expect("the avatar fixture has metadata")
             .uid();
         let asset = read_avatar(&png, uid, 7).expect("a user-owned PNG is accepted");
-        assert!(asset.matches_uri("fomalhaut://avatar/7"));
+        assert_eq!(asset.uri(), "fomalhaut://avatar/7");
         assert_eq!(asset.content_type(), "image/png");
 
         let link = directory.join("avatar-link.png");

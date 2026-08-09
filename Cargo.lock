@@ -369,13 +369,13 @@ dependencies = [
  "fomalhaut-config",
  "fomalhaut-core",
  "fomalhaut-greetd",
+ "fomalhaut-gtk",
  "fomalhaut-session",
  "fomalhaut-web",
  "greetd_ipc",
  "gtk4",
  "libc",
  "tokio",
- "webkit6",
  "zbus",
 ]
 
@@ -408,6 +408,11 @@ dependencies = [
 [[package]]
 name = "fomalhaut-gtk"
 version = "0.1.0-alpha"
+dependencies = [
+ "fomalhaut-web",
+ "gtk4",
+ "webkit6",
+]
 
 [[package]]
 name = "fomalhaut-lock"

@@ -11,30 +11,22 @@ use std::{
 
 use fomalhaut_config::{PowerConfig, UserDiscoveryConfig};
 use fomalhaut_greetd::GreeterClient;
+use fomalhaut_gtk::{BridgeController, ControllerBatch, ControllerOutput, SubmitError};
 use fomalhaut_web::{
     controller::{HostController, TrustedSession},
     protocol::RequestEnvelope,
 };
 
-use crate::{
-    power::LogindPowerControl,
-    users::{AvatarAsset, discover_users},
-};
+use crate::{power::LogindPowerControl, users::discover_users};
 
 const CHANNEL_CAPACITY: usize = 8;
 
-pub struct WorkerBatch {
-    pub epoch: u64,
-    pub response: String,
-    pub event_scripts: Vec<String>,
-    pub session_started: bool,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GreeterAction {
+    SessionStarted,
 }
 
-pub enum WorkerOutput {
-    Ready(Vec<AvatarAsset>),
-    Batch(WorkerBatch),
-    Fatal(&'static str),
-}
+pub type WorkerOutput = ControllerOutput<GreeterAction>;
 
 enum WorkerCommand {
     Request {
@@ -43,12 +35,6 @@ enum WorkerCommand {
     },
     CancelForPage,
     Shutdown,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SubmitError {
-    Busy,
-    Stopped,
 }
 
 #[derive(Debug)]
@@ -136,6 +122,20 @@ impl Drop for WorkerHandle {
     }
 }
 
+impl BridgeController for WorkerHandle {
+    fn submit(&self, epoch: u64, request: RequestEnvelope) -> Result<(), SubmitError> {
+        Self::submit(self, epoch, request)
+    }
+
+    fn cancel_for_page(&self) -> Result<(), SubmitError> {
+        Self::cancel_for_page(self)
+    }
+
+    fn shutdown(&self) {
+        Self::shutdown(self);
+    }
+}
+
 fn run_worker(
     socket_path: PathBuf,
     sessions: Vec<TrustedSession>,
@@ -205,11 +205,11 @@ fn run_worker(
                     }
                 };
                 if outputs
-                    .send(WorkerOutput::Batch(WorkerBatch {
+                    .send(WorkerOutput::Batch(ControllerBatch {
                         epoch,
                         response,
                         event_scripts,
-                        session_started,
+                        terminal: session_started.then_some(GreeterAction::SessionStarted),
                     }))
                     .is_err()
                 {
@@ -252,7 +252,7 @@ mod tests {
         time::Duration,
     };
 
-    use super::{WorkerHandle, WorkerOutput};
+    use super::{GreeterAction, WorkerHandle, WorkerOutput};
     use fomalhaut_config::{PowerConfig, UserDiscoveryConfig};
     use fomalhaut_core::SessionCommand;
     use fomalhaut_web::{
@@ -543,7 +543,7 @@ mod tests {
         else {
             panic!("worker must return a session-start batch");
         };
-        assert!(started.session_started);
+        assert_eq!(started.terminal, Some(GreeterAction::SessionStarted));
         assert!(
             started
                 .event_scripts

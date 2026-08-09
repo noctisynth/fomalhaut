@@ -24,13 +24,22 @@ backend-neutral Rust crate 边界写入设计。下方已完成项仍只证明�
 client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web greeter controller
 已改为只依赖该能力 trait 并使用 fake backend 测试。五个目标 crate 已由 Cargo CLI 创建并
 通过 Semifold CLI 登记为独立 `0.1.0-alpha`/`alpha` package；其中 `fomalhaut-config`、
-`fomalhaut-gtk`、`fomalhaut-pam` 和 `fomalhaut-lock` 仍只是明确失败或无功能的骨架，不代表
-对应功能完成。该切片通过 workspace 编译、Clippy 和 118 个测试。
+`fomalhaut-gtk` 在该切片结束时仍是骨架，随后已按下方记录实现；`fomalhaut-pam` 和
+`fomalhaut-lock` 仍只是明确失败或无功能的骨架，不代表对应功能完成。该切片通过 workspace
+编译、Clippy 和 118 个测试。
 
 随后完成共享配置切片：严格 TOML 解析已迁入 `fomalhaut-config`，并实现
 `for_greeter()`/`for_locker()`、通用/角色主题优先级、旧字段独占迁移别名和新旧冲突拒绝。
 greeter 已改用角色视图；安装器会迁移 `[frontend].path`，保留角色覆盖、显示和电源策略，
 并通过全新安装、旧配置迁移和重复运行幂等的隔离测试。该切片将 workspace 测试增至 120 个。
+
+随后完成共享 GTK host 切片：GTK application 生命周期、hardened WebView、资源 scheme、
+bridge、页面 epoch、renderer 观测和辅助内存资源服务已迁入 `fomalhaut-gtk`；角色无关的
+controller/output/callback 边界不会让共享 crate 依赖 greetd、PAM、配置或 session-lock
+binding。greeter 继续在自身 crate
+组合普通全屏窗口、session discovery、greetd worker 和 session-start 退出策略，原有行为保持
+不变；`fomalhaut-gtk` 的独立 package payload 和 registry 依赖解析已验证。该切片将 workspace
+测试增至 124 个。
 
 ## P0：greeter/locker 产品与 crate 边界
 
@@ -49,8 +58,10 @@ greeter 已改用角色视图；安装器会迁移 `[frontend].path`，保留角
       `fomalhaut-config`，且 locker 视图不暴露 session discovery 或用户枚举配置。
 - [x] 用 `smif commit` 为共享角色配置切片建立 changeset，覆盖新增的
       `fomalhaut-config` 和接入该配置的 `fomalhaut`。
-- [ ] 将 GTK4/WebKitGTK application、WebView、scheme、bridge 和安全 policy 迁入
-      `fomalhaut-gtk`。
+- [x] 将 GTK4/WebKitGTK application、WebView、scheme、bridge、页面生命周期和安全 policy
+      迁入 `fomalhaut-gtk`。
+- [x] 用 `smif commit` 为共享 GTK host 切片建立 changeset，覆盖新增实现的
+      `fomalhaut-gtk` 和接入共享宿主的 `fomalhaut`。
 - [x] 让现有 Web greeter controller 只依赖 `LoginBackend`，并用不依赖 greetd 类型的 fake
       backend 覆盖当前 greeter 状态转换。
 - [ ] 将 `fomalhaut-web` controller 继续拆成公共 auth、greeter lifecycle 和 locker lifecycle，
@@ -63,10 +74,14 @@ greeter 已改用角色视图；安装器会迁移 `[frontend].path`，保留角
 - [x] 用 `smif commit` 为首个 backend-neutral/greetd 迁移切片建立联合 changeset，覆盖
       `fomalhaut-core`、`fomalhaut-greetd`、`fomalhaut-web` 和 `fomalhaut`。
 - [ ] 随后续 crate 实现同步 CI、package payload 与已发布 crate 的兼容说明；未实现的
-      `fomalhaut-config`、`fomalhaut-gtk`、`fomalhaut-pam` 和 `fomalhaut-lock` 不提前发布。
+      `fomalhaut-pam` 和 `fomalhaut-lock` 不提前发布。`fomalhaut-config`、`fomalhaut-gtk`
+      已分别通过独立 package payload 验证，但联合发布后的下游验证仍按下项完成。
 - [ ] 在 Semifold CI 联合更新 `fomalhaut-core` 与 `fomalhaut-greetd` 版本/包间依赖后验证
       `fomalhaut-greetd` 的最终发布 tarball；本地版本事务前的 `cargo package` 会按 registry
       解析尚未包含新 core API 的已发布 `fomalhaut-core 0.1.0-alpha.1`，不能替代该验证。
+- [ ] 在 Semifold CI 联合发布 `fomalhaut-config`、`fomalhaut-greetd`、`fomalhaut-gtk` 与
+      `fomalhaut` 后验证 greeter 的最终 tarball；本地版本事务前无法从 registry 解析尚未发布的
+      config/GTK crate，单独验证两个库的 payload 不能替代下游联合验证。
 
 ### PAM wrapper 选择与实现门槛
 

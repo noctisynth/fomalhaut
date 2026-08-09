@@ -298,6 +298,13 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 - 不依赖 `gtk4-session-lock`；该依赖只进入 `fomalhaut-lock`，避免迫使 greeter
   引入额外的 session-lock 系统库。
 
+共享宿主切片已经迁入 `fomalhaut-gtk`：该 crate 现在拥有 GTK application 生命周期、
+hardened WebView、资源 scheme、bridge、页面 epoch、renderer 观测和辅助内存资源服务，并以
+`BridgeController`、有界 `ControllerOutput` 和角色回调接收类型化输入。普通 greeter 窗口、session discovery、
+greetd worker 和“登录 session 已启动后退出”的策略仍由 `fomalhaut` 组合；共享 crate
+不依赖 greetd、PAM、配置解析或 session-lock binding。角色终态通过泛型 terminal action
+交回可执行程序处理，为 locker 后续独占 unlock handle 保留边界。
+
 ### 4.8 `fomalhaut` 与 `fomalhaut-lock`
 
 `fomalhaut` 暂时保留现有 greeter 二进制名，组合 `LoginBackend`、session discovery、
