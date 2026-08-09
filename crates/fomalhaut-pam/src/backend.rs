@@ -375,21 +375,7 @@ impl ProcessWorker {
         let (sender, messages) = mpsc::sync_channel(WORKER_CHANNEL_CAPACITY);
         let reader = thread::Builder::new()
             .name("fomalhaut-pam-ipc".to_owned())
-            .spawn(move || {
-                let mut stdout = BufReader::new(stdout);
-                loop {
-                    let message = read_worker_message(&mut stdout);
-                    let terminal = matches!(
-                        message,
-                        Ok(WorkerMessage::Authenticated
-                            | WorkerMessage::Rejected
-                            | WorkerMessage::Fatal)
-                    );
-                    if sender.send(message).is_err() || terminal {
-                        return;
-                    }
-                }
-            })
+            .spawn(move || forward_worker_messages(stdout, sender))
             .map_err(|_| {
                 terminate_child(&mut child);
                 WorkerFailure::Spawn
@@ -442,6 +428,24 @@ impl ProcessWorker {
             Ok(())
         } else {
             Err(WorkerFailure::ExitStatus)
+        }
+    }
+}
+
+fn forward_worker_messages(
+    stdout: impl std::io::Read,
+    sender: mpsc::SyncSender<Result<WorkerMessage, IpcError>>,
+) {
+    let mut stdout = BufReader::new(stdout);
+    loop {
+        let message = read_worker_message(&mut stdout);
+        let terminal = message.is_err()
+            || matches!(
+                message,
+                Ok(WorkerMessage::Authenticated | WorkerMessage::Rejected | WorkerMessage::Fatal)
+            );
+        if sender.send(message).is_err() || terminal {
+            return;
         }
     }
 }
@@ -512,6 +516,7 @@ mod tests {
     use std::{
         collections::VecDeque,
         future::Future,
+        io::Cursor,
         sync::{Arc, Mutex},
         task::{Context, Poll, Waker},
     };
@@ -525,7 +530,26 @@ mod tests {
         ipc::{MAX_TRANSACTION_FRAMES, WorkerMessage, WorkerMessageLevel, WorkerPromptKind},
     };
 
-    use super::{PamReauthBackend, WorkerFactory, WorkerFailure, WorkerTransport};
+    use super::{
+        PamReauthBackend, WorkerFactory, WorkerFailure, WorkerTransport, forward_worker_messages,
+    };
+
+    #[test]
+    fn worker_reader_exits_after_the_first_ipc_failure() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(8);
+        forward_worker_messages(Cursor::new(Vec::<u8>::new()), sender);
+
+        assert!(
+            receiver
+                .recv()
+                .expect("one IPC failure is forwarded")
+                .is_err()
+        );
+        assert!(
+            receiver.recv().is_err(),
+            "the reader exits instead of filling the channel"
+        );
+    }
 
     fn block_on<F: Future>(future: F) -> F::Output {
         let mut context = Context::from_waker(Waker::noop());

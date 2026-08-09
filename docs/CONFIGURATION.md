@@ -138,10 +138,11 @@ systemctl --user start fomalhaut-lock.service
 
 该 user unit 显式使用 `NoNewPrivileges=no`。这是 PAM 兼容边界，不表示 Fomalhaut 自身以 root
 运行或带有 setuid bit：Arch 的 `pam_unix` 需要透明执行系统安装的 setuid `unix_chkpwd` helper，
-`NoNewPrivileges=yes` 会阻止该 helper 获得校验受保护密码数据库所需的身份。unit 仍保留
-`LockPersonality=yes` 与 `RestrictSUIDSGID=yes`，后者禁止创建新的 SUID/SGID 文件。管理员若替换
-PAM stack，应同时复核这一权限要求，不能在未验证真实密码认证的情况下自行启用
-`NoNewPrivileges`。
+`NoNewPrivileges=yes` 会阻止该 helper 获得校验受保护密码数据库所需的身份。systemd user scope
+中的 `LockPersonality=yes` 与 `RestrictSUIDSGID=yes` 也会为了安装 seccomp 过滤器而隐式启用
+`NoNewPrivs`，因此推荐 unit 不设置这两项。管理员若替换 PAM stack，应同时复核这一权限要求；
+需要恢复这些 hardening 时必须先把 PAM 调度拆入独立权限域，不能在当前内嵌 worker 架构下直接
+启用。
 
 unit 同时使用 `UnsetEnvironment=GDK_SCALE GDK_DPI_SCALE`，只为 locker 服务清除 user manager
 可能继承的工具包缩放变量。niri/GTK 仍负责输出缩放，额外页面 zoom 只由 locker 的配置值决定。

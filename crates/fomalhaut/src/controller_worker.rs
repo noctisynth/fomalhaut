@@ -260,7 +260,7 @@ mod tests {
         controller::TrustedSession,
         protocol::{SessionKind, SessionSummary, decode_request},
     };
-    use greetd_ipc::{AuthMessageType, Request, Response, codec::TokioCodec};
+    use greetd_ipc::{AuthMessageType, ErrorType, Request, Response, codec::TokioCodec};
 
     static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -310,12 +310,51 @@ mod tests {
                     .expect("stub reads password response");
                 assert!(matches!(
                     respond,
+                    Request::PostAuthMessageResponse { response } if response.as_deref() == Some("incorrect")
+                ));
+                Response::Error {
+                    error_type: ErrorType::AuthError,
+                    description: "test authentication rejection".to_owned(),
+                }
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub rejects authentication");
+
+                let failure_cancel = Request::read_from(&mut stream)
+                    .await
+                    .expect("worker cancels the rejected greetd session");
+                assert!(matches!(failure_cancel, Request::CancelSession));
+                Response::Success
+                    .write_to(&mut stream)
+                    .await
+                    .expect("stub accepts rejected-session cancellation");
+
+                let retry = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads authentication retry");
+                assert!(matches!(
+                    retry,
+                    Request::CreateSession { username } if username == "alice"
+                ));
+                Response::AuthMessage {
+                    auth_message_type: AuthMessageType::Secret,
+                    auth_message: "Password:".to_owned(),
+                }
+                .write_to(&mut stream)
+                .await
+                .expect("stub writes retry password prompt");
+
+                let retry_response = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads retry password response");
+                assert!(matches!(
+                    retry_response,
                     Request::PostAuthMessageResponse { response } if response.as_deref() == Some("correct")
                 ));
                 Response::Success
                     .write_to(&mut stream)
                     .await
-                    .expect("stub accepts authentication");
+                    .expect("stub accepts retry authentication");
 
                 let cancel = Request::read_from(&mut stream)
                     .await
@@ -326,11 +365,11 @@ mod tests {
                     .await
                     .expect("stub accepts page cancellation");
 
-                let retry = Request::read_from(&mut stream)
+                let page_retry = Request::read_from(&mut stream)
                     .await
-                    .expect("stub reads authentication retry");
+                    .expect("stub reads authentication after page cancellation");
                 assert!(matches!(
-                    retry,
+                    page_retry,
                     Request::CreateSession { username } if username == "alice"
                 ));
                 Response::AuthMessage {
@@ -386,13 +425,53 @@ mod tests {
         );
 
         let respond = decode_request(
-            br#"{"protocol":1,"id":2,"method":"auth.respond","params":{"promptId":1,"response":"correct"}}"#,
+            br#"{"protocol":1,"id":2,"method":"auth.respond","params":{"promptId":1,"response":"incorrect"}}"#,
         )
         .expect("response request fixture is valid");
         worker.submit(7, respond).expect("response is queued");
+        let WorkerOutput::Batch(rejected) = outputs
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns recoverable authentication rejection")
+        else {
+            panic!("worker must return an authentication batch");
+        };
+        assert!(
+            rejected
+                .event_scripts
+                .iter()
+                .any(|event| event.contains("auth.failed"))
+        );
+        assert!(rejected.response.contains(r#""ok":true"#));
+        assert!(!rejected.response.contains("incorrect"));
+
+        let retry = decode_request(
+            br#"{"protocol":1,"id":3,"method":"auth.begin","params":{"username":"alice"}}"#,
+        )
+        .expect("retry request fixture is valid");
+        worker.submit(7, retry).expect("retry request is queued");
+        let WorkerOutput::Batch(retry_prompt) = outputs
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns retry password prompt")
+        else {
+            panic!("worker must return a retry batch");
+        };
+        assert!(
+            retry_prompt
+                .event_scripts
+                .iter()
+                .any(|event| event.contains("auth.prompt"))
+        );
+
+        let retry_response = decode_request(
+            br#"{"protocol":1,"id":4,"method":"auth.respond","params":{"promptId":2,"response":"correct"}}"#,
+        )
+        .expect("retry response request fixture is valid");
+        worker
+            .submit(7, retry_response)
+            .expect("retry response is queued");
         let WorkerOutput::Batch(authenticated) = outputs
             .recv_timeout(Duration::from_secs(2))
-            .expect("worker returns authentication success")
+            .expect("worker returns retry authentication success")
         else {
             panic!("worker must return an authentication batch");
         };
@@ -407,20 +486,22 @@ mod tests {
         worker
             .cancel_for_page()
             .expect("page cancellation is queued");
-        let retry = decode_request(
-            br#"{"protocol":1,"id":3,"method":"auth.begin","params":{"username":"alice"}}"#,
+        let page_retry = decode_request(
+            br#"{"protocol":1,"id":5,"method":"auth.begin","params":{"username":"alice"}}"#,
         )
-        .expect("retry request fixture is valid");
-        worker.submit(8, retry).expect("retry request is queued");
-        let WorkerOutput::Batch(retry_prompt) = outputs
+        .expect("page retry request fixture is valid");
+        worker
+            .submit(8, page_retry)
+            .expect("page retry request is queued");
+        let WorkerOutput::Batch(page_retry_prompt) = outputs
             .recv_timeout(Duration::from_secs(2))
-            .expect("worker returns retry prompt")
+            .expect("worker returns page retry prompt")
         else {
             panic!("worker must return a retry batch");
         };
-        assert_eq!(retry_prompt.epoch, 8);
+        assert_eq!(page_retry_prompt.epoch, 8);
         assert!(
-            retry_prompt
+            page_retry_prompt
                 .event_scripts
                 .iter()
                 .any(|event| event.contains("auth.prompt"))

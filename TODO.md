@@ -90,6 +90,15 @@ monitor surface 之间没有窗口，也未持有 GTK application，导致 `acti
 共享/分角色 scale union、安装器参数、共享 `fomalhaut-logind` crate、locker 电源状态边界和 PAM
 拒绝/fatal 分类。下列实现和再次实机验证完成前仍不提交“当前设备可用”的结论。
 
+随后真实复测确认上一轮 unit 权限修复并未实际生效：systemd user scope 中
+`LockPersonality=yes` 和 `RestrictSUIDSGID=yes` 都会因 seccomp 隐式得到 `NoNewPrivs: 1`，即使
+unit 同时声明 `NoNewPrivileges=no`；移除两者的对照 scope 才得到 `NoNewPrivs: 0`。因此既有
+“保留两个 hardening 同时允许 setuid PAM helper”的设计不可落地，现已改为当前内嵌 PAM worker
+架构下移除两项，未来若需要恢复必须先拆分独立 PAM broker。该轮还发现 greeter 在真实
+greetd/PAM 上由可用回归为密码提交后失败，以及 locker 电源请求无响应；现有 scripted backend、
+controller 和主题测试没有覆盖安装后二进制的真实系统边界，以下回归项必须在再次部署和实机验证
+后才能关闭。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -346,15 +355,19 @@ monitor surface 之间没有窗口，也未持有 GTK application，导致 `acti
 - [x] 将 `[display].scale` 扩展为“共享有限浮点数”或“同时包含 greeter/locker 的严格 table”
       union，验证 dotted-key 语法、互斥/缺项/未知字段和两侧边界；当前 niri 部署使用 greeter
       `1.5`、locker `1.0`，systemd unit 清除继承的 `GDK_SCALE`/`GDK_DPI_SCALE`。
-- [x] 让 `LockerController` 接收共享 `PowerControl`，按 capability 处理 `power.request`；请求前
+- [ ] 让 `LockerController` 接收共享 `PowerControl`，按 capability 处理 `power.request`；请求前
       取消当前 PAM transaction，但不生成 unlock authorization、不释放 session lock，覆盖
-      suspend/resume 保持锁定所需的 controller/主题行为。
+      suspend/resume 保持锁定所需的 controller/主题行为；controller/主题 mock 已覆盖，但当前
+      niri 实机请求曾长期 busy。已定位为取消 worker 后 IPC reader 在 EOF 上重复写满 channel、
+      父线程 `join` 死锁，并增加首个 IPC 错误退出回归；仍需重新部署并验证请求到达 logind、
+      suspend/resume 后保持锁定。
 - [x] 实现并由隔离测试验证 `Type=notify` readiness 与 compositor-neutral systemd user unit；
       locker 保持前台、不自行 fork，且只在 compositor `locked` 与 controller
       `lock.acquired` 后通过 `NOTIFY_SOCKET` 发出 readiness。
-- [ ] 将 user unit 改为显式 `NoNewPrivileges=no`，允许受信任系统 PAM stack 执行 Arch
-      `pam_unix` 所需的 setuid `unix_chkpwd`，同时保留 `LockPersonality`、
-      `RestrictSUIDSGID` 和一次性 worker 边界；在真实密码验证后才能标记完成。
+- [ ] 将 user unit 改为显式 `NoNewPrivileges=no`，并移除会通过 seccomp 隐式设置
+      `NoNewPrivs: 1` 的 `LockPersonality` 与 `RestrictSUIDSGID`，允许受信任系统 PAM stack 执行
+      Arch `pam_unix` 所需的 setuid `unix_chkpwd`；保留一次性 worker 边界，并在实际 scope
+      验证 `NoNewPrivs: 0` 和真实密码成功后才能标记完成。
 - [x] 提供并用 niri 26.04 配置验证器验证 niri KDL 快捷键和通用 swayidle
       timeout/lock/before-sleep 示例，明确
       swayidle 可在 niri 等 Wayland compositor 上运行，不把 locker 设计为 Sway 专用。
@@ -366,6 +379,11 @@ monitor surface 之间没有窗口，也未持有 GTK application，导致 `acti
 ## P1：现有 greeter 纵向切片
 
 ### Host 集成
+
+- [ ] 定位当前安装后二进制相对 2026-08-10 05:16 成功记录的 greeter 认证回归；补充超出
+      scripted greetd transport 的安装/真实 PAM 边界验证。主题异步提交已断言完整回答，真实 Unix
+      greetd IPC 的普通拒绝、`CancelSession`、重试、成功与 session start 链路也已覆盖；仍需在
+      安装后的 WebKit/真实 PAM 上复现或确认恢复，区分系统输入/PAM 状态与未覆盖的宿主边界。
 
 - [x] 在 `fomalhaut-web` 实现不依赖 GTK 的认证 controller，维护公开状态、core prompt 映射
       和单调事件 sequence。

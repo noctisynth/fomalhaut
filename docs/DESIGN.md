@@ -1449,10 +1449,14 @@ locker 或集成只支持 Sway。挂起前必须等待命令成功，避免设�
 locker 的 PAM stack 可能按发行版策略执行已有的特权校验 helper；当前 Arch
 `pam_unix.so` 会透明调用 setuid `unix_chkpwd` 读取受保护的密码数据库。因此 user unit 不得设置
 `NoNewPrivileges=yes`，该选项会通过 `execve` 阻止 helper 获得其文件授予的身份并使正确密码也
-无法验证。unit 显式保留 `NoNewPrivileges=no`，同时继续使用 `LockPersonality=yes` 和
-`RestrictSUIDSGID=yes`；后者只禁止进程创建新的 SUID/SGID 文件，不阻止 PAM 执行管理员已安装的
-helper。Fomalhaut 自身二进制仍无 setuid bit、不直接读取 shadow，也不实现 PAM 之外的提权或
-认证 fallback。
+无法验证。真实 systemd user scope 验证还表明，`LockPersonality=yes` 与
+`RestrictSUIDSGID=yes` 都会为了安装各自的 seccomp 过滤器而隐式把进程的 `NoNewPrivs` 设为 `1`；
+同一 unit 中显式写入 `NoNewPrivileges=no` 也不能覆盖该内核状态。因此当前内嵌一次性 PAM worker
+架构下，推荐 unit 显式保留 `NoNewPrivileges=no`，并且不得设置这两个选项或其他会隐式启用
+`NoNewPrivs` 的 systemd hardening。Fomalhaut 自身二进制仍无 setuid bit、不直接读取 shadow，也不
+实现 PAM 之外的提权或认证 fallback；如果未来要求恢复与 setuid helper 冲突的 seccomp hardening，
+必须先把 PAM 调度迁入具有独立认证、IPC 和权限边界的专用 service/broker，不能在现有 unit 中伪称
+两者可以兼容。
 
 该 user unit 还必须使用 `UnsetEnvironment=GDK_SCALE GDK_DPI_SCALE` 清除 user manager 可能继承的
 工具包缩放变量。locker 的基础输出缩放由现有 compositor/GTK 负责，额外 WebKit zoom 只来自
@@ -1489,7 +1493,8 @@ locker 服务进程，不修改用户会话的全局环境。
 - greeter 只以专用低权限 `greeter` 用户运行；locker 只以当前普通 session
   用户运行。两者都不安装 setuid bit，不自行读取 `/etc/shadow`；locker 允许系统 PAM stack
   按管理员策略执行发行版已有的 `unix_chkpwd` 等 helper，因此不得用 `NoNewPrivileges` 破坏
-  PAM 的既有权限模型。
+  PAM 的既有权限模型，也不得在同一 user unit 中启用会隐式设置 `NoNewPrivs` 的 seccomp
+  hardening。需要更强进程沙箱时必须先拆分 PAM broker 权限域。
 - 正式模式不监听 TCP。
 - 不把 greetd socket、PAM worker 通道或未来 daemon IPC 暴露给前端。
 - locker 用系统 UID/账户数据 API 获取当前真实 UID 和对应账户，不从主题、

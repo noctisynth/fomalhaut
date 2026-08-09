@@ -163,6 +163,10 @@ describe("SPA authentication UI", () => {
 
     expect(input).toHaveValue("");
     expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "auth.respond",
+      params: { promptId: 7, response: "do-not-retain" },
+    });
   });
 
   test("renders visible prompts as text inputs on the recovery screen", async () => {
