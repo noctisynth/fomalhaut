@@ -15,7 +15,7 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fomalhaut Login</title>
+  <title>Fomalhaut</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -23,6 +23,12 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
     <p class="eyebrow">FOMALHAUT</p>
     <h1 id="title">Sign in</h1>
     <p class="introduction">Minimal example theme for the Fomalhaut frontend protocol.</p>
+
+    <section id="locker-identity" aria-labelledby="locker-identity-name" hidden>
+      <div id="locker-avatar" class="user-fallback" aria-hidden="true">?</div>
+      <h2 id="locker-identity-name"></h2>
+      <p id="locker-username" class="introduction"></p>
+    </section>
 
     <section id="known-users" aria-labelledby="known-users-title" hidden>
       <h2 id="known-users-title">Users</h2>
@@ -35,8 +41,10 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
       <input id="credential" name="username" type="text" autocomplete="username"
              autocapitalize="none" spellcheck="false" required autofocus>
 
-      <label for="session">Session</label>
-      <select id="session" name="session"></select>
+      <div id="session-control">
+        <label for="session">Session</label>
+        <select id="session" name="session"></select>
+      </div>
 
       <div class="actions">
         <button id="submit" type="submit">Continue</button>
@@ -101,6 +109,32 @@ form {
   display: grid;
   gap: .65rem;
   margin-top: 2rem;
+}
+
+#session-control {
+  display: grid;
+  gap: .65rem;
+}
+
+#locker-identity {
+  justify-items: center;
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+#locker-identity:not([hidden]) {
+  display: grid;
+}
+
+#locker-identity .user-fallback {
+  width: 4.5rem;
+  height: 4.5rem;
+  font-size: 1.5rem;
+}
+
+#locker-identity h2,
+#locker-identity p {
+  margin: .65rem 0 0;
 }
 
 label {
@@ -212,11 +246,17 @@ select:disabled {
 const APP_JS: &[u8] = br#"'use strict';
 
 const form = document.getElementById('login-form');
+const title = document.getElementById('title');
 const credentialLabel = document.getElementById('credential-label');
 const credential = document.getElementById('credential');
+const lockerIdentity = document.getElementById('locker-identity');
+const lockerAvatar = document.getElementById('locker-avatar');
+const lockerIdentityName = document.getElementById('locker-identity-name');
+const lockerUsername = document.getElementById('locker-username');
 const knownUsers = document.getElementById('known-users');
 const userList = document.getElementById('user-list');
 const otherUser = document.getElementById('other-user');
+const sessionControl = document.getElementById('session-control');
 const session = document.getElementById('session');
 const submit = document.getElementById('submit');
 const cancel = document.getElementById('cancel');
@@ -225,8 +265,10 @@ const messages = document.getElementById('messages');
 
 let nextRequestId = 1;
 let activePrompt = null;
+let mode = null;
 let busy = false;
 let terminal = false;
+let retryAvailable = false;
 let lastSequence = 0;
 
 function setStatus(message) {
@@ -235,11 +277,11 @@ function setStatus(message) {
 
 function updateControls() {
   const disabled = busy || terminal;
-  credential.disabled = disabled;
-  session.disabled = disabled;
-  submit.disabled = disabled;
+  credential.disabled = disabled || (mode === 'locker' && activePrompt === null);
+  session.disabled = disabled || mode !== 'greeter';
+  submit.disabled = disabled || (mode === 'locker' && activePrompt === null && !retryAvailable);
   cancel.disabled = disabled;
-  otherUser.disabled = disabled || activePrompt !== null;
+  otherUser.disabled = disabled || mode !== 'greeter' || activePrompt !== null;
   for (const button of userList.querySelectorAll('button')) {
     button.disabled = disabled || activePrompt !== null;
   }
@@ -251,7 +293,11 @@ function setBusy(value) {
 }
 
 function showUsernameInput() {
+  if (mode !== 'greeter') {
+    return;
+  }
   activePrompt = null;
+  retryAvailable = false;
   credential.value = '';
   credential.type = 'text';
   credential.name = 'username';
@@ -265,8 +311,22 @@ function showUsernameInput() {
   updateControls();
 }
 
+function showLockerWaiting(canRetry) {
+  activePrompt = null;
+  retryAvailable = canRetry;
+  credential.value = '';
+  credential.type = 'password';
+  credential.name = 'response';
+  credential.autocomplete = 'off';
+  credentialLabel.textContent = 'Credential';
+  submit.textContent = canRetry ? 'Try again' : 'Waiting...';
+  cancel.hidden = true;
+  updateControls();
+}
+
 function showPrompt(prompt) {
   activePrompt = prompt;
+  retryAvailable = false;
   credential.value = '';
   credential.type = prompt.kind === 'secret' ? 'password' : 'text';
   credential.name = 'response';
@@ -278,6 +338,13 @@ function showPrompt(prompt) {
     credential.focus();
   }
   updateControls();
+}
+
+function setLockerIdentity(identity) {
+  lockerIdentityName.textContent = identity.displayName;
+  lockerUsername.textContent = identity.username;
+  lockerAvatar.textContent = identity.displayName.slice(0, 1).toLocaleUpperCase() || '?';
+  lockerIdentity.hidden = false;
 }
 
 function addMessage(message) {
@@ -341,23 +408,64 @@ function setUsers(snapshot) {
 }
 
 function applySnapshot(snapshot) {
-  setUsers(snapshot);
-  setSessions(snapshot);
+  mode = snapshot.mode;
+  lastSequence = Math.max(lastSequence, snapshot.sequence);
+  terminal = false;
   messages.replaceChildren();
   for (const message of snapshot.messages) {
     addMessage(message);
   }
-  if (snapshot.prompt) {
-    showPrompt(snapshot.prompt);
-  } else if (snapshot.authentication === 'starting_session'
-      || snapshot.authentication === 'started') {
+
+  if (mode === 'greeter') {
+    title.textContent = 'Sign in';
+    lockerIdentity.hidden = true;
+    sessionControl.hidden = false;
+    setUsers(snapshot);
+    setSessions(snapshot);
+    if (snapshot.prompt) {
+      showPrompt(snapshot.prompt);
+    } else if (snapshot.login === 'starting_session' || snapshot.login === 'started') {
+      terminal = true;
+      setStatus('Starting the selected session...');
+    } else {
+      showUsernameInput();
+      setStatus('Enter your username to continue.');
+    }
+    updateControls();
+    return false;
+  }
+
+  title.textContent = 'Session locked';
+  knownUsers.hidden = true;
+  sessionControl.hidden = true;
+  setLockerIdentity(snapshot.identity);
+  if (snapshot.lock === 'failed') {
     terminal = true;
-    setStatus('Starting the selected session...');
+    showLockerWaiting(false);
+    setStatus('The native session lock failed.');
+  } else if (snapshot.lock === 'released') {
+    terminal = true;
+    showLockerWaiting(false);
+    setStatus('Session unlocked.');
+  } else if (snapshot.lock === 'unlocking' || snapshot.authentication === 'authenticated') {
+    terminal = true;
+    showLockerWaiting(false);
+    setStatus('Authentication succeeded. Unlocking...');
+  } else if (snapshot.prompt) {
+    showPrompt(snapshot.prompt);
+    setStatus('Authentication requires a response.');
+  } else if (snapshot.lock === 'acquiring') {
+    showLockerWaiting(false);
+    setStatus('Securing this session...');
+  } else if (snapshot.authentication === 'failed') {
+    showLockerWaiting(true);
+    setStatus('Authentication failed. Try again.');
   } else {
-    showUsernameInput();
-    setStatus('Enter your username to continue.');
+    showLockerWaiting(false);
+    setStatus('Waiting for the authentication service...');
   }
   updateControls();
+  return snapshot.lock === 'locked' && snapshot.authentication === 'idle';
 }
 
 async function sendRequest(method, params) {
@@ -378,7 +486,7 @@ async function sendRequest(method, params) {
     return response;
   } catch (_error) {
     terminal = true;
-    setStatus('The login service bridge is unavailable.');
+    setStatus('The Fomalhaut host bridge is unavailable.');
     return null;
   } finally {
     setBusy(false);
@@ -388,7 +496,10 @@ async function sendRequest(method, params) {
 async function refreshState() {
   const response = await sendRequest('state.get', {});
   if (response && response.ok) {
-    applySnapshot(response.result);
+    const beginLockerAuthentication = applySnapshot(response.result);
+    if (beginLockerAuthentication) {
+      await sendRequest('auth.begin', {});
+    }
   }
 }
 
@@ -410,16 +521,24 @@ form.addEventListener('submit', async (event) => {
       await refreshState();
     }
   } else {
-    const pending = sendRequest('auth.begin', { username: value });
+    const params = mode === 'locker' ? {} : { username: value };
+    const pending = sendRequest('auth.begin', params);
     value = '';
     const response = await pending;
     if (response && !response.ok) {
-      showUsernameInput();
+      if (mode === 'locker') {
+        showLockerWaiting(true);
+      } else {
+        showUsernameInput();
+      }
     }
   }
 });
 
 session.addEventListener('change', async () => {
+  if (mode !== 'greeter') {
+    return;
+  }
   const response = await sendRequest('session.select', { sessionId: session.value });
   if (response && !response.ok) {
     await refreshState();
@@ -436,7 +555,7 @@ cancel.addEventListener('click', async () => {
 });
 
 otherUser.addEventListener('click', () => {
-  if (!busy && !terminal && !activePrompt) {
+  if (mode === 'greeter' && !busy && !terminal && !activePrompt) {
     credential.value = '';
     credential.focus();
   }
@@ -460,30 +579,66 @@ window.addEventListener('fomalhaut:event', (event) => {
     case 'auth.succeeded':
       terminal = true;
       updateControls();
-      setStatus('Authentication succeeded. Starting the selected session...');
+      setStatus(mode === 'locker'
+        ? 'Authentication succeeded. Unlocking...'
+        : 'Authentication succeeded. Starting the selected session...');
       break;
     case 'auth.failed':
-      showUsernameInput();
+      if (mode === 'locker') {
+        showLockerWaiting(true);
+      } else {
+        showUsernameInput();
+      }
       setStatus('Authentication failed. Try again.');
       break;
     case 'auth.cancelled':
-      showUsernameInput();
+      if (mode === 'locker') {
+        showLockerWaiting(true);
+      } else {
+        showUsernameInput();
+      }
       setStatus('Authentication was cancelled.');
       break;
     case 'session.selected':
-      session.value = message.data.sessionId;
-      setStatus('Session selection updated.');
+      if (mode === 'greeter') {
+        session.value = message.data.sessionId;
+        setStatus('Session selection updated.');
+      }
       break;
     case 'session.started':
       terminal = true;
       updateControls();
       setStatus('Session started.');
       break;
-    case 'state.changed':
-      if (message.data.state === 'disconnected') {
+    case 'lock.acquired':
+      if (mode === 'locker') {
+        showLockerWaiting(false);
+        setStatus('Session locked. Waiting for authentication...');
+        void sendRequest('auth.begin', {});
+      }
+      break;
+    case 'lock.failed':
+      if (mode === 'locker') {
         terminal = true;
-        updateControls();
-        setStatus('The login service disconnected.');
+        showLockerWaiting(false);
+        setStatus('The native session lock failed.');
+      }
+      break;
+    case 'lock.released':
+      if (mode === 'locker') {
+        terminal = true;
+        showLockerWaiting(false);
+        setStatus('Session unlocked.');
+      }
+      break;
+    case 'state.changed':
+      if (message.data.state === 'failed') {
+        if (mode === 'locker') {
+          showLockerWaiting(true);
+        } else {
+          showUsernameInput();
+        }
+        setStatus('The authentication service could not complete the request.');
       }
       break;
     default:
@@ -582,7 +737,9 @@ mod tests {
         for control in [
             "id=\"login-form\"",
             "id=\"known-users\"",
+            "id=\"locker-identity\"",
             "for=\"credential\"",
+            "id=\"session-control\"",
             "id=\"session\"",
             "aria-live=\"polite\"",
         ] {
@@ -599,8 +756,13 @@ mod tests {
         }
         assert!(script.contains("prompt.kind === 'secret'"));
         assert!(script.contains("snapshot.users"));
+        assert!(script.contains("snapshot.identity"));
+        assert!(script.contains("snapshot.sequence"));
         assert!(script.contains("user.avatarUrl"));
         assert!(script.contains("message.sequence <= lastSequence"));
+        assert!(script.contains("mode === 'locker' ? {} : { username: value }"));
+        assert!(script.contains("case 'lock.acquired':"));
+        assert!(script.contains("case 'lock.released':"));
         assert!(!script.contains("innerHTML"));
         assert!(!script.contains("fetch("));
         assert!(!script.contains("http://"));

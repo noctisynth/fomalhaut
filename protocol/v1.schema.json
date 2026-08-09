@@ -15,18 +15,14 @@
   ],
   "$defs": {
     "AuthBeginParams": {
-      "description": "Parameters for `auth.begin`.",
-      "type": "object",
-      "properties": {
-        "username": {
-          "type": "string",
-          "minLength": 1,
-          "x-fomalhaut-maxUtf8Bytes": 256
+      "description": "Role-specific parameters accepted by `auth.begin` before host-mode validation.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GreeterAuthBeginParams"
+        },
+        {
+          "$ref": "#/$defs/LockerAuthBeginParams"
         }
-      },
-      "additionalProperties": false,
-      "required": [
-        "username"
       ]
     },
     "AuthMessage": {
@@ -68,13 +64,11 @@
       "description": "Authentication lifecycle visible to the frontend.",
       "type": "string",
       "enum": [
-        "disconnected",
         "idle",
         "authenticating",
-        "waiting_for_prompt",
+        "waiting_for_secret",
+        "waiting_for_visible",
         "authenticated",
-        "starting_session",
-        "started",
         "cancelling",
         "failed"
       ]
@@ -276,6 +270,54 @@
             "event",
             "data"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "lock.acquired"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "lock.failed"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EmptyResult"
+            },
+            "event": {
+              "type": "string",
+              "const": "lock.released"
+            }
+          },
+          "required": [
+            "event",
+            "data"
+          ]
         }
       ],
       "required": [
@@ -283,6 +325,76 @@
         "sequence"
       ],
       "unevaluatedProperties": false
+    },
+    "GreeterAuthBeginParams": {
+      "description": "Greeter parameters for `auth.begin`.",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "username"
+      ]
+    },
+    "IdentitySummary": {
+      "description": "Trusted identity fixed by the locker host.",
+      "type": "object",
+      "properties": {
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-fomalhaut-maxUtf8Bytes": 64
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "x-fomalhaut-maxUtf8Bytes": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "username",
+        "displayName",
+        "avatarUrl"
+      ]
+    },
+    "LockState": {
+      "description": "Locker-only native session-lock lifecycle.",
+      "type": "string",
+      "enum": [
+        "acquiring",
+        "locked",
+        "unlocking",
+        "released",
+        "failed"
+      ]
+    },
+    "LockerAuthBeginParams": {
+      "description": "Locker parameters for `auth.begin`.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "LoginState": {
+      "description": "Greeter-only trusted session lifecycle.",
+      "type": "string",
+      "enum": [
+        "idle",
+        "starting_session",
+        "started",
+        "failed"
+      ]
     },
     "MessageLevel": {
       "description": "Severity of a non-interactive authentication message.",
@@ -674,63 +786,134 @@
       ]
     },
     "StateSnapshot": {
-      "description": "Complete state needed to rebuild a frontend after refresh.",
-      "type": "object",
-      "properties": {
-        "authentication": {
-          "$ref": "#/$defs/AuthState"
-        },
-        "capabilities": {
-          "$ref": "#/$defs/Capabilities"
-        },
-        "messages": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AuthMessage"
-          },
-          "maxItems": 16
-        },
-        "prompt": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Prompt"
+      "description": "Complete role-discriminated state needed to rebuild a frontend after refresh.",
+      "oneOf": [
+        {
+          "description": "Greeter-only public state.",
+          "type": "object",
+          "properties": {
+            "authentication": {
+              "$ref": "#/$defs/AuthState"
             },
-            {
-              "type": "null"
+            "capabilities": {
+              "$ref": "#/$defs/Capabilities"
+            },
+            "login": {
+              "$ref": "#/$defs/LoginState"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AuthMessage"
+              },
+              "maxItems": 16
+            },
+            "mode": {
+              "type": "string",
+              "const": "greeter"
+            },
+            "prompt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Prompt"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "selectedSessionId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-fomalhaut-maxUtf8Bytes": 256
+            },
+            "sequence": {
+              "$ref": "#/$defs/Sequence"
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SessionSummary"
+              },
+              "maxItems": 128
+            },
+            "users": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UserSummary"
+              },
+              "maxItems": 128
             }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "authentication",
+            "login",
+            "prompt",
+            "messages",
+            "sequence",
+            "users",
+            "sessions",
+            "selectedSessionId",
+            "capabilities"
           ]
         },
-        "selectedSessionId": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "x-fomalhaut-maxUtf8Bytes": 256
-        },
-        "sessions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/SessionSummary"
+        {
+          "description": "Locker-only public state.",
+          "type": "object",
+          "properties": {
+            "authentication": {
+              "$ref": "#/$defs/AuthState"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/Capabilities"
+            },
+            "identity": {
+              "$ref": "#/$defs/IdentitySummary"
+            },
+            "lock": {
+              "$ref": "#/$defs/LockState"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AuthMessage"
+              },
+              "maxItems": 16
+            },
+            "mode": {
+              "type": "string",
+              "const": "locker"
+            },
+            "prompt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Prompt"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sequence": {
+              "$ref": "#/$defs/Sequence"
+            }
           },
-          "maxItems": 128
-        },
-        "users": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/UserSummary"
-          },
-          "maxItems": 128
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "authentication",
+            "lock",
+            "prompt",
+            "messages",
+            "sequence",
+            "identity",
+            "capabilities"
+          ]
         }
-      },
-      "additionalProperties": false,
-      "required": [
-        "authentication",
-        "prompt",
-        "messages",
-        "users",
-        "sessions",
-        "selectedSessionId",
-        "capabilities"
       ]
     },
     "SuccessResponse": {

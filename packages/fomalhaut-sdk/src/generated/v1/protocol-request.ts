@@ -3,9 +3,9 @@ import type { PowerAction } from "./protocol-message.js";
 import type { ProtocolSecret } from "./protocol-secret.js";
 
 /**
- * Parameters for `auth.begin`.
+ * Role-specific parameters accepted by `auth.begin` before host-mode validation.
  */
-export type AuthBeginParams = { username: string };
+export type AuthBeginParams = GreeterAuthBeginParams | LockerAuthBeginParams;
 
 /**
  * Parameters for `auth.respond`.
@@ -27,6 +27,16 @@ export type FrontendRequest =
   | { method: "auth.cancel"; params: EmptyParams }
   | { method: "session.select"; params: SessionSelectParams }
   | { method: "power.request"; params: PowerRequestParams };
+
+/**
+ * Greeter parameters for `auth.begin`.
+ */
+export type GreeterAuthBeginParams = { username: string };
+
+/**
+ * Locker parameters for `auth.begin`.
+ */
+export type LockerAuthBeginParams = Record<string, never>;
 
 export type PowerRequestParams = { action: PowerAction };
 

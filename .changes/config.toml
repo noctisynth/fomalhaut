@@ -59,6 +59,14 @@ path = "crates/fomalhaut-pam"
 resolver = "rust"
 channel = "alpha"
 
+[packages.fomalhaut-theme]
+path = "packages/fomalhaut-theme"
+resolver = "nodejs"
+
+[packages.fomalhaut-workspace]
+path = "."
+resolver = "nodejs"
+
 [resolver.rust.pre-check]
 type = "http"
 url = "https://crates.io/api/v1/crates/{{ package.name }}/{{ package.version }}"

@@ -13,19 +13,49 @@ use super::{
 
 const AVATAR_URL_PREFIX: &str = "fomalhaut://avatar/";
 
+/// Product role selected by the trusted native host.
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub enum RuntimeMode {
+    Greeter,
+    Locker,
+}
+
 /// Authentication lifecycle visible to the frontend.
 #[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "v1/protocol-message.ts")]
 pub enum AuthState {
-    Disconnected,
     Idle,
     Authenticating,
-    WaitingForPrompt,
+    WaitingForSecret,
+    WaitingForVisible,
     Authenticated,
+    Cancelling,
+    Failed,
+}
+
+/// Greeter-only trusted session lifecycle.
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub enum LoginState {
+    Idle,
     StartingSession,
     Started,
-    Cancelling,
+    Failed,
+}
+
+/// Locker-only native session-lock lifecycle.
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub enum LockState {
+    Acquiring,
+    Locked,
+    Unlocking,
+    Released,
     Failed,
 }
 
@@ -117,15 +147,7 @@ impl UserSummary {
     ) -> Result<Self, ProtocolValueError> {
         validate_text(&username, MAX_USERNAME_BYTES, false, true)?;
         validate_text(&display_name, MAX_USER_DISPLAY_NAME_BYTES, false, true)?;
-        if let Some(url) = &avatar_url {
-            validate_text(url, MAX_AVATAR_URL_BYTES, false, true)?;
-            let Some(identifier) = url.strip_prefix(AVATAR_URL_PREFIX) else {
-                return Err(ProtocolValueError::InvalidCharacter);
-            };
-            if identifier.is_empty() || !identifier.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err(ProtocolValueError::InvalidCharacter);
-            }
-        }
+        validate_avatar_url(avatar_url.as_deref())?;
         Ok(Self {
             username,
             display_name,
@@ -150,6 +172,54 @@ impl UserSummary {
     pub fn avatar_url(&self) -> Option<&str> {
         self.avatar_url.as_deref()
     }
+}
+
+/// Trusted identity fixed by the locker host.
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub struct IdentitySummary {
+    #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
+    username: String,
+    #[schemars(length(min = 1), extend("x-fomalhaut-maxUtf8Bytes" = 256))]
+    display_name: String,
+    #[schemars(
+        inner(regex(pattern = r"^fomalhaut://avatar/[0-9]+$")),
+        extend("x-fomalhaut-maxUtf8Bytes" = 64)
+    )]
+    avatar_url: Option<String>,
+}
+
+impl IdentitySummary {
+    /// Constructs a bounded identity from fields established by the native locker host.
+    pub fn new(
+        username: String,
+        display_name: String,
+        avatar_url: Option<String>,
+    ) -> Result<Self, ProtocolValueError> {
+        validate_text(&username, MAX_USERNAME_BYTES, false, true)?;
+        validate_text(&display_name, MAX_USER_DISPLAY_NAME_BYTES, false, true)?;
+        validate_avatar_url(avatar_url.as_deref())?;
+        Ok(Self {
+            username,
+            display_name,
+            avatar_url,
+        })
+    }
+}
+
+fn validate_avatar_url(avatar_url: Option<&str>) -> Result<(), ProtocolValueError> {
+    let Some(url) = avatar_url else {
+        return Ok(());
+    };
+    validate_text(url, MAX_AVATAR_URL_BYTES, false, true)?;
+    let Some(identifier) = url.strip_prefix(AVATAR_URL_PREFIX) else {
+        return Err(ProtocolValueError::InvalidCharacter);
+    };
+    if identifier.is_empty() || !identifier.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(ProtocolValueError::InvalidCharacter);
+    }
+    Ok(())
 }
 
 /// Public session family.
@@ -234,15 +304,26 @@ impl Capabilities {
     }
 }
 
-/// Complete state needed to rebuild a frontend after refresh.
+/// Complete role-discriminated state needed to rebuild a frontend after refresh.
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub enum StateSnapshot {
+    Greeter(GreeterStateSnapshot),
+    Locker(LockerStateSnapshot),
+}
+
+/// Greeter-only public state.
 #[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 #[ts(export, export_to = "v1/protocol-message.ts")]
-pub struct StateSnapshot {
+pub struct GreeterStateSnapshot {
     authentication: AuthState,
+    login: LoginState,
     prompt: Option<Prompt>,
     #[schemars(length(max = 16))]
     messages: Vec<AuthMessage>,
+    sequence: Sequence,
     #[schemars(length(max = 128))]
     users: Vec<UserSummary>,
     #[schemars(length(max = 128))]
@@ -252,17 +333,33 @@ pub struct StateSnapshot {
     capabilities: Capabilities,
 }
 
+/// Crate-internal fields used to construct and validate a greeter snapshot atomically.
+pub(crate) struct GreeterSnapshotFields {
+    pub(crate) authentication: AuthState,
+    pub(crate) login: LoginState,
+    pub(crate) prompt: Option<Prompt>,
+    pub(crate) messages: Vec<AuthMessage>,
+    pub(crate) sequence: Sequence,
+    pub(crate) users: Vec<UserSummary>,
+    pub(crate) sessions: Vec<SessionSummary>,
+    pub(crate) selected_session_id: Option<String>,
+    pub(crate) capabilities: Capabilities,
+}
+
 impl StateSnapshot {
-    /// Constructs a bounded, internally consistent state snapshot.
-    pub fn new(
-        authentication: AuthState,
-        prompt: Option<Prompt>,
-        messages: Vec<AuthMessage>,
-        users: Vec<UserSummary>,
-        sessions: Vec<SessionSummary>,
-        selected_session_id: Option<String>,
-        capabilities: Capabilities,
-    ) -> Result<Self, ProtocolValueError> {
+    /// Constructs a bounded, internally consistent greeter snapshot.
+    pub(crate) fn greeter(fields: GreeterSnapshotFields) -> Result<Self, ProtocolValueError> {
+        let GreeterSnapshotFields {
+            authentication,
+            login,
+            prompt,
+            messages,
+            sequence,
+            users,
+            sessions,
+            selected_session_id,
+            capabilities,
+        } = fields;
         if messages.len() > MAX_AUTH_MESSAGES
             || users.len() > MAX_USERS
             || sessions.len() > MAX_SESSIONS
@@ -275,16 +372,57 @@ impl StateSnapshot {
                 return Err(ProtocolValueError::UnknownSelection);
             }
         }
-        Ok(Self {
+        Ok(Self::Greeter(GreeterStateSnapshot {
             authentication,
+            login,
             prompt,
             messages,
+            sequence,
             users,
             sessions,
             selected_session_id,
             capabilities,
-        })
+        }))
     }
+
+    /// Constructs a bounded locker snapshot without user or session enumeration capabilities.
+    pub fn locker(
+        authentication: AuthState,
+        lock: LockState,
+        prompt: Option<Prompt>,
+        messages: Vec<AuthMessage>,
+        sequence: Sequence,
+        identity: IdentitySummary,
+        capabilities: Capabilities,
+    ) -> Result<Self, ProtocolValueError> {
+        if messages.len() > MAX_AUTH_MESSAGES {
+            return Err(ProtocolValueError::TooManyItems);
+        }
+        Ok(Self::Locker(LockerStateSnapshot {
+            authentication,
+            lock,
+            prompt,
+            messages,
+            sequence,
+            identity,
+            capabilities,
+        }))
+    }
+}
+
+/// Locker-only public state.
+#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub struct LockerStateSnapshot {
+    authentication: AuthState,
+    lock: LockState,
+    prompt: Option<Prompt>,
+    #[schemars(length(max = 16))]
+    messages: Vec<AuthMessage>,
+    sequence: Sequence,
+    identity: IdentitySummary,
+    capabilities: Capabilities,
 }
 
 /// Empty success payload.
@@ -378,6 +516,12 @@ pub struct Sequence(
 );
 
 impl Sequence {
+    /// Returns the initial watermark before any event has been published.
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self(0)
+    }
+
     /// Returns the numeric sequence.
     #[must_use]
     pub const fn get(self) -> u64 {
@@ -410,6 +554,12 @@ impl EventSequence {
             .ok_or(ProtocolValueError::SequenceExhausted)?;
         Ok(sequence)
     }
+
+    /// Returns the last allocated sequence, or zero before the first event.
+    #[must_use]
+    pub const fn watermark(&self) -> Sequence {
+        Sequence(self.next.saturating_sub(1))
+    }
 }
 
 /// Typed event emitted by the trusted host.
@@ -433,6 +583,12 @@ pub enum Event {
     SessionSelected(SessionSelectedData),
     #[serde(rename = "session.started")]
     SessionStarted(EmptyResult),
+    #[serde(rename = "lock.acquired")]
+    LockAcquired(EmptyResult),
+    #[serde(rename = "lock.failed")]
+    LockFailed(EmptyResult),
+    #[serde(rename = "lock.released")]
+    LockReleased(EmptyResult),
 }
 
 /// Authentication-state event data.
@@ -507,8 +663,9 @@ pub enum WireMessage {
 mod tests {
     use super::{
         AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
-        ResponseEnvelope, ResponseResult, Sequence, SessionKind, SessionSelectedData,
-        SessionSummary, StateSnapshot, UserSummary,
+        GreeterSnapshotFields, IdentitySummary, LockState, LoginState, ResponseEnvelope,
+        ResponseResult, Sequence, SessionKind, SessionSelectedData, SessionSummary, StateSnapshot,
+        UserSummary,
     };
     use crate::protocol::{
         MAX_SAFE_INTEGER, ProtocolErrorBody, ProtocolErrorCode, ProtocolValueError, RequestId,
@@ -543,11 +700,13 @@ mod tests {
             SessionKind::Wayland,
         )
         .expect("the session fixture is within bounds");
-        let snapshot = StateSnapshot::new(
-            AuthState::Idle,
-            None,
-            Vec::new(),
-            vec![
+        let snapshot = StateSnapshot::greeter(GreeterSnapshotFields {
+            authentication: AuthState::Idle,
+            login: LoginState::Idle,
+            prompt: None,
+            messages: Vec::new(),
+            sequence: Sequence::initial(),
+            users: vec![
                 UserSummary::new(
                     "alice".to_owned(),
                     "Alice".to_owned(),
@@ -555,23 +714,52 @@ mod tests {
                 )
                 .expect("the user fixture is within bounds"),
             ],
-            vec![session],
-            Some("wayland:sway".to_owned()),
-            Capabilities::disabled(),
-        );
+            sessions: vec![session],
+            selected_session_id: Some("wayland:sway".to_owned()),
+            capabilities: Capabilities::disabled(),
+        });
         assert!(snapshot.is_ok());
 
-        let error = StateSnapshot::new(
-            AuthState::Idle,
-            None,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Some("wayland:missing".to_owned()),
-            Capabilities::disabled(),
-        )
+        let error = StateSnapshot::greeter(GreeterSnapshotFields {
+            authentication: AuthState::Idle,
+            login: LoginState::Idle,
+            prompt: None,
+            messages: Vec::new(),
+            sequence: Sequence::initial(),
+            users: Vec::new(),
+            sessions: Vec::new(),
+            selected_session_id: Some("wayland:missing".to_owned()),
+            capabilities: Capabilities::disabled(),
+        })
         .expect_err("a snapshot cannot select an absent session");
         assert_eq!(error, ProtocolValueError::UnknownSelection);
+    }
+
+    #[test]
+    fn locker_snapshot_has_no_user_or_session_catalog() {
+        let identity = IdentitySummary::new(
+            "alice".to_owned(),
+            "Alice".to_owned(),
+            Some("fomalhaut://avatar/1".to_owned()),
+        )
+        .expect("the trusted identity fixture is valid");
+        let snapshot = StateSnapshot::locker(
+            AuthState::Idle,
+            LockState::Locked,
+            None,
+            Vec::new(),
+            Sequence::initial(),
+            identity,
+            Capabilities::disabled(),
+        )
+        .expect("the locker snapshot is valid");
+        let value = serde_json::to_value(snapshot).expect("snapshot serialization succeeds");
+
+        assert_eq!(value["mode"], "locker");
+        assert_eq!(value["sequence"], 0);
+        assert!(value.get("users").is_none());
+        assert!(value.get("sessions").is_none());
+        assert!(value.get("selectedSessionId").is_none());
     }
 
     #[test]

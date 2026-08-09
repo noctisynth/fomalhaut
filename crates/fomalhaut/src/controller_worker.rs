@@ -13,7 +13,7 @@ use fomalhaut_config::{PowerConfig, UserDiscoveryConfig};
 use fomalhaut_greetd::GreeterClient;
 use fomalhaut_gtk::{BridgeController, ControllerBatch, ControllerOutput, SubmitError};
 use fomalhaut_web::{
-    controller::{HostController, TrustedSession},
+    controller::{GreeterController, TrustedSession},
     protocol::RequestEnvelope,
 };
 
@@ -174,7 +174,7 @@ fn run_worker(
         }
     };
     let power = LogindPowerControl::discover(&power_config);
-    let mut controller = HostController::with_power_control(client, sessions, users, power);
+    let mut controller = GreeterController::with_power_control(client, sessions, users, power);
     if outputs.send(WorkerOutput::Ready(avatars)).is_err() {
         let _ = runtime.block_on(controller.cancel_for_lifecycle());
         return;

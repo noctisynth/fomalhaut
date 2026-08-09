@@ -1,5 +1,6 @@
 import {
-  FomalhautClient,
+  type AnyFomalhautClient,
+  createFomalhautClient,
   type FomalhautTransport,
   WebKitTransport,
 } from "fomalhaut-sdk";
@@ -16,7 +17,7 @@ function hasHostBridge(host: Window): boolean {
   return Boolean((host as BridgeWindow).webkit?.messageHandlers?.fomalhaut);
 }
 
-export async function createClient(): Promise<FomalhautClient> {
+export async function createClient(): Promise<AnyFomalhautClient> {
   let transport: FomalhautTransport = new WebKitTransport();
 
   if (import.meta.env.DEV && !hasHostBridge(window)) {
@@ -26,5 +27,5 @@ export async function createClient(): Promise<FomalhautClient> {
     transport = new DevelopmentTransport();
   }
 
-  return new FomalhautClient(transport);
+  return createFomalhautClient(transport);
 }

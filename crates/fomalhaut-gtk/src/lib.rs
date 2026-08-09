@@ -14,7 +14,7 @@ use fomalhaut_web::{
     bridge::response_json,
     protocol::{
         ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, RequestId, ResponseEnvelope,
-        decode_request,
+        RuntimeMode, decode_request_for_mode,
     },
     theme::ThemeSource,
 };
@@ -321,6 +321,7 @@ impl<C: BridgeController> HostedView<C> {
 /// Builds a hardened WebView while leaving window and product lifecycle ownership to the caller.
 pub fn build_web_view<C, A>(
     theme: ThemeSource,
+    mode: RuntimeMode,
     zoom_level: f64,
     controller: Rc<C>,
     outputs: Receiver<ControllerOutput<A>>,
@@ -346,6 +347,7 @@ where
     let content_manager = UserContentManager::new();
     connect_bridge(
         &content_manager,
+        mode,
         Rc::clone(&controller),
         Rc::clone(&page_epoch),
         Rc::clone(&pending_reply),
@@ -526,6 +528,7 @@ fn finish_scheme_response(
 
 fn connect_bridge<C: BridgeController + 'static>(
     content_manager: &UserContentManager,
+    mode: RuntimeMode,
     controller: Rc<C>,
     page_epoch: Rc<Cell<u64>>,
     pending_reply: Rc<RefCell<Option<PendingReply>>>,
@@ -539,7 +542,7 @@ fn connect_bridge<C: BridgeController + 'static>(
                 reply.return_error_message("the bridge requires a JSON-compatible message");
                 return true;
             };
-            let request = match decode_request(input.as_bytes()) {
+            let request = match decode_request_for_mode(input.as_bytes(), mode) {
                 Ok(request) => request,
                 Err(error) => {
                     if let Some(id) = error.request_id() {

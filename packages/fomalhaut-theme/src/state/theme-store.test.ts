@@ -1,7 +1,7 @@
-import { FomalhautClient } from "fomalhaut-sdk";
+import { createFomalhautClient } from "fomalhaut-sdk";
 import { describe, expect, test } from "vitest";
 import { createThemeStore } from "@/state/theme-store";
-import { MockTransport, snapshot } from "@/test/mock-transport";
+import { lockerSnapshot, MockTransport, snapshot } from "@/test/mock-transport";
 
 const alice = {
   username: "alice",
@@ -15,7 +15,7 @@ describe("SPA identity selection", () => {
     "always opens the selection screen for $users.length users",
     async ({ users }) => {
       const transport = new MockTransport(snapshot(users));
-      const client = new FomalhautClient(transport);
+      const client = await createFomalhautClient(transport);
       const runtime = createThemeStore(client);
 
       await runtime.initialize();
@@ -25,13 +25,14 @@ describe("SPA identity selection", () => {
       });
       expect(transport.requests.map((request) => request.method)).toEqual([
         "state.get",
+        "state.get",
       ]);
     },
   );
 
   test("skips selection and starts PAM for exactly one trusted user", async () => {
     const transport = new MockTransport(snapshot([alice]));
-    const client = new FomalhautClient(transport);
+    const client = await createFomalhautClient(transport);
     const runtime = createThemeStore(client);
 
     await runtime.initialize();
@@ -42,13 +43,14 @@ describe("SPA identity selection", () => {
     });
     expect(transport.requests.map((request) => request.method)).toEqual([
       "state.get",
+      "state.get",
       "auth.begin",
     ]);
   });
 
   test("starts authentication only after a known user is chosen", async () => {
     const transport = new MockTransport(snapshot([alice, bob]));
-    const client = new FomalhautClient(transport);
+    const client = await createFomalhautClient(transport);
     const runtime = createThemeStore(client);
     await runtime.initialize();
 
@@ -66,7 +68,7 @@ describe("SPA identity selection", () => {
 
   test("keeps manual identity on its authentication screen", async () => {
     const transport = new MockTransport(snapshot());
-    const client = new FomalhautClient(transport);
+    const client = await createFomalhautClient(transport);
     const runtime = createThemeStore(client);
     await runtime.initialize();
 
@@ -90,7 +92,7 @@ describe("SPA identity selection", () => {
       message: "Password",
     });
     const transport = new MockTransport(active);
-    const client = new FomalhautClient(transport);
+    const client = await createFomalhautClient(transport);
     const runtime = createThemeStore(client);
 
     await runtime.initialize();
@@ -103,7 +105,7 @@ describe("SPA identity selection", () => {
 
 test("converts protocol events into recovered snapshot state", async () => {
   const transport = new MockTransport(snapshot([alice]));
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
 
@@ -111,7 +113,7 @@ test("converts protocol events into recovered snapshot state", async () => {
     protocol: 1,
     sequence: 1,
     event: "state.changed",
-    data: { state: "waiting_for_prompt" },
+    data: { state: "waiting_for_visible" },
   });
   transport.emit({
     protocol: 1,
@@ -133,7 +135,7 @@ test("converts protocol events into recovered snapshot state", async () => {
   });
 
   expect(runtime.store.getState().snapshot).toMatchObject({
-    authentication: "waiting_for_prompt",
+    authentication: "waiting_for_visible",
     prompt: { promptId: 4, kind: "visible", message: "Token" },
     messages: [{ level: "info", text: "Touch your security key" }],
     selectedSessionId: "x11",
@@ -153,19 +155,20 @@ test("converts protocol events into recovered snapshot state", async () => {
     event: "session.started",
     data: {},
   });
-  expect(runtime.store.getState().snapshot?.authentication).toBe("started");
+  const started = runtime.store.getState().snapshot;
+  expect(started?.mode === "greeter" ? started.login : null).toBe("started");
 });
 
 test("cancels an active authentication before returning", async () => {
   const transport = new MockTransport(snapshot([alice]));
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
   transport.emit({
     protocol: 1,
     sequence: 1,
     event: "state.changed",
-    data: { state: "waiting_for_prompt" },
+    data: { state: "waiting_for_secret" },
   });
 
   expect(await runtime.store.getState().cancelAndReturn()).toBe(true);
@@ -175,7 +178,7 @@ test("cancels an active authentication before returning", async () => {
 
 test("does not cancel again after greetd has released a failed attempt", async () => {
   const transport = new MockTransport(snapshot([alice, bob]));
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
   await runtime.store.getState().chooseKnownUser(alice);
@@ -200,7 +203,7 @@ test("does not cancel again after greetd has released a failed attempt", async (
 
 test("clears PAM failure feedback before retrying the same user", async () => {
   const transport = new MockTransport(snapshot([alice, bob]));
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
   await runtime.store.getState().chooseKnownUser(alice);
@@ -238,14 +241,14 @@ test("clears PAM failure feedback before retrying the same user", async () => {
 
 test("does not leave authentication when cancellation fails", async () => {
   const transport = new MockTransport(snapshot([alice]));
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
   transport.emit({
     protocol: 1,
     sequence: 1,
     event: "state.changed",
-    data: { state: "waiting_for_prompt" },
+    data: { state: "waiting_for_secret" },
   });
   transport.rejectMethod = "auth.cancel";
 
@@ -259,7 +262,7 @@ test("does not leave authentication when cancellation fails", async () => {
 test("applies busy backpressure before requests reach the SDK", async () => {
   const transport = new MockTransport(snapshot([alice, bob]));
   transport.respondPromise = new Promise(() => undefined);
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
   const prompt = { promptId: 1, kind: "secret", message: "Password" } as const;
@@ -270,6 +273,63 @@ test("applies busy backpressure before requests reach the SDK", async () => {
 
   expect(transport.requests.map((request) => request.method)).toEqual([
     "state.get",
+    "state.get",
     "auth.respond",
   ]);
+});
+
+test("locker mode reauthenticates the fixed identity without session APIs", async () => {
+  const transport = new MockTransport(lockerSnapshot());
+  const client = await createFomalhautClient(transport);
+  const runtime = createThemeStore(client);
+
+  await runtime.initialize();
+
+  expect(runtime.store.getState().screen).toEqual({ name: "locker" });
+  expect(runtime.store.getState().snapshot).toMatchObject({
+    mode: "locker",
+    lock: "locked",
+    identity: { username: "alice", displayName: "Alice" },
+  });
+  expect(transport.requests.map((request) => request.method)).toEqual([
+    "state.get",
+    "state.get",
+    "auth.begin",
+  ]);
+  expect(transport.requests.at(-1)).toMatchObject({ params: {} });
+
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "state.changed",
+    data: { state: "waiting_for_secret" },
+  });
+  transport.emit({
+    protocol: 1,
+    sequence: 2,
+    event: "auth.prompt",
+    data: { promptId: 7, kind: "secret", message: "Password" },
+  });
+  expect(runtime.store.getState().snapshot).toMatchObject({
+    mode: "locker",
+    authentication: "waiting_for_secret",
+    prompt: { promptId: 7, kind: "secret", message: "Password" },
+    sequence: 2,
+  });
+
+  const requestCount = transport.requests.length;
+  expect(await runtime.store.getState().selectSession("x11")).toBe(false);
+  expect(transport.requests).toHaveLength(requestCount);
+
+  transport.emit({
+    protocol: 1,
+    sequence: 3,
+    event: "lock.failed",
+    data: {},
+  });
+  expect(runtime.store.getState().snapshot).toMatchObject({
+    mode: "locker",
+    lock: "failed",
+    sequence: 3,
+  });
 });

@@ -5,17 +5,17 @@ use std::{collections::VecDeque, error::Error, fmt};
 use fomalhaut_core::{
     AuthEvent as CoreAuthEvent, AuthState as CoreAuthState, BackendError, CoreError, LoginBackend,
     MessageLevel as CoreMessageLevel, PromptId as CorePromptId, PromptKind as CorePromptKind,
-    SessionCommand,
+    ReauthBackend, SessionCommand,
 };
 
 use crate::{
     bridge::{event_dispatch_script, response_json},
     protocol::{
         AuthMessage, AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
-        FrontendRequest, MAX_AUTH_MESSAGES, MessageLevel, PowerAction, Prompt, PromptId,
-        PromptKind, ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope,
-        ResponseResult, SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot,
-        UserSummary,
+        FrontendRequest, GreeterSnapshotFields, IdentitySummary, LockState, LoginState,
+        MAX_AUTH_MESSAGES, MessageLevel, PowerAction, Prompt, PromptId, PromptKind,
+        ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope, ResponseResult,
+        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot, UserSummary,
     },
 };
 
@@ -25,6 +25,7 @@ pub struct ControllerBatch {
     response: ResponseEnvelope,
     events: Vec<EventEnvelope>,
     session_started: bool,
+    unlock_authorized: bool,
 }
 
 impl ControllerBatch {
@@ -40,6 +41,18 @@ impl ControllerBatch {
         self.session_started
     }
 
+    /// Takes the one-shot native unlock authorization produced by successful reauthentication.
+    ///
+    /// The token is internal to the trusted Rust host and is never serialized into the frontend
+    /// protocol. Greeter batches and non-terminal locker batches return `None`.
+    pub fn take_unlock_authorization(&mut self) -> Option<UnlockAuthorization> {
+        if !self.unlock_authorized {
+            return None;
+        }
+        self.unlock_authorized = false;
+        Some(UnlockAuthorization { private: () })
+    }
+
     /// Serializes the batch into one reply and ordered JavaScript event calls.
     pub fn into_bridge_parts(self) -> Result<(String, Vec<String>), ControllerError> {
         let response = response_json(&self.response)
@@ -52,6 +65,16 @@ impl ControllerBatch {
             .map_err(|_| ControllerError::new("a controller event could not be serialized"))?;
         Ok((response, events))
     }
+}
+
+/// One-shot proof that the reauthentication controller authorized a native unlock attempt.
+///
+/// Only [`ControllerBatch::take_unlock_authorization`] can construct this value. Consuming it does
+/// not unlock the session; the locker host remains responsible for the session-lock handle and
+/// the compositor roundtrip.
+#[derive(Debug)]
+pub struct UnlockAuthorization {
+    private: (),
 }
 
 /// Sanitized fatal failure while maintaining public controller state.
@@ -124,20 +147,178 @@ impl TrustedSession {
 }
 
 /// Serial authentication controller over an arbitrary core transport.
-pub struct HostController<B> {
-    client: B,
+struct AuthPublicState {
     authentication: AuthState,
     prompt: Option<Prompt>,
     core_prompt: Option<CorePromptId>,
     messages: VecDeque<AuthMessage>,
+    sequences: EventSequence,
+}
+
+impl AuthPublicState {
+    fn new(state: CoreAuthState) -> Self {
+        Self {
+            authentication: map_state(state),
+            prompt: None,
+            core_prompt: None,
+            messages: VecDeque::new(),
+            sequences: EventSequence::default(),
+        }
+    }
+
+    fn reset_conversation(&mut self) {
+        self.prompt = None;
+        self.core_prompt = None;
+        self.messages.clear();
+    }
+
+    fn update_state(&mut self, state: CoreAuthState) {
+        self.authentication = map_state(state);
+    }
+
+    fn envelope_events(
+        &mut self,
+        events: Vec<Event>,
+    ) -> Result<Vec<EventEnvelope>, ControllerError> {
+        events
+            .into_iter()
+            .map(|event| {
+                self.sequences
+                    .allocate()
+                    .map(|sequence| EventEnvelope::new(sequence, event))
+                    .map_err(|_| ControllerError::new("the frontend event sequence is exhausted"))
+            })
+            .collect()
+    }
+
+    async fn drain_core_events<B: fomalhaut_core::ConversationBackend>(
+        &mut self,
+        client: &mut B,
+    ) -> Result<Vec<Event>, ControllerError> {
+        let mut events = Vec::new();
+        loop {
+            match client.next_event().await {
+                Ok(event) => events.push(self.apply_core_event(event)?),
+                Err(BackendError::Core(CoreError::NoPendingEvent)) => return Ok(events),
+                Err(_) => {
+                    return Err(ControllerError::new(
+                        "the controller could not consume a core event",
+                    ));
+                }
+            }
+        }
+    }
+
+    fn apply_core_event(&mut self, event: CoreAuthEvent) -> Result<Event, ControllerError> {
+        match event {
+            CoreAuthEvent::Prompt { id, kind, message } => {
+                let prompt_id = PromptId::new(id.get())
+                    .map_err(|_| ControllerError::new("the core prompt ID is not frontend-safe"))?;
+                let prompt_kind = match kind {
+                    CorePromptKind::Secret => PromptKind::Secret,
+                    CorePromptKind::Visible => PromptKind::Visible,
+                };
+                let prompt = Prompt::new(prompt_id, prompt_kind, message).map_err(|_| {
+                    ControllerError::new("the core prompt exceeds frontend protocol limits")
+                })?;
+                self.core_prompt = Some(id);
+                self.prompt = Some(prompt.clone());
+                Ok(Event::AuthPrompt(prompt))
+            }
+            CoreAuthEvent::Message { level, text } => {
+                let level = match level {
+                    CoreMessageLevel::Info => MessageLevel::Info,
+                    CoreMessageLevel::Error => MessageLevel::Error,
+                };
+                let message = AuthMessage::new(level, text).map_err(|_| {
+                    ControllerError::new("the core message exceeds frontend protocol limits")
+                })?;
+                if self.messages.len() == MAX_AUTH_MESSAGES {
+                    self.messages.pop_front();
+                }
+                self.messages.push_back(message.clone());
+                Ok(Event::AuthMessage(message))
+            }
+            CoreAuthEvent::Authenticated(_) => {
+                self.prompt = None;
+                self.core_prompt = None;
+                Ok(Event::AuthSucceeded(EmptyResult {}))
+            }
+            CoreAuthEvent::AuthenticationFailed => {
+                self.prompt = None;
+                self.core_prompt = None;
+                Ok(Event::AuthFailed(EmptyResult {}))
+            }
+            CoreAuthEvent::Cancelled => {
+                self.prompt = None;
+                self.core_prompt = None;
+                Ok(Event::AuthCancelled(EmptyResult {}))
+            }
+        }
+    }
+
+    async fn discard_core_events<B: fomalhaut_core::ConversationBackend>(
+        &mut self,
+        client: &mut B,
+    ) -> Result<(), ControllerError> {
+        loop {
+            match client.next_event().await {
+                Ok(mut event) => event.zeroize_for_controller(),
+                Err(BackendError::Core(CoreError::NoPendingEvent)) => return Ok(()),
+                Err(_) => {
+                    return Err(ControllerError::new(
+                        "the controller could not discard a core event",
+                    ));
+                }
+            }
+        }
+    }
+
+    async fn cancel_for_lifecycle<B: fomalhaut_core::ConversationBackend>(
+        &mut self,
+        client: &mut B,
+    ) -> Result<(), ControllerError> {
+        if !client.needs_cancel() {
+            self.update_state(client.state());
+            return Ok(());
+        }
+
+        client
+            .cancel()
+            .await
+            .map_err(|_| ControllerError::new("the controller could not cancel authentication"))?;
+        self.discard_core_events(client).await?;
+        self.update_state(client.state());
+        self.prompt = None;
+        self.core_prompt = None;
+        Ok(())
+    }
+
+    async fn cancel_after_internal_failure<B: fomalhaut_core::ConversationBackend>(
+        &mut self,
+        client: &mut B,
+    ) {
+        if client.needs_cancel() {
+            let _ = client.cancel().await;
+        }
+        self.prompt = None;
+        self.core_prompt = None;
+        self.update_state(client.state());
+    }
+}
+
+/// Greeter controller combining public authentication state with login-only capabilities.
+pub struct GreeterController<B> {
+    client: B,
+    auth: AuthPublicState,
+    login: LoginState,
     sessions: Vec<TrustedSession>,
     users: Vec<UserSummary>,
     power: Box<dyn PowerControl>,
     selected_session: Option<usize>,
-    sequences: EventSequence,
 }
 
-impl<B: LoginBackend> HostController<B> {
+impl<B: LoginBackend> GreeterController<B> {
     /// Wraps a connected core client and initializes its public state.
     #[must_use]
     pub fn new(client: B) -> Self {
@@ -168,43 +349,49 @@ impl<B: LoginBackend> HostController<B> {
         users: Vec<UserSummary>,
         power: impl PowerControl + 'static,
     ) -> Self {
-        let authentication = map_state(client.state(), client.session_started());
+        let auth = AuthPublicState::new(client.state());
+        let login = if client.session_started() {
+            LoginState::Started
+        } else {
+            LoginState::Idle
+        };
         let selected_session = (!sessions.is_empty()).then_some(0);
         Self {
             client,
-            authentication,
-            prompt: None,
-            core_prompt: None,
-            messages: VecDeque::new(),
+            auth,
+            login,
             sessions,
             users,
             power: Box::new(power),
             selected_session,
-            sequences: EventSequence::default(),
         }
     }
 
     /// Returns a bounded, frontend-safe snapshot of the current controller state.
     pub fn snapshot(&self) -> Result<StateSnapshot, ControllerError> {
-        StateSnapshot::new(
-            self.authentication,
-            self.prompt.clone(),
-            self.messages.iter().cloned().collect(),
-            self.users.clone(),
-            self.sessions
+        StateSnapshot::greeter(GreeterSnapshotFields {
+            authentication: self.auth.authentication,
+            login: self.login,
+            prompt: self.auth.prompt.clone(),
+            messages: self.auth.messages.iter().cloned().collect(),
+            sequence: self.auth.sequences.watermark(),
+            users: self.users.clone(),
+            sessions: self
+                .sessions
                 .iter()
                 .map(|session| session.summary.clone())
                 .collect(),
-            self.selected_session
+            selected_session_id: self
+                .selected_session
                 .and_then(|index| self.sessions.get(index))
                 .map(|session| session.summary.id().to_owned()),
-            self.power.capabilities(),
-        )
+            capabilities: self.power.capabilities(),
+        })
         .map_err(|_| ControllerError::new("the controller public state is invalid"))
     }
 }
 
-impl<B: LoginBackend> HostController<B> {
+impl<B: LoginBackend> GreeterController<B> {
     /// Handles one strictly decoded frontend request as a serial transaction.
     pub async fn handle(
         &mut self,
@@ -217,19 +404,22 @@ impl<B: LoginBackend> HostController<B> {
                 response: ResponseEnvelope::success(id, ResponseResult::State(snapshot)),
                 events: Vec::new(),
                 session_started: self.client.session_started(),
+                unlock_authorized: false,
             });
         }
 
-        let previous_state = self.authentication;
+        let previous_state = self.auth.authentication;
         let mut operation = self.execute(request).await;
         let mut detail_events = match operation.as_mut() {
             Ok(events) => std::mem::take(events),
             Err(_) => Vec::new(),
         };
-        let core_events = match self.drain_core_events().await {
+        let core_events = match self.auth.drain_core_events(&mut self.client).await {
             Ok(events) => events,
             Err(error) => {
-                self.cancel_after_internal_failure().await;
+                self.auth
+                    .cancel_after_internal_failure(&mut self.client)
+                    .await;
                 return Err(error);
             }
         };
@@ -252,21 +442,30 @@ impl<B: LoginBackend> HostController<B> {
                 })?
                 .command
                 .clone();
+            self.login = LoginState::StartingSession;
             match self.client.start_session(command).await {
-                Ok(()) => detail_events.push(Event::SessionStarted(EmptyResult {})),
-                Err(error) => operation = Err(protocol_error(error)),
+                Ok(()) => {
+                    self.login = LoginState::Started;
+                    detail_events.push(Event::SessionStarted(EmptyResult {}));
+                }
+                Err(error) => {
+                    self.login = LoginState::Failed;
+                    operation = Err(protocol_error(error));
+                }
             }
-            let session_events = match self.drain_core_events().await {
+            let session_events = match self.auth.drain_core_events(&mut self.client).await {
                 Ok(events) => events,
                 Err(error) => {
-                    self.cancel_after_internal_failure().await;
+                    self.auth
+                        .cancel_after_internal_failure(&mut self.client)
+                        .await;
                     return Err(error);
                 }
             };
             detail_events.extend(session_events);
         }
 
-        self.authentication = map_state(self.client.state(), self.client.session_started());
+        self.auth.update_state(self.client.state());
 
         self.finish_batch(id, previous_state, operation, detail_events)
     }
@@ -279,13 +478,13 @@ impl<B: LoginBackend> HostController<B> {
         detail_events: Vec<Event>,
     ) -> Result<ControllerBatch, ControllerError> {
         let mut events = Vec::with_capacity(detail_events.len().saturating_add(1));
-        if previous_state != self.authentication {
+        if previous_state != self.auth.authentication {
             events.push(Event::StateChanged(StateChangedData::new(
-                self.authentication,
+                self.auth.authentication,
             )));
         }
         events.extend(detail_events);
-        let events = self.envelope_events(events)?;
+        let events = self.auth.envelope_events(events)?;
 
         let response = match operation {
             Ok(_) => ResponseEnvelope::success(id, ResponseResult::Empty(EmptyResult {})),
@@ -295,47 +494,41 @@ impl<B: LoginBackend> HostController<B> {
             response,
             events,
             session_started: self.client.session_started(),
+            unlock_authorized: false,
         })
     }
 
     /// Cancels an active greetd session after a page or host lifecycle boundary.
     pub async fn cancel_for_lifecycle(&mut self) -> Result<(), ControllerError> {
-        if !self.client.needs_cancel() {
-            self.authentication = map_state(self.client.state(), self.client.session_started());
-            return Ok(());
-        }
-
-        self.client
-            .cancel()
-            .await
-            .map_err(|_| ControllerError::new("the controller could not cancel authentication"))?;
-        self.discard_core_events().await?;
-        self.authentication = map_state(self.client.state(), self.client.session_started());
-        self.prompt = None;
-        self.core_prompt = None;
-        Ok(())
+        self.auth.cancel_for_lifecycle(&mut self.client).await
     }
 
     async fn execute(&mut self, request: FrontendRequest) -> Result<Vec<Event>, ProtocolErrorBody> {
         match request {
             FrontendRequest::AuthBegin(params) => {
+                let Some(username) = params.username() else {
+                    return Err(ProtocolErrorBody::new(
+                        ProtocolErrorCode::InvalidParams,
+                        "auth.begin parameters do not match the greeter mode",
+                        false,
+                    ));
+                };
                 if matches!(
                     self.client.state(),
                     CoreAuthState::Idle | CoreAuthState::Failed
                 ) {
-                    self.prompt = None;
-                    self.core_prompt = None;
-                    self.messages.clear();
+                    self.auth.reset_conversation();
+                    self.login = LoginState::Idle;
                 }
                 self.client
-                    .begin_login(params.username().to_owned())
+                    .begin_login(username.to_owned())
                     .await
                     .map_err(protocol_error)?;
                 Ok(Vec::new())
             }
             FrontendRequest::AuthRespond(params) => {
                 let (prompt_id, response) = params.into_parts();
-                let Some(core_prompt) = self.core_prompt else {
+                let Some(core_prompt) = self.auth.core_prompt else {
                     return Err(stale_prompt_error());
                 };
                 if core_prompt.get() != prompt_id.get() {
@@ -420,121 +613,223 @@ impl<B: LoginBackend> HostController<B> {
         })?;
         Ok(vec![Event::SessionSelected(event)])
     }
+}
 
-    async fn drain_core_events(&mut self) -> Result<Vec<Event>, ControllerError> {
-        let mut events = Vec::new();
-        loop {
-            match self.client.next_event().await {
-                Ok(event) => events.push(self.apply_core_event(event)?),
-                Err(BackendError::Core(CoreError::NoPendingEvent)) => return Ok(events),
-                Err(_) => {
-                    return Err(ControllerError::new(
-                        "the controller could not consume a core event",
-                    ));
-                }
-            }
+/// Locker controller combining shared authentication state with native lock lifecycle state.
+///
+/// This controller only accepts a [`ReauthBackend`]. It can authorize the trusted native host to
+/// attempt an unlock, but it neither owns nor exposes a Wayland session-lock handle.
+pub struct LockerController<B> {
+    client: B,
+    auth: AuthPublicState,
+    lock: LockState,
+    identity: IdentitySummary,
+}
+
+impl<B: ReauthBackend> LockerController<B> {
+    /// Wraps a connected current-user reauthentication backend and trusted identity summary.
+    #[must_use]
+    pub fn new(client: B, identity: IdentitySummary) -> Self {
+        let auth = AuthPublicState::new(client.state());
+        Self {
+            client,
+            auth,
+            lock: LockState::Acquiring,
+            identity,
         }
     }
 
-    fn apply_core_event(&mut self, event: CoreAuthEvent) -> Result<Event, ControllerError> {
-        match event {
-            CoreAuthEvent::Prompt { id, kind, message } => {
-                let prompt_id = PromptId::new(id.get())
-                    .map_err(|_| ControllerError::new("the core prompt ID is not frontend-safe"))?;
-                let prompt_kind = match kind {
-                    CorePromptKind::Secret => PromptKind::Secret,
-                    CorePromptKind::Visible => PromptKind::Visible,
-                };
-                let prompt = Prompt::new(prompt_id, prompt_kind, message).map_err(|_| {
-                    ControllerError::new("the core prompt exceeds frontend protocol limits")
-                })?;
-                self.core_prompt = Some(id);
-                self.prompt = Some(prompt.clone());
-                Ok(Event::AuthPrompt(prompt))
-            }
-            CoreAuthEvent::Message { level, text } => {
-                let level = match level {
-                    CoreMessageLevel::Info => MessageLevel::Info,
-                    CoreMessageLevel::Error => MessageLevel::Error,
-                };
-                let message = AuthMessage::new(level, text).map_err(|_| {
-                    ControllerError::new("the core message exceeds frontend protocol limits")
-                })?;
-                if self.messages.len() == MAX_AUTH_MESSAGES {
-                    self.messages.pop_front();
-                }
-                self.messages.push_back(message.clone());
-                Ok(Event::AuthMessage(message))
-            }
-            CoreAuthEvent::Authenticated(_) => {
-                self.prompt = None;
-                self.core_prompt = None;
-                Ok(Event::AuthSucceeded(EmptyResult {}))
-            }
-            CoreAuthEvent::AuthenticationFailed => {
-                self.prompt = None;
-                self.core_prompt = None;
-                Ok(Event::AuthFailed(EmptyResult {}))
-            }
-            CoreAuthEvent::Cancelled => {
-                self.prompt = None;
-                self.core_prompt = None;
-                Ok(Event::AuthCancelled(EmptyResult {}))
-            }
-        }
+    /// Returns a bounded locker snapshot without user or session selection capabilities.
+    pub fn snapshot(&self) -> Result<StateSnapshot, ControllerError> {
+        StateSnapshot::locker(
+            self.auth.authentication,
+            self.lock,
+            self.auth.prompt.clone(),
+            self.auth.messages.iter().cloned().collect(),
+            self.auth.sequences.watermark(),
+            self.identity.clone(),
+            Capabilities::disabled(),
+        )
+        .map_err(|_| ControllerError::new("the controller public state is invalid"))
     }
 
-    fn envelope_events(
+    /// Records compositor confirmation that the session lock is active.
+    pub fn mark_lock_acquired(&mut self) -> Result<Vec<EventEnvelope>, ControllerError> {
+        if self.lock != LockState::Acquiring {
+            return Err(ControllerError::new(
+                "the lock cannot be acquired in its current lifecycle state",
+            ));
+        }
+        self.lock = LockState::Locked;
+        self.auth
+            .envelope_events(vec![Event::LockAcquired(EmptyResult {})])
+    }
+
+    /// Records a native session-lock failure without interpreting it as authentication failure.
+    pub fn mark_lock_failed(&mut self) -> Result<Vec<EventEnvelope>, ControllerError> {
+        if matches!(self.lock, LockState::Failed | LockState::Released) {
+            return Err(ControllerError::new(
+                "the lock cannot fail in its current lifecycle state",
+            ));
+        }
+        self.lock = LockState::Failed;
+        self.auth
+            .envelope_events(vec![Event::LockFailed(EmptyResult {})])
+    }
+
+    /// Consumes controller authorization after the native host starts the unlock roundtrip.
+    pub fn begin_unlock(
         &mut self,
-        events: Vec<Event>,
-    ) -> Result<Vec<EventEnvelope>, ControllerError> {
-        events
-            .into_iter()
-            .map(|event| {
-                self.sequences
-                    .allocate()
-                    .map(|sequence| EventEnvelope::new(sequence, event))
-                    .map_err(|_| ControllerError::new("the frontend event sequence is exhausted"))
-            })
-            .collect()
+        authorization: UnlockAuthorization,
+    ) -> Result<(), ControllerError> {
+        let UnlockAuthorization { private: () } = authorization;
+        if self.lock != LockState::Locked || self.auth.authentication != AuthState::Authenticated {
+            return Err(ControllerError::new(
+                "the lock cannot begin unlocking in its current state",
+            ));
+        }
+        self.lock = LockState::Unlocking;
+        Ok(())
     }
 
-    async fn discard_core_events(&mut self) -> Result<(), ControllerError> {
-        loop {
-            match self.client.next_event().await {
-                Ok(mut event) => event.zeroize_for_controller(),
-                Err(BackendError::Core(CoreError::NoPendingEvent)) => return Ok(()),
-                Err(_) => {
-                    return Err(ControllerError::new(
-                        "the controller could not discard a core event",
+    /// Records compositor-visible completion after an authorized native unlock roundtrip.
+    pub fn mark_lock_released(&mut self) -> Result<Vec<EventEnvelope>, ControllerError> {
+        if self.lock != LockState::Unlocking {
+            return Err(ControllerError::new(
+                "the lock cannot be released in its current lifecycle state",
+            ));
+        }
+        self.lock = LockState::Released;
+        self.auth
+            .envelope_events(vec![Event::LockReleased(EmptyResult {})])
+    }
+
+    /// Handles one strictly decoded locker request as a serial transaction.
+    pub async fn handle(
+        &mut self,
+        request: RequestEnvelope,
+    ) -> Result<ControllerBatch, ControllerError> {
+        let (id, request) = request.into_parts();
+        if matches!(request, FrontendRequest::StateGet(_)) {
+            let snapshot = self.snapshot()?;
+            return Ok(ControllerBatch {
+                response: ResponseEnvelope::success(id, ResponseResult::State(snapshot)),
+                events: Vec::new(),
+                session_started: false,
+                unlock_authorized: false,
+            });
+        }
+
+        let previous_state = self.auth.authentication;
+        let mut operation = self.execute(request).await;
+        let mut detail_events = match operation.as_mut() {
+            Ok(events) => std::mem::take(events),
+            Err(_) => Vec::new(),
+        };
+        let core_events = match self.auth.drain_core_events(&mut self.client).await {
+            Ok(events) => events,
+            Err(error) => {
+                self.auth
+                    .cancel_after_internal_failure(&mut self.client)
+                    .await;
+                return Err(error);
+            }
+        };
+        detail_events.extend(core_events);
+        self.auth.update_state(self.client.state());
+
+        let unlock_authorized = operation.is_ok()
+            && previous_state != AuthState::Authenticated
+            && self.auth.authentication == AuthState::Authenticated;
+        let mut events = Vec::with_capacity(detail_events.len().saturating_add(1));
+        if previous_state != self.auth.authentication {
+            events.push(Event::StateChanged(StateChangedData::new(
+                self.auth.authentication,
+            )));
+        }
+        events.extend(detail_events);
+        let events = self.auth.envelope_events(events)?;
+        let response = match operation {
+            Ok(_) => ResponseEnvelope::success(id, ResponseResult::Empty(EmptyResult {})),
+            Err(error) => ResponseEnvelope::error(id, error),
+        };
+        Ok(ControllerBatch {
+            response,
+            events,
+            session_started: false,
+            unlock_authorized,
+        })
+    }
+
+    /// Cancels an active reauthentication transaction on a page or host lifecycle boundary.
+    pub async fn cancel_for_lifecycle(&mut self) -> Result<(), ControllerError> {
+        self.auth.cancel_for_lifecycle(&mut self.client).await
+    }
+
+    async fn execute(&mut self, request: FrontendRequest) -> Result<Vec<Event>, ProtocolErrorBody> {
+        if self.lock != LockState::Locked {
+            return Err(ProtocolErrorBody::new(
+                ProtocolErrorCode::InvalidState,
+                "authentication is unavailable in the current lock lifecycle state",
+                false,
+            ));
+        }
+
+        match request {
+            FrontendRequest::AuthBegin(params) => {
+                if !params.is_locker() {
+                    return Err(ProtocolErrorBody::new(
+                        ProtocolErrorCode::InvalidParams,
+                        "auth.begin parameters do not match the locker mode",
+                        false,
                     ));
                 }
+                if matches!(
+                    self.client.state(),
+                    CoreAuthState::Idle | CoreAuthState::Failed
+                ) {
+                    self.auth.reset_conversation();
+                }
+                self.client.begin_reauth().await.map_err(protocol_error)?;
+                Ok(Vec::new())
             }
+            FrontendRequest::AuthRespond(params) => {
+                let (prompt_id, response) = params.into_parts();
+                let Some(core_prompt) = self.auth.core_prompt else {
+                    return Err(stale_prompt_error());
+                };
+                if core_prompt.get() != prompt_id.get() {
+                    return Err(stale_prompt_error());
+                }
+                self.client
+                    .respond(core_prompt, response.into_core_secret())
+                    .await
+                    .map_err(protocol_error)?;
+                Ok(Vec::new())
+            }
+            FrontendRequest::AuthCancel(_) => {
+                self.client.cancel().await.map_err(protocol_error)?;
+                Ok(Vec::new())
+            }
+            FrontendRequest::SessionSelect(_) | FrontendRequest::PowerRequest(_) => {
+                Err(ProtocolErrorBody::new(
+                    ProtocolErrorCode::MethodDisabled,
+                    "the method is disabled for the locker mode",
+                    false,
+                ))
+            }
+            FrontendRequest::StateGet(_) => Ok(Vec::new()),
         }
-    }
-
-    async fn cancel_after_internal_failure(&mut self) {
-        if self.client.needs_cancel() {
-            let _ = self.client.cancel().await;
-        }
-        self.prompt = None;
-        self.core_prompt = None;
-        self.authentication = map_state(self.client.state(), self.client.session_started());
     }
 }
 
-fn map_state(state: CoreAuthState, session_started: bool) -> AuthState {
-    if session_started {
-        return AuthState::Started;
-    }
-
+fn map_state(state: CoreAuthState) -> AuthState {
     match state {
-        CoreAuthState::Disconnected => AuthState::Disconnected,
+        CoreAuthState::Disconnected => AuthState::Failed,
         CoreAuthState::Idle => AuthState::Idle,
         CoreAuthState::Authenticating => AuthState::Authenticating,
-        CoreAuthState::WaitingForSecret | CoreAuthState::WaitingForVisible => {
-            AuthState::WaitingForPrompt
-        }
+        CoreAuthState::WaitingForSecret => AuthState::WaitingForSecret,
+        CoreAuthState::WaitingForVisible => AuthState::WaitingForVisible,
         CoreAuthState::Authenticated => AuthState::Authenticated,
         CoreAuthState::Cancelling => AuthState::Cancelling,
         CoreAuthState::Failed => AuthState::Failed,
@@ -601,13 +896,17 @@ mod tests {
     use serde_json::Value;
     use zeroize::Zeroize;
 
-    use super::{HostController, PowerControl, PowerControlError, TrustedSession};
+    use super::{
+        GreeterController, LockerController, PowerControl, PowerControlError, TrustedSession,
+    };
     use crate::protocol::{
-        Capabilities, PowerAction, ProtocolErrorCode, SessionKind, SessionSummary, decode_request,
+        Capabilities, IdentitySummary, PowerAction, ProtocolErrorCode, SessionKind, SessionSummary,
+        decode_request,
     };
     use fomalhaut_core::{
         AuthConversation, AuthEvent, AuthState, AuthenticatedIdentity, BackendError,
-        ConversationBackend, CoreError, LoginBackend, PromptId, PromptKind, Secret, SessionCommand,
+        ConversationBackend, CoreError, LoginBackend, PromptId, PromptKind, ReauthBackend, Secret,
+        SessionCommand,
     };
 
     enum ScriptStep {
@@ -624,6 +923,8 @@ mod tests {
         pending_identity: Option<AuthenticatedIdentity>,
         session_started: bool,
     }
+
+    struct ScriptedReauthBackend(ScriptedLoginBackend);
 
     struct RecordingPower {
         capabilities: Capabilities,
@@ -780,6 +1081,47 @@ mod tests {
         }
     }
 
+    impl ScriptedReauthBackend {
+        fn new(steps: impl IntoIterator<Item = ScriptStep>) -> Self {
+            Self(ScriptedLoginBackend::new(steps))
+        }
+    }
+
+    impl ConversationBackend for ScriptedReauthBackend {
+        fn state(&self) -> AuthState {
+            self.0.state()
+        }
+
+        fn needs_cancel(&self) -> bool {
+            self.0.conversation.needs_cancel()
+        }
+
+        async fn respond(
+            &mut self,
+            prompt: PromptId,
+            response: Secret,
+        ) -> Result<(), BackendError> {
+            self.0.respond(prompt, response).await
+        }
+
+        async fn cancel(&mut self) -> Result<(), BackendError> {
+            self.0.cancel().await
+        }
+
+        async fn next_event(&mut self) -> Result<AuthEvent, BackendError> {
+            self.0.next_event().await
+        }
+    }
+
+    impl ReauthBackend for ScriptedReauthBackend {
+        async fn begin_reauth(&mut self) -> Result<(), BackendError> {
+            let identity = AuthenticatedIdentity::new("current-user".to_owned())?;
+            self.0.conversation.begin()?;
+            self.0.pending_identity = Some(identity);
+            self.0.advance_authentication()
+        }
+    }
+
     fn request(json: &str) -> crate::protocol::RequestEnvelope {
         decode_request(json.as_bytes()).expect("the controller request fixture is valid")
     }
@@ -799,10 +1141,19 @@ mod tests {
         TrustedSession::new(summary, command)
     }
 
+    fn locker_identity() -> IdentitySummary {
+        IdentitySummary::new(
+            "alice".to_owned(),
+            "Alice".to_owned(),
+            Some("fomalhaut://avatar/1".to_owned()),
+        )
+        .expect("locker identity fixture is frontend-safe")
+    }
+
     #[tokio::test]
     async fn state_get_returns_connected_idle_snapshot() {
         let client = ScriptedLoginBackend::new([]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
         let batch = controller
             .handle(request(
                 r#"{"protocol":1,"id":1,"method":"state.get","params":{}}"#,
@@ -811,6 +1162,7 @@ mod tests {
             .expect("state snapshot is valid");
         let (response, events) = batch.into_parts();
 
+        assert_eq!(json(&response)["result"]["mode"], "greeter");
         assert_eq!(json(response)["result"]["authentication"], "idle");
         assert!(events.is_empty());
     }
@@ -831,7 +1183,7 @@ mod tests {
             succeeds: true,
         };
         let mut controller =
-            HostController::with_power_control(client, Vec::new(), Vec::new(), power);
+            GreeterController::with_power_control(client, Vec::new(), Vec::new(), power);
         controller
             .handle(request(
                 r#"{"protocol":1,"id":1,"method":"auth.begin","params":{"username":"alice"}}"#,
@@ -868,7 +1220,7 @@ mod tests {
         };
         let client = ScriptedLoginBackend::new([]);
         let mut controller =
-            HostController::with_power_control(client, Vec::new(), Vec::new(), power);
+            GreeterController::with_power_control(client, Vec::new(), Vec::new(), power);
         let batch = controller
             .handle(request(
                 r#"{"protocol":1,"id":1,"method":"power.request","params":{"action":"reboot"}}"#,
@@ -895,7 +1247,7 @@ mod tests {
             },
             ScriptStep::Success,
         ]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
 
         let begin = controller
             .handle(request(
@@ -932,7 +1284,7 @@ mod tests {
             kind: PromptKind::Visible,
             message: "Code:".to_owned(),
         }]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
         controller
             .handle(request(
                 r#"{"protocol":1,"id":4,"method":"auth.begin","params":{"username":"alice"}}"#,
@@ -963,7 +1315,7 @@ mod tests {
             },
             ScriptStep::Success,
         ]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
         controller
             .handle(request(
                 r#"{"protocol":1,"id":9,"method":"auth.begin","params":{"username":"alice"}}"#,
@@ -987,7 +1339,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_session_is_rejected_and_power_remains_disabled() {
         let client = ScriptedLoginBackend::new([]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
 
         let select = controller
             .handle(request(
@@ -1024,7 +1376,7 @@ mod tests {
             trusted_session("wayland:first", "first", SessionKind::Wayland),
             trusted_session("wayland:second", "second", SessionKind::Wayland),
         ];
-        let mut controller = HostController::with_sessions(client, sessions);
+        let mut controller = GreeterController::with_sessions(client, sessions);
 
         let state = controller
             .handle(request(
@@ -1066,7 +1418,7 @@ mod tests {
         let (response, events) = started.into_parts();
         assert_eq!(json(response)["ok"], true);
         let events = json(events);
-        assert_eq!(events[0]["data"]["state"], "started");
+        assert_eq!(events[0]["data"]["state"], "authenticated");
         assert!(events.as_array().is_some_and(|events| {
             events
                 .iter()
@@ -1075,6 +1427,10 @@ mod tests {
                     .iter()
                     .any(|event| event["event"] == "session.started")
         }));
+        assert_eq!(
+            json(controller.snapshot().expect("snapshot remains valid"))["login"],
+            "started"
+        );
 
         let after_start = controller
             .handle(request(
@@ -1098,7 +1454,7 @@ mod tests {
             "first",
             SessionKind::Wayland,
         )];
-        let mut controller = HostController::with_sessions(client, sessions);
+        let mut controller = GreeterController::with_sessions(client, sessions);
 
         let failed = controller
             .handle(request(
@@ -1118,7 +1474,7 @@ mod tests {
     async fn transport_failure_is_sanitized_and_disconnects_public_state() {
         let client =
             ScriptedLoginBackend::new([ScriptStep::Unavailable("private stub detail".to_owned())]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
 
         let batch = controller
             .handle(request(
@@ -1131,7 +1487,7 @@ mod tests {
         assert_eq!(response["error"]["code"], "internal");
         assert!(!response.to_string().contains("private stub detail"));
         let events = json(events);
-        assert_eq!(events[0]["data"]["state"], "disconnected");
+        assert_eq!(events[0]["data"]["state"], "failed");
     }
 
     #[tokio::test]
@@ -1148,7 +1504,7 @@ mod tests {
             },
             ScriptStep::Success,
         ]);
-        let mut controller = HostController::new(client);
+        let mut controller = GreeterController::new(client);
 
         controller
             .handle(request(
@@ -1182,6 +1538,235 @@ mod tests {
         assert_eq!(
             json(controller.snapshot().expect("snapshot is valid"))["authentication"],
             "idle"
+        );
+    }
+
+    #[tokio::test]
+    async fn locker_snapshot_and_native_lifecycle_are_sequenced() {
+        let client = ScriptedReauthBackend::new([]);
+        let mut controller = LockerController::new(client, locker_identity());
+
+        let state = controller
+            .handle(request(
+                r#"{"protocol":1,"id":30,"method":"state.get","params":{}}"#,
+            ))
+            .await
+            .expect("locker snapshot is valid");
+        let (response, events) = state.into_parts();
+        let response = json(response);
+        assert_eq!(response["result"]["mode"], "locker");
+        assert_eq!(response["result"]["lock"], "acquiring");
+        assert_eq!(response["result"]["sequence"], 0);
+        assert_eq!(response["result"]["identity"]["username"], "alice");
+        assert!(response["result"].get("sessions").is_none());
+        assert!(events.is_empty());
+
+        let acquired = controller
+            .mark_lock_acquired()
+            .expect("the compositor can confirm initial lock acquisition");
+        assert_eq!(json(&acquired)[0]["sequence"], 1);
+        assert_eq!(json(acquired)[0]["event"], "lock.acquired");
+        let snapshot = json(
+            controller
+                .snapshot()
+                .expect("locker snapshot remains valid"),
+        );
+        assert_eq!(snapshot["lock"], "locked");
+        assert_eq!(snapshot["sequence"], 1);
+
+        let failed = controller
+            .mark_lock_failed()
+            .expect("native lock failure is observable");
+        assert_eq!(json(failed)[0]["event"], "lock.failed");
+        assert_eq!(
+            json(controller.snapshot().expect("failed snapshot is valid"))["lock"],
+            "failed"
+        );
+        assert!(controller.mark_lock_acquired().is_err());
+    }
+
+    #[tokio::test]
+    async fn locker_rejects_prelock_and_cross_role_requests() {
+        let client = ScriptedReauthBackend::new([]);
+        let mut controller = LockerController::new(client, locker_identity());
+
+        let prelock = controller
+            .handle(request(
+                r#"{"protocol":1,"id":31,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("pre-lock authentication returns a protocol response");
+        let (response, events) = prelock.into_parts();
+        assert_eq!(json(response)["error"]["code"], "invalid_state");
+        assert!(events.is_empty());
+
+        controller
+            .mark_lock_acquired()
+            .expect("the compositor confirms the lock");
+        let greeter_begin = controller
+            .handle(request(
+                r#"{"protocol":1,"id":32,"method":"auth.begin","params":{"username":"mallory"}}"#,
+            ))
+            .await
+            .expect("cross-role auth parameters return a protocol response");
+        let (response, events) = greeter_begin.into_parts();
+        assert_eq!(json(response)["error"]["code"], "invalid_params");
+        assert!(events.is_empty());
+
+        let session = controller
+            .handle(request(
+                r#"{"protocol":1,"id":33,"method":"session.select","params":{"sessionId":"wayland:sway"}}"#,
+            ))
+            .await
+            .expect("locker session selection returns a protocol response");
+        let (response, events) = session.into_parts();
+        assert_eq!(json(response)["error"]["code"], "method_disabled");
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn locker_multistep_reauth_only_authorizes_native_unlock_once() {
+        let client = ScriptedReauthBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
+            },
+            ScriptStep::Prompt {
+                kind: PromptKind::Visible,
+                message: "One-time code:".to_owned(),
+            },
+            ScriptStep::Success,
+        ]);
+        let mut controller = LockerController::new(client, locker_identity());
+        controller
+            .mark_lock_acquired()
+            .expect("the compositor confirms the lock");
+
+        let mut begin = controller
+            .handle(request(
+                r#"{"protocol":1,"id":34,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("locker authentication starts");
+        assert!(begin.take_unlock_authorization().is_none());
+        let (_, events) = begin.into_parts();
+        assert_eq!(json(events)[1]["data"]["kind"], "secret");
+
+        let mut password = controller
+            .handle(request(
+                r#"{"protocol":1,"id":35,"method":"auth.respond","params":{"promptId":1,"response":"correct"}}"#,
+            ))
+            .await
+            .expect("password advances to the visible prompt");
+        assert!(password.take_unlock_authorization().is_none());
+        let (_, events) = password.into_parts();
+        assert_eq!(json(events)[1]["data"]["kind"], "visible");
+
+        let mut otp = controller
+            .handle(request(
+                r#"{"protocol":1,"id":36,"method":"auth.respond","params":{"promptId":2,"response":"123456"}}"#,
+            ))
+            .await
+            .expect("the second factor authenticates");
+        let authorization = otp
+            .take_unlock_authorization()
+            .expect("successful reauthentication produces native authorization");
+        assert!(otp.take_unlock_authorization().is_none());
+        let (_, events) = otp.into_parts();
+        let events = json(events);
+        assert_eq!(events[0]["data"]["state"], "authenticated");
+        assert!(events.as_array().is_some_and(|events| {
+            events
+                .iter()
+                .any(|event| event["event"] == "auth.succeeded")
+        }));
+        assert_eq!(
+            json(controller.snapshot().expect("authorized snapshot is valid"))["lock"],
+            "locked"
+        );
+
+        controller
+            .begin_unlock(authorization)
+            .expect("only the native host consumes unlock authorization");
+        assert_eq!(
+            json(controller.snapshot().expect("unlocking snapshot is valid"))["lock"],
+            "unlocking"
+        );
+        let released = controller
+            .mark_lock_released()
+            .expect("the compositor roundtrip completes release");
+        assert_eq!(json(released)[0]["event"], "lock.released");
+        assert_eq!(
+            json(controller.snapshot().expect("released snapshot is valid"))["lock"],
+            "released"
+        );
+    }
+
+    #[tokio::test]
+    async fn locker_auth_failure_cancel_and_disconnect_remain_locked() {
+        let client = ScriptedReauthBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
+            },
+            ScriptStep::AuthenticationFailed,
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
+            },
+            ScriptStep::Success,
+            ScriptStep::Unavailable("private worker detail".to_owned()),
+        ]);
+        let mut controller = LockerController::new(client, locker_identity());
+        controller
+            .mark_lock_acquired()
+            .expect("the compositor confirms the lock");
+
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":37,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("first prompt is available");
+        let mut failed = controller
+            .handle(request(
+                r#"{"protocol":1,"id":38,"method":"auth.respond","params":{"promptId":1,"response":"wrong"}}"#,
+            ))
+            .await
+            .expect("authentication failure remains protocol-safe");
+        assert!(failed.take_unlock_authorization().is_none());
+        assert_eq!(
+            json(controller.snapshot().expect("failure snapshot is valid"))["lock"],
+            "locked"
+        );
+
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":39,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("retry prompt is available");
+        controller
+            .cancel_for_lifecycle()
+            .await
+            .expect("lifecycle cancellation succeeds");
+        let snapshot = json(controller.snapshot().expect("cancelled snapshot is valid"));
+        assert_eq!(snapshot["authentication"], "idle");
+        assert_eq!(snapshot["lock"], "locked");
+
+        let disconnected = controller
+            .handle(request(
+                r#"{"protocol":1,"id":40,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("worker disconnect returns a sanitized response");
+        let (response, events) = disconnected.into_parts();
+        assert_eq!(json(&response)["error"]["code"], "internal");
+        assert!(!json(response).to_string().contains("private worker detail"));
+        assert_eq!(json(events)[0]["data"]["state"], "failed");
+        assert_eq!(
+            json(controller.snapshot().expect("disconnect snapshot is valid"))["lock"],
+            "locked"
         );
     }
 }

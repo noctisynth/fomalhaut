@@ -45,6 +45,24 @@ binding。greeter 继续在自身 crate
 不包含 `rpassword`，并已通过当前系统 PAM headers、bindgen/libclang 和 workspace lint/编译
 基线。该步骤只完成依赖接入，不表示一次性 worker、`ReauthBackend` 或 PAM fixture 已实现。
 
+角色化协议实现前进一步固定公开契约：公共 auth、greeter login 和 locker lock 使用相互独立
+的枚举；两种快照携带最后发布的 sequence watermark；locker identity 只含 username、
+display name 和可选 host avatar URL。SDK 以 `FomalhautClient<M>` 泛型、条件参数 tuple 和
+模式专用 session/event 类型完成主要收敛，异步 factory bootstrap 后返回可按 `mode` 判别的
+greeter/locker client 联合。以下协议、controller、生成产物和主题事项在实际实现及验证前
+仍保持未完成。
+
+随后完成该角色化协议切片：`fomalhaut-web` 已拆出共享 auth state、独立
+`GreeterController<LoginBackend>` 与 `LockerController<ReauthBackend>`；locker 认证成功只产生
+一次性 Rust 内部 unlock authorization，native lock lifecycle 独立产生 `lock.*` 事件。
+Rust wire、Draft 2020-12 Schema、ts-rs binding、泛型 SDK、内嵌 minimal theme 和
+React/Nocturne 单页均已同步。验证覆盖 workspace 138 个 Rust 测试、Clippy、rustfmt、rustdoc，
+SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试和生产构建。Semifold 已通过 CLI
+同步 workspace 并创建覆盖 `fomalhaut-web`、`fomalhaut-gtk`、`fomalhaut` 与
+`fomalhaut-sdk` 的联合 changeset；根 workspace 和 private 主题仅作为无 release channel 的
+发现节点保留，不进入发布计划。真实 PAM、session-lock、多输出 WebView 和 compositor 验证仍
+属于后续未完成事项。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -68,7 +86,7 @@ binding。greeter 继续在自身 crate
       `fomalhaut-gtk` 和接入共享宿主的 `fomalhaut`。
 - [x] 让现有 Web greeter controller 只依赖 `LoginBackend`，并用不依赖 greetd 类型的 fake
       backend 覆盖当前 greeter 状态转换。
-- [ ] 将 `fomalhaut-web` controller 继续拆成公共 auth、greeter lifecycle 和 locker lifecycle，
+- [x] 将 `fomalhaut-web` controller 继续拆成公共 auth、greeter lifecycle 和 locker lifecycle，
       并用 fake `ReauthBackend` 覆盖 locker 权能分离与全部状态转换。
 - [x] 让现有 `fomalhaut` 只组合 greetd `LoginBackend`，不再由 core 或 Web crate 直接依赖
       greetd transport/type。
@@ -107,21 +125,24 @@ binding。greeter 继续在自身 crate
 
 ## P0：统一前端协议、SDK 与主题
 
-- [ ] 将 `StateSnapshot` 改为以 `mode: "greeter" | "locker"` 区分的
+- [x] 将 `StateSnapshot` 改为以 `mode: "greeter" | "locker"` 区分的
       `GreeterStateSnapshot | LockerStateSnapshot`，分离公共 auth、login lifecycle 和
       lock lifecycle。
-- [ ] 将 `auth.begin` 改为 greeter `{ username }`/locker `{}` 两种严格参数，
+- [x] 将 `auth.begin` 改为 greeter `{ username }`/locker `{}` 两种严格参数，
       让 host 拒绝错误角色参数、locker 中的 `session.select` 和其他越权方法。
-- [ ] 增加 `lock.acquired`、`lock.failed`、`lock.released` 事件与快照 sequence
-      watermark，覆盖多视图 bootstrap、重复/乱序事件和页面 epoch。
-- [ ] 只扩展现有 `fomalhaut-sdk`：生成 mode/state 判别联合，提供模式收窄的
+- [x] 增加 `lock.acquired`、`lock.failed`、`lock.released` 事件与快照 sequence
+      watermark；SDK 已覆盖 bootstrap watermark、重复/乱序和错误角色事件，GTK host 继续
+      覆盖页面 epoch。
+- [ ] `fomalhaut-lock` 多输出宿主落地后，补充多个 WebView 共享同一 controller/transaction
+      的集成测试，验证每个页面的 snapshot watermark 与后续事件衔接。
+- [x] 只扩展现有 `fomalhaut-sdk`：生成 mode/state 判别联合，提供模式收窄的
       greeter `auth.begin(username)` 与 locker `auth.begin()` facade，不新建 locker SDK。
 - [x] 把全局配置从 `[frontend].path` 迁移为 `[themes].default`、`greeter`、
       `locker`，按“角色专用 → default → 内嵌”选择；新旧字段同时出现时拒绝。
-- [ ] 保持每个 `theme.toml` 只有一个 entrypoint；让内嵌 minimal theme 和
+- [x] 保持每个 `theme.toml` 只有一个 entrypoint；让内嵌 minimal theme 和
       React/Nocturne 参考主题在同一页面内同时支持 greeter/locker mode，同时保留
       分别配置两个主题的能力。
-- [ ] 同步 Rust wire、Draft 2020-12 Schema、ts-rs 产物、SDK、两个主题、
+- [x] 同步 Rust wire、Draft 2020-12 Schema、ts-rs 产物、SDK、两个主题、
       `docs/CONFIGURATION.md` 和 changeset；密码继续进入 JavaScript，主题必须在 SDK
       调用前同步清空 input。
 

@@ -1,7 +1,7 @@
 {
   "name": "fomalhaut-sdk",
   "version": "0.1.0-alpha.1",
-  "description": "Typed frontend client for the Fomalhaut greetd greeter protocol",
+  "description": "Typed frontend client for Fomalhaut greeter and locker hosts",
   "type": "module",
   "sideEffects": false,
   "license": "AGPL-3.0-only",

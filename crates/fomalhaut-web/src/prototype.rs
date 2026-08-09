@@ -2,8 +2,8 @@
 
 use crate::protocol::{
     AuthState, Capabilities, Event, EventEnvelope, EventSequence, FrontendRequest,
-    ProtocolErrorBody, ProtocolErrorCode, ResponseEnvelope, ResponseResult, StateChangedData,
-    StateSnapshot, decode_request,
+    GreeterSnapshotFields, LoginState, ProtocolErrorBody, ProtocolErrorCode, ResponseEnvelope,
+    ResponseResult, StateChangedData, StateSnapshot, decode_request,
 };
 
 const INVALID_MESSAGE: &str = "the native protocol bridge rejected the message";
@@ -63,7 +63,7 @@ pub fn prototype_event_dispatch_script() -> Result<String, PrototypeScriptError>
     let sequence = sequences.allocate().map_err(|_| PrototypeScriptError)?;
     let event = EventEnvelope::new(
         sequence,
-        Event::StateChanged(StateChangedData::new(AuthState::Disconnected)),
+        Event::StateChanged(StateChangedData::new(AuthState::Failed)),
     );
     let json = serde_json::to_string(&event).map_err(|_| PrototypeScriptError)?;
     let quoted_json = serde_json::to_string(&json).map_err(|_| PrototypeScriptError)?;
@@ -86,15 +86,17 @@ impl std::fmt::Display for PrototypeScriptError {
 impl std::error::Error for PrototypeScriptError {}
 
 fn prototype_state() -> Result<StateSnapshot, ProtocolErrorBody> {
-    StateSnapshot::new(
-        AuthState::Disconnected,
-        None,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        None,
-        Capabilities::disabled(),
-    )
+    StateSnapshot::greeter(GreeterSnapshotFields {
+        authentication: AuthState::Failed,
+        login: LoginState::Idle,
+        prompt: None,
+        messages: Vec::new(),
+        sequence: EventSequence::default().watermark(),
+        users: Vec::new(),
+        sessions: Vec::new(),
+        selected_session_id: None,
+        capabilities: Capabilities::disabled(),
+    })
     .map_err(|_| {
         ProtocolErrorBody::new(
             ProtocolErrorCode::Internal,
@@ -125,13 +127,14 @@ mod tests {
     }
 
     #[test]
-    fn state_probe_returns_disconnected_empty_snapshot() {
+    fn state_probe_returns_failed_empty_greeter_snapshot() {
         let value = response_value(r#"{"protocol":1,"id":7,"method":"state.get","params":{}}"#);
 
         assert_eq!(value["protocol"], 1);
         assert_eq!(value["id"], 7);
         assert_eq!(value["ok"], true);
-        assert_eq!(value["result"]["authentication"], "disconnected");
+        assert_eq!(value["result"]["mode"], "greeter");
+        assert_eq!(value["result"]["authentication"], "failed");
         assert_eq!(value["result"]["sessions"], serde_json::json!([]));
         assert_eq!(
             value["result"]["capabilities"]["power"],
@@ -172,7 +175,7 @@ mod tests {
         let script =
             prototype_event_dispatch_script().expect("the fixed prototype event is serializable");
         assert!(script.contains("state.changed"));
-        assert!(script.contains("disconnected"));
+        assert!(script.contains("failed"));
         assert!(script.contains("JSON.parse"));
     }
 }

@@ -1,11 +1,11 @@
 # fomalhaut-sdk
 
-Typed, framework-independent access to the Fomalhaut greeter protocol.
+Typed, framework-independent access to the Fomalhaut greeter and locker protocol.
 
 ```ts
-import { FomalhautClient } from "fomalhaut-sdk";
+import { createFomalhautClient } from "fomalhaut-sdk";
 
-const client = new FomalhautClient();
+const client = await createFomalhautClient();
 const state = await client.state.get();
 
 if (state.capabilities.power.includes("suspend")) {
@@ -21,14 +21,18 @@ client.on("auth.prompt", async (prompt) => {
   await client.auth.respond(prompt.promptId, response);
 });
 
-const firstSession = state.sessions[0];
-if (firstSession) {
-  await client.session.select(firstSession.id);
+if (client.mode === "greeter") {
+  const firstSession = state.mode === "greeter" ? state.sessions[0] : undefined;
+  if (firstSession) {
+    await client.session.select(firstSession.id);
+  }
+  await client.auth.begin("alice");
+} else {
+  await client.auth.begin();
 }
-await client.auth.begin("alice");
 ```
 
 Authentication responses are not queued or logged by the SDK. Clear credential inputs before
-awaiting a request, and only load trusted theme code in the greeter.
+awaiting a request, and only load trusted theme code in either host.
 
 Generated protocol types are also available from `fomalhaut-sdk/protocol`.

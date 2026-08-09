@@ -1,11 +1,12 @@
 import type {
+  AuthState,
   EventEnvelope,
   FomalhautEventReceiver,
   FomalhautTransport,
   FomalhautUnsubscribe,
   Event as ProtocolEvent,
   RequestEnvelope,
-  StateSnapshot,
+  StateSnapshotFor,
 } from "fomalhaut-sdk";
 
 const DEVELOPMENT_MARKER = "FOMALHAUT_DEVELOPMENT_TRANSPORT";
@@ -13,10 +14,13 @@ const DEVELOPMENT_MARKER = "FOMALHAUT_DEVELOPMENT_TRANSPORT";
 export class DevelopmentTransport implements FomalhautTransport {
   readonly #receivers = new Set<FomalhautEventReceiver>();
   #sequence = 0;
-  #state: StateSnapshot = {
+  #state: StateSnapshotFor<"greeter"> = {
+    mode: "greeter",
     authentication: "idle",
+    login: "idle",
     prompt: null,
     messages: [],
+    sequence: 0,
     users: [
       {
         username: "stargazer",
@@ -43,17 +47,22 @@ export class DevelopmentTransport implements FomalhautTransport {
           data: { sessionId: request.params.sessionId },
         });
         return this.#success(request.id, {});
-      case "auth.begin":
+      case "auth.begin": {
         this.#state.messages = [];
         this.#setAuthentication("authenticating");
+        const username =
+          "username" in request.params
+            ? request.params.username
+            : "the current user";
         this.#state.prompt = {
           promptId: 1,
           kind: "secret",
-          message: `Password for ${request.params.username}`,
+          message: `Password for ${username}`,
         };
-        this.#setAuthentication("waiting_for_prompt");
+        this.#setAuthentication("waiting_for_secret");
         this.#emit({ event: "auth.prompt", data: this.#state.prompt });
         return this.#success(request.id, {});
+      }
       case "auth.respond":
         this.#state.prompt = null;
         if (request.params.response === "fomalhaut") {
@@ -79,7 +88,7 @@ export class DevelopmentTransport implements FomalhautTransport {
           id: request.id,
           ok: false,
           error: {
-            code: "operation_not_allowed",
+            code: "method_disabled",
             message: "Power actions are disabled in the development fixture",
             retryable: false,
           },
@@ -92,13 +101,14 @@ export class DevelopmentTransport implements FomalhautTransport {
     return () => this.#receivers.delete(receiver);
   }
 
-  #setAuthentication(state: StateSnapshot["authentication"]): void {
+  #setAuthentication(state: AuthState): void {
     this.#state.authentication = state;
     this.#emit({ event: "state.changed", data: { state } });
   }
 
   #emit(event: ProtocolEvent): void {
     this.#sequence += 1;
+    this.#state.sequence = this.#sequence;
     const envelope = {
       protocol: 1,
       sequence: this.#sequence,

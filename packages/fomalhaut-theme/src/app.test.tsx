@@ -1,14 +1,14 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FomalhautClient } from "fomalhaut-sdk";
+import { createFomalhautClient } from "fomalhaut-sdk";
 import { describe, expect, test } from "vitest";
 import { App } from "@/app";
 import { createThemeStore } from "@/state/theme-store";
 import { ThemeStoreProvider } from "@/state/theme-store-provider";
-import { MockTransport, snapshot } from "@/test/mock-transport";
+import { lockerSnapshot, MockTransport, snapshot } from "@/test/mock-transport";
 
 async function renderTheme(transport: MockTransport) {
-  const client = new FomalhautClient(transport);
+  const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
   render(
@@ -20,6 +20,39 @@ async function renderTheme(transport: MockTransport) {
 }
 
 describe("SPA authentication UI", () => {
+  test("renders locker mode for the fixed identity without greeter controls", async () => {
+    const transport = new MockTransport(lockerSnapshot());
+    await renderTheme(transport);
+
+    expect(screen.getByRole("heading", { name: "Alice" })).toBeVisible();
+    expect(screen.getByText("Authenticate to unlock")).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Who’s signing in?" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Session" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Back/ })).toBeNull();
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "auth.begin",
+      params: {},
+    });
+
+    act(() => {
+      transport.emit({
+        protocol: 1,
+        sequence: 1,
+        event: "state.changed",
+        data: { state: "waiting_for_secret" },
+      });
+      transport.emit({
+        protocol: 1,
+        sequence: 2,
+        event: "auth.prompt",
+        data: { promptId: 9, kind: "secret", message: "Password" },
+      });
+    });
+    expect(screen.getByLabelText("Password")).toBeEnabled();
+  });
+
   test("skips selection and starts authentication for one known user", async () => {
     const transport = new MockTransport(
       snapshot([{ username: "alice", displayName: "Alice", avatarUrl: null }]),
@@ -31,6 +64,7 @@ describe("SPA authentication UI", () => {
       screen.queryByRole("heading", { name: "Who’s signing in?" }),
     ).not.toBeInTheDocument();
     expect(transport.requests.map((request) => request.method)).toEqual([
+      "state.get",
       "state.get",
       "auth.begin",
     ]);

@@ -1,4 +1,9 @@
-import type { PowerAction, Prompt, UserSummary } from "fomalhaut-sdk";
+import type {
+  IdentitySummary,
+  PowerAction,
+  Prompt,
+  UserSummary,
+} from "fomalhaut-sdk";
 import {
   ArrowLeft,
   ArrowRight,
@@ -51,15 +56,17 @@ export function App() {
       <Background />
       <Clock />
 
-      {phase === "ready" && snapshot && screen.name !== "user-selection" && (
-        <AuthenticationBackButton
-          label={
-            screen.name === "authentication-recovery"
-              ? "Cancel authentication"
-              : "Back to users"
-          }
-        />
-      )}
+      {phase === "ready" &&
+        snapshot?.mode === "greeter" &&
+        screen.name !== "user-selection" && (
+          <AuthenticationBackButton
+            label={
+              screen.name === "authentication-recovery"
+                ? "Cancel authentication"
+                : "Back to users"
+            }
+          />
+        )}
 
       <div className="relative z-10 grid min-h-screen place-items-center px-6 py-28">
         {phase === "loading" && <LoadingView />}
@@ -67,7 +74,7 @@ export function App() {
         {phase === "ready" && snapshot && <Screen screen={screen} />}
       </div>
 
-      {phase === "ready" && snapshot && <SessionControl />}
+      {phase === "ready" && snapshot?.mode === "greeter" && <SessionControl />}
       {phase === "ready" && snapshot && <PowerMenu />}
     </main>
   );
@@ -143,7 +150,7 @@ function UnavailableView({ message }: { message: string | null }) {
       )}
     >
       <Alert variant="destructive">
-        <AlertTitle>Greeter unavailable</AlertTitle>
+        <AlertTitle>Fomalhaut unavailable</AlertTitle>
         <AlertDescription>{message}</AlertDescription>
       </Alert>
     </div>
@@ -160,11 +167,15 @@ function Screen({ screen }: { screen: ThemeScreen }) {
       return <OtherUserView username={screen.username} />;
     case "authentication-recovery":
       return <AuthenticationRecoveryView />;
+    case "locker":
+      return <LockerView />;
   }
 }
 
 function UserSelectionView() {
-  const users = useThemeStore((state) => state.snapshot?.users ?? []);
+  const users = useThemeStore((state) =>
+    state.snapshot?.mode === "greeter" ? state.snapshot.users : [],
+  );
   const busy = useThemeStore((state) => state.busy);
   const chooseKnownUser = useThemeStore((state) => state.chooseKnownUser);
   const chooseOtherUser = useThemeStore((state) => state.chooseOtherUser);
@@ -341,6 +352,63 @@ function AuthenticationRecoveryView() {
       ) : (
         <AuthenticationWaiting allowRetry={false} />
       )}
+    </AuthenticationLayout>
+  );
+}
+
+function LockerView() {
+  const snapshot = useThemeStore((state) =>
+    state.snapshot?.mode === "locker" ? state.snapshot : null,
+  );
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const status = (() => {
+    switch (snapshot.lock) {
+      case "acquiring":
+        return "Securing this session…";
+      case "locked":
+        return "Authenticate to unlock";
+      case "unlocking":
+        return "Unlocking…";
+      case "released":
+        return "Session unlocked";
+      case "failed":
+        return "The native session lock is unavailable";
+    }
+  })();
+
+  return (
+    <AuthenticationLayout>
+      <UserAvatar
+        user={snapshot.identity}
+        className={cn(
+          "size-24 border-2 border-white/20",
+          "shadow-[0_0_50px_rgba(142,197,255,0.18)]",
+        )}
+      />
+      <div className="text-center">
+        <p className="mb-3 text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
+          Fomalhaut Lock
+        </p>
+        <h1 className="text-3xl font-medium tracking-tight">
+          {snapshot.identity.displayName}
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {snapshot.identity.username}
+        </p>
+        <p className="mt-3 text-sm text-muted-foreground" role="status">
+          {status}
+        </p>
+      </div>
+      <AuthenticationFeedback />
+      {snapshot.lock === "locked" && snapshot.prompt ? (
+        <PromptForm prompt={snapshot.prompt} />
+      ) : snapshot.lock === "locked" ? (
+        <AuthenticationWaiting />
+      ) : null}
     </AuthenticationLayout>
   );
 }
@@ -654,7 +722,7 @@ function UserAvatar({
   user,
   className,
 }: {
-  user: UserSummary;
+  user: UserSummary | IdentitySummary;
   className?: string;
 }) {
   const fallback = user.displayName.trim().charAt(0).toLocaleUpperCase() || "?";
@@ -674,7 +742,7 @@ function SessionControl() {
   const snapshot = useThemeStore((state) => state.snapshot);
   const busy = useThemeStore((state) => state.busy);
   const selectSession = useThemeStore((state) => state.selectSession);
-  if (!snapshot) {
+  if (snapshot?.mode !== "greeter") {
     return null;
   }
   const selectedSession = snapshot.sessions.find(

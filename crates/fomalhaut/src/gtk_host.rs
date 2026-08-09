@@ -7,7 +7,7 @@ use fomalhaut_gtk::{ApplicationHandle, ViewCallbacks, build_web_view, run_applic
 use fomalhaut_session::{DiscoveryConfig, SessionKind as CatalogSessionKind, discover};
 use fomalhaut_web::{
     controller::TrustedSession,
-    protocol::{MAX_SESSIONS, SessionKind as WebSessionKind, SessionSummary},
+    protocol::{MAX_SESSIONS, RuntimeMode, SessionKind as WebSessionKind, SessionSummary},
     theme::ThemeSource,
 };
 use gtk4 as gtk;
@@ -65,8 +65,15 @@ fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindo
             failure_application.quit_failure();
         },
     );
-    let view = build_web_view(theme, display.scale(), worker, outputs, callbacks)
-        .map_err(|_| HostError::SharedView)?;
+    let view = build_web_view(
+        theme,
+        RuntimeMode::Greeter,
+        display.scale(),
+        worker,
+        outputs,
+        callbacks,
+    )
+    .map_err(|_| HostError::SharedView)?;
 
     let window = gtk::ApplicationWindow::builder()
         .application(application.application())

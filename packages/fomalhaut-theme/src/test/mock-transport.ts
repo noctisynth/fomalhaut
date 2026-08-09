@@ -4,6 +4,7 @@ import type {
   FomalhautUnsubscribe,
   RequestEnvelope,
   StateSnapshot,
+  StateSnapshotFor,
 } from "fomalhaut-sdk";
 
 export class MockTransport implements FomalhautTransport {
@@ -47,17 +48,47 @@ export class MockTransport implements FomalhautTransport {
 }
 
 export function snapshot(
-  users: StateSnapshot["users"] = [],
+  users: StateSnapshotFor<"greeter">["users"] = [],
   prompt: StateSnapshot["prompt"] = null,
   power: StateSnapshot["capabilities"]["power"] = [],
-): StateSnapshot {
+): StateSnapshotFor<"greeter"> {
   return {
-    authentication: prompt ? "waiting_for_prompt" : "idle",
+    mode: "greeter",
+    authentication: prompt
+      ? prompt.kind === "secret"
+        ? "waiting_for_secret"
+        : "waiting_for_visible"
+      : "idle",
+    login: "idle",
     prompt,
     messages: [],
+    sequence: 0,
     users,
     sessions: [{ id: "wayland", name: "Wayland", kind: "wayland" }],
     selectedSessionId: "wayland",
     capabilities: { power },
+  };
+}
+
+export function lockerSnapshot(
+  prompt: StateSnapshot["prompt"] = null,
+): StateSnapshotFor<"locker"> {
+  return {
+    mode: "locker",
+    authentication: prompt
+      ? prompt.kind === "secret"
+        ? "waiting_for_secret"
+        : "waiting_for_visible"
+      : "idle",
+    lock: "locked",
+    prompt,
+    messages: [],
+    sequence: 0,
+    identity: {
+      username: "alice",
+      displayName: "Alice",
+      avatarUrl: null,
+    },
+    capabilities: { power: [] },
   };
 }

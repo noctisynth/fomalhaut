@@ -15,13 +15,11 @@ export type AuthMessage = { level: MessageLevel; text: string };
  * Authentication lifecycle visible to the frontend.
  */
 export type AuthState =
-  | "disconnected"
   | "idle"
   | "authenticating"
-  | "waiting_for_prompt"
+  | "waiting_for_secret"
+  | "waiting_for_visible"
   | "authenticated"
-  | "starting_session"
-  | "started"
   | "cancelling"
   | "failed";
 
@@ -53,7 +51,10 @@ export type Event =
   | { event: "auth.failed"; data: EmptyResult }
   | { event: "auth.cancelled"; data: EmptyResult }
   | { event: "session.selected"; data: SessionSelectedData }
-  | { event: "session.started"; data: EmptyResult };
+  | { event: "session.started"; data: EmptyResult }
+  | { event: "lock.acquired"; data: EmptyResult }
+  | { event: "lock.failed"; data: EmptyResult }
+  | { event: "lock.released"; data: EmptyResult };
 
 /**
  * Sequenced event envelope.
@@ -67,7 +68,62 @@ export type EventEnvelope = { protocol: 1; sequence: Sequence } & (
   | { event: "auth.cancelled"; data: EmptyResult }
   | { event: "session.selected"; data: SessionSelectedData }
   | { event: "session.started"; data: EmptyResult }
+  | { event: "lock.acquired"; data: EmptyResult }
+  | { event: "lock.failed"; data: EmptyResult }
+  | { event: "lock.released"; data: EmptyResult }
 );
+
+/**
+ * Greeter-only public state.
+ */
+export type GreeterStateSnapshot = {
+  authentication: AuthState;
+  login: LoginState;
+  prompt: Prompt | null;
+  messages: Array<AuthMessage>;
+  sequence: Sequence;
+  users: Array<UserSummary>;
+  sessions: Array<SessionSummary>;
+  selectedSessionId: string | null;
+  capabilities: Capabilities;
+};
+
+/**
+ * Trusted identity fixed by the locker host.
+ */
+export type IdentitySummary = {
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+};
+
+/**
+ * Locker-only native session-lock lifecycle.
+ */
+export type LockState =
+  | "acquiring"
+  | "locked"
+  | "unlocking"
+  | "released"
+  | "failed";
+
+/**
+ * Locker-only public state.
+ */
+export type LockerStateSnapshot = {
+  authentication: AuthState;
+  lock: LockState;
+  prompt: Prompt | null;
+  messages: Array<AuthMessage>;
+  sequence: Sequence;
+  identity: IdentitySummary;
+  capabilities: Capabilities;
+};
+
+/**
+ * Greeter-only trusted session lifecycle.
+ */
+export type LoginState = "idle" | "starting_session" | "started" | "failed";
 
 /**
  * Severity of a non-interactive authentication message.
@@ -100,6 +156,11 @@ export type ResponseEnvelope = SuccessResponse | ErrorResponse;
 export type ResponseResult = EmptyResult | StateSnapshot;
 
 /**
+ * Product role selected by the trusted native host.
+ */
+export type RuntimeMode = "greeter" | "locker";
+
+/**
  * Monotonically increasing event sequence value.
  */
 export type Sequence = number;
@@ -125,17 +186,11 @@ export type SessionSummary = { id: string; name: string; kind: SessionKind };
 export type StateChangedData = { state: AuthState };
 
 /**
- * Complete state needed to rebuild a frontend after refresh.
+ * Complete role-discriminated state needed to rebuild a frontend after refresh.
  */
-export type StateSnapshot = {
-  authentication: AuthState;
-  prompt: Prompt | null;
-  messages: Array<AuthMessage>;
-  users: Array<UserSummary>;
-  sessions: Array<SessionSummary>;
-  selectedSessionId: string | null;
-  capabilities: Capabilities;
-};
+export type StateSnapshot =
+  | ({ mode: "greeter" } & GreeterStateSnapshot)
+  | ({ mode: "locker" } & LockerStateSnapshot);
 
 export type SuccessResponse = {
   protocol: 1;

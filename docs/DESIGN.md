@@ -821,6 +821,24 @@ PAM wrapper 的生态与源码审计已经完成，首阶段采用精确固定�
 分支只包含当前可信 identity、lock lifecycle 与可用能力。locker 快照不得
 暴露用户切换、session 列表或 session 启动操作。
 
+公开类型固定为以下形状；字段使用现有 wire 的 `camelCase` 规则：
+
+- `AuthState` 只包含 `idle`、`authenticating`、`waiting_for_secret`、
+  `waiting_for_visible`、`authenticated`、`cancelling` 和 `failed`。backend 断开在公开
+  协议中收敛为 `failed`，不得重新混入 login/lock lifecycle。
+- `LoginState` 包含 `idle`、`starting_session`、`started` 和 `failed`。
+- `LockState` 包含 `acquiring`、`locked`、`unlocking`、`released` 和 `failed`。
+- `IdentitySummary` 只包含可信 host 提供的 `username`、`displayName` 和可选不透明
+  `avatarUrl`，不暴露 UID、home、shell 或 PAM 数据。
+- `GreeterStateSnapshot` 固定包含 `mode`、`authentication`、`login`、`prompt`、
+  `messages`、`sequence`、`users`、`sessions`、`selectedSessionId` 和 `capabilities`。
+- `LockerStateSnapshot` 固定包含 `mode`、`authentication`、`lock`、`prompt`、
+  `messages`、`sequence`、`identity` 和 `capabilities`。
+
+`sequence` 是生成快照时已经发布的最后一个 event sequence；尚未发布事件时为 `0`。
+页面只接受严格大于该 watermark 的后续事件。`unlocking` 只表示 native host 已接受内部
+`UnlockAuthorized` 并开始 Wayland unlock/roundtrip，不把 unlock 权能交给 JavaScript。
+
 示例请求：
 
 ```json
@@ -940,6 +958,15 @@ greeter 和 locker 只维护这一个 SDK，不新建 `fomalhaut-lock-sdk`。SDK
 建立当前 mode，在 TypeScript 收窄后返回角色 facade：greeter 中为
 `auth.begin(username)`，locker 中为 `auth.begin()`。运行时仍由 host 严格检查角色，
 类型收窄不是安全边界。
+
+SDK 的主收敛机制固定为泛型 `FomalhautClient<M extends RuntimeMode>`。异步 factory 先完成
+`state.get` bootstrap，返回
+`FomalhautClient<"greeter"> | FomalhautClient<"locker">`；调用方按只读 `mode` 字段收窄。
+`StateSnapshotFor<M>`、`AuthBeginArgs<M>`、角色事件名/数据和 session facade 都由条件类型或
+`Extract` 从生成 wire 类型推导，不重复手写第二套协议类型。greeter 实例的
+`auth.begin` 参数 tuple 为 `[username: string]`，locker 为 `[]`；`session` 在 locker
+实例上收敛为 `undefined`，不能调用。factory 设置 snapshot watermark 后才向订阅者发布更新
+事件，并拒绝 bootstrap 前或 mode 不匹配的状态结果。
 
 Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfile。根 `package.json`
 以 `workspaces = ["packages/*"]` 发现 package，根 package 必须为 private；`bun install` 产生

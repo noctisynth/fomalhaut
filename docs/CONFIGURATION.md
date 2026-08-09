@@ -154,10 +154,29 @@ window.addEventListener('fomalhaut:event', (event) => {
 });
 ```
 
-完整请求、响应、事件和长度约束见仓库根目录的 `protocol/v1.schema.json`。实现登录界面至少需要
-处理 `state.get`、`session.select`、`auth.begin`、`auth.respond`、`auth.cancel` 以及所有
-`auth.*`/`session.*` 事件。主题可以读取其页面中输入的认证内容，因此管理员仍应只安装可信
-来源的主题。
+完整请求、响应、事件和长度约束见仓库根目录的 `protocol/v1.schema.json`。`state.get` 返回以
+`mode: "greeter" | "locker"` 判别的联合快照，并携带已经发布的最后一个 event `sequence`。
+同一主题入口应先按 `mode` 收窄：greeter 处理用户与 session 选择，并以
+`auth.begin(username)` 开始认证；locker 只展示宿主固定的 `identity`，不提供用户/session
+切换，并以无参数 `auth.begin()` 重新认证当前用户。两者共享 `auth.respond`、`auth.cancel`、
+prompt/message 和公共认证状态；`session.*` 只属于 greeter，`lock.*` 只属于 locker。主题可以
+读取其页面中输入的认证内容，因此管理员仍应只安装可信来源的主题，并在 SDK 调用前同步清空
+输入元素。
+
+推荐主题直接使用同一个 `fomalhaut-sdk`。factory 会先完成 bootstrap，并返回可由只读 `mode`
+字段收窄的泛型 client：
+
+```ts
+const client = await createFomalhautClient();
+
+if (client.mode === "greeter") {
+  await client.auth.begin("alice");
+  await client.session.select("wayland:sway");
+} else {
+  await client.auth.begin();
+  // client.session 在这里由 TypeScript 收敛为 undefined。
+}
+```
 
 仓库中的 React 参考主题可通过以下命令构建：
 
@@ -176,10 +195,11 @@ default = "/home/example/Projects/fomalhaut/packages/fomalhaut-theme/dist"
 transport；它接受 `fomalhaut` 作为 fixture 密码。生产构建不会包含该 transport，脱离真实
 WebKit bridge 时会拒绝登录请求。
 
-`state.get` 的 `users` 数组提供经过宿主过滤的 `username`、`displayName` 和可选
+`state.get` greeter 分支的 `users` 数组提供经过宿主过滤的 `username`、`displayName` 和可选
 `avatarUrl`。头像 URL 只会是宿主管理的 `fomalhaut://avatar/<id>`，主题不得尝试从用户名推导
 本地路径。用户列表可能为空，主题必须始终保留手工用户名输入；选择用户摘要后仍应将其
-`username` 传给 `auth.begin`，最终认证结果只由 greetd/PAM 决定。
+`username` 传给 `auth.begin`，最终认证结果只由 greetd/PAM 决定。locker 分支只提供当前可信
+`identity` 的同形显示字段，不提供 UID 或账户枚举，也不允许主题改变认证目标。
 
 ## 电源管理
 

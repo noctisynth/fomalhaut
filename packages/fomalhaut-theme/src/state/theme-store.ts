@@ -1,11 +1,14 @@
 import {
+  type AnyFomalhautClient,
   type AuthState,
   FomalhautBridgeError,
   FomalhautBusyError,
   type FomalhautClient,
   FomalhautProtocolError,
+  type FomalhautUnsubscribe,
   type PowerAction,
   type Prompt,
+  type RuntimeMode,
   type StateSnapshot,
   type UserSummary,
 } from "fomalhaut-sdk";
@@ -17,7 +20,8 @@ export type ThemeScreen =
   | { name: "user-selection" }
   | { name: "known-user"; user: UserSummary }
   | { name: "other-user"; username: string | null }
-  | { name: "authentication-recovery" };
+  | { name: "authentication-recovery" }
+  | { name: "locker" };
 
 export interface ThemeState {
   phase: ThemePhase;
@@ -49,20 +53,20 @@ function displayError(error: unknown): string {
     return error.message;
   }
   if (error instanceof FomalhautBusyError) {
-    return "Another greeter request is still in progress.";
+    return "Another authentication request is still in progress.";
   }
   if (error instanceof FomalhautBridgeError) {
     return "The Fomalhaut host is unavailable.";
   }
-  return "The greeter could not complete the request.";
+  return "Fomalhaut could not complete the request.";
 }
 
 function authenticationIsActive(authentication: AuthState): boolean {
   return [
     "authenticating",
-    "waiting_for_prompt",
+    "waiting_for_secret",
+    "waiting_for_visible",
     "authenticated",
-    "starting_session",
     "cancelling",
   ].includes(authentication);
 }
@@ -76,7 +80,9 @@ function clearAuthenticationDisplay(store: ThemeStore): void {
   }));
 }
 
-export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
+export function createThemeStore(
+  client: AnyFomalhautClient,
+): ThemeStoreRuntime {
   const store = createStore<ThemeState>((set, get) => {
     const run = async (operation: () => Promise<void>): Promise<boolean> => {
       if (get().busy) {
@@ -94,7 +100,10 @@ export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
       }
     };
 
-    const begin = async (username: string): Promise<boolean> => {
+    const beginGreeter = async (username: string): Promise<boolean> => {
+      if (client.mode !== "greeter") {
+        return false;
+      }
       clearAuthenticationDisplay(store);
       return run(() => client.auth.begin(username));
     };
@@ -106,24 +115,37 @@ export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
       busy: false,
       error: null,
       chooseKnownUser: async (user) => {
+        if (client.mode !== "greeter") {
+          return false;
+        }
         set({ screen: { name: "known-user", user } });
-        return begin(user.username);
+        return beginGreeter(user.username);
       },
       chooseOtherUser: () => {
+        if (client.mode !== "greeter") {
+          return;
+        }
         clearAuthenticationDisplay(store);
         set({ screen: { name: "other-user", username: null } });
       },
       submitManualUsername: async (username) => {
+        if (client.mode !== "greeter") {
+          return false;
+        }
         set({ screen: { name: "other-user", username } });
-        return begin(username);
+        return beginGreeter(username);
       },
       retryAuthentication: () => {
+        clearAuthenticationDisplay(store);
+        if (client.mode === "locker") {
+          return run(() => client.auth.begin());
+        }
         const { screen } = get();
         if (screen.name === "known-user") {
-          return begin(screen.user.username);
+          return beginGreeter(screen.user.username);
         }
         if (screen.name === "other-user" && screen.username) {
-          return begin(screen.username);
+          return beginGreeter(screen.username);
         }
         return Promise.resolve(false);
       },
@@ -139,58 +161,149 @@ export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
           return false;
         }
         clearAuthenticationDisplay(store);
-        set({ screen: { name: "user-selection" } });
+        set({
+          screen:
+            client.mode === "locker"
+              ? { name: "locker" }
+              : { name: "user-selection" },
+        });
         return true;
       },
-      selectSession: (sessionId) => run(() => client.session.select(sessionId)),
+      selectSession: (sessionId) => {
+        if (client.mode !== "greeter") {
+          return Promise.resolve(false);
+        }
+        return run(() => client.session.select(sessionId));
+      },
       requestPower: (action) => run(() => client.power.request(action)),
       clearError: () => set({ error: null }),
     };
   });
 
-  const updateAuthentication = (authentication: AuthState): void => {
+  const updateAuthentication = (
+    authentication: AuthState,
+    sequence: number,
+  ): void => {
     store.setState((state) => ({
       snapshot: state.snapshot
-        ? { ...state.snapshot, authentication }
+        ? { ...state.snapshot, authentication, sequence }
         : state.snapshot,
     }));
   };
 
-  const unsubscribe = [
-    client.on("state.changed", ({ state }) => updateAuthentication(state)),
-    client.on("auth.prompt", (prompt) => {
+  const subscribeCommonEvents = <M extends RuntimeMode>(
+    client: FomalhautClient<M>,
+  ): FomalhautUnsubscribe[] => [
+    client.on("state.changed", ({ state }, envelope) =>
+      updateAuthentication(state, envelope.sequence),
+    ),
+    client.on("auth.prompt", (prompt, envelope) => {
       store.setState((state) => ({
-        snapshot: state.snapshot ? { ...state.snapshot, prompt } : null,
+        snapshot: state.snapshot
+          ? { ...state.snapshot, prompt, sequence: envelope.sequence }
+          : null,
       }));
     }),
-    client.on("auth.message", (message) => {
+    client.on("auth.message", (message, envelope) => {
       store.setState((state) => ({
         snapshot: state.snapshot
           ? {
               ...state.snapshot,
               messages: [...state.snapshot.messages, message],
+              sequence: envelope.sequence,
             }
           : null,
       }));
     }),
-    client.on("auth.failed", () => clearPrompt(store)),
-    client.on("auth.cancelled", () => clearPrompt(store)),
-    client.on("auth.succeeded", () => clearPrompt(store)),
-    client.on("session.selected", ({ sessionId }) => {
-      store.setState((state) => ({
-        snapshot: state.snapshot
-          ? { ...state.snapshot, selectedSessionId: sessionId }
-          : null,
-      }));
-    }),
-    client.on("session.started", () => updateAuthentication("started")),
+    client.on("auth.failed", (_, envelope) =>
+      clearPrompt(store, envelope.sequence),
+    ),
+    client.on("auth.cancelled", (_, envelope) =>
+      clearPrompt(store, envelope.sequence),
+    ),
+    client.on("auth.succeeded", (_, envelope) =>
+      clearPrompt(store, envelope.sequence),
+    ),
   ];
+
+  const unsubscribe: FomalhautUnsubscribe[] = [];
+
+  if (client.mode === "greeter") {
+    unsubscribe.push(
+      ...subscribeCommonEvents(client),
+      client.on("session.selected", ({ sessionId }, envelope) => {
+        store.setState((state) => ({
+          snapshot:
+            state.snapshot?.mode === "greeter"
+              ? {
+                  ...state.snapshot,
+                  selectedSessionId: sessionId,
+                  sequence: envelope.sequence,
+                }
+              : state.snapshot,
+        }));
+      }),
+      client.on("session.started", (_, envelope) => {
+        store.setState((state) => ({
+          snapshot:
+            state.snapshot?.mode === "greeter"
+              ? {
+                  ...state.snapshot,
+                  login: "started",
+                  sequence: envelope.sequence,
+                }
+              : state.snapshot,
+        }));
+      }),
+    );
+  } else {
+    const updateLock = (
+      lock: Extract<StateSnapshot, { mode: "locker" }>["lock"],
+      sequence: number,
+    ): void => {
+      store.setState((state) => ({
+        snapshot:
+          state.snapshot?.mode === "locker"
+            ? { ...state.snapshot, lock, sequence }
+            : state.snapshot,
+      }));
+    };
+    unsubscribe.push(
+      ...subscribeCommonEvents(client),
+      client.on("lock.acquired", (_, envelope) =>
+        updateLock("locked", envelope.sequence),
+      ),
+      client.on("lock.failed", (_, envelope) =>
+        updateLock("failed", envelope.sequence),
+      ),
+      client.on("lock.released", (_, envelope) =>
+        updateLock("released", envelope.sequence),
+      ),
+    );
+  }
 
   return {
     store,
     initialize: async () => {
       try {
         const snapshot = await client.state.get();
+        if (snapshot.mode === "locker") {
+          store.setState({
+            phase: "ready",
+            snapshot,
+            screen: { name: "locker" },
+            error: null,
+          });
+          if (
+            snapshot.lock === "locked" &&
+            (snapshot.authentication === "idle" ||
+              snapshot.authentication === "failed")
+          ) {
+            await store.getState().retryAuthentication();
+          }
+          return;
+        }
+
         const singleUser =
           snapshot.users.length === 1 ? snapshot.users[0] : undefined;
         store.setState({
@@ -218,8 +331,10 @@ export function createThemeStore(client: FomalhautClient): ThemeStoreRuntime {
   };
 }
 
-function clearPrompt(store: ThemeStore): void {
+function clearPrompt(store: ThemeStore, sequence: number): void {
   store.setState((state) => ({
-    snapshot: state.snapshot ? { ...state.snapshot, prompt: null } : null,
+    snapshot: state.snapshot
+      ? { ...state.snapshot, prompt: null, sequence }
+      : null,
   }));
 }
