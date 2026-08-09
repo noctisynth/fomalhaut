@@ -5,6 +5,7 @@
 pkgname=greetd-fomalhaut
 _upstream_name=fomalhaut
 _upstream_ver=@UPSTREAM_VERSION@
+_source_ref=@SOURCE_REF@
 pkgver=@PKGVER@
 pkgrel=@PKGREL@
 pkgdesc='WebKitGTK display manager greeter for greetd'
@@ -25,7 +26,7 @@ depends=(
 optdepends=('accountsservice: user display names and avatars')
 makedepends=('cargo')
 source=(
-  "${_upstream_name}-${_upstream_ver}.tar.gz::${url}/archive/refs/tags/${_upstream_name}-v${_upstream_ver}.tar.gz"
+  "${_upstream_name}-${_source_ref}.tar.gz::${url}/archive/${_source_ref}.tar.gz"
   'greetd-fomalhaut.toml'
 )
 sha256sums=(
@@ -33,7 +34,7 @@ sha256sums=(
   '@CONFIG_SHA256@'
 )
 
-_source_dir="${_upstream_name}-${_upstream_name}-v${_upstream_ver}"
+_source_dir="${_upstream_name}-${_source_ref}"
 
 prepare() {
   cd "${_source_dir}"
@@ -47,7 +48,7 @@ build() {
 
 check() {
   cd "${_source_dir}"
-  CARGO_TARGET_DIR=target cargo test --frozen --workspace --all-targets
+  CARGO_TARGET_DIR=target cargo test --frozen --package fomalhaut --all-targets
 }
 
 package() {

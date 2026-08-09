@@ -2,15 +2,15 @@
 
 [简体中文](README.zh.md)
 
-Fomalhaut is a local, WebKitGTK-based greeter for
-[greetd](https://git.sr.ht/~kennylevinsen/greetd). It brings fully customizable
-HTML, CSS, and JavaScript interfaces to the Linux login screen while leaving
-authentication and session management to greetd.
+Fomalhaut is a local, WebKitGTK-based greetd display manager and Wayland session
+locker. It brings fully customizable HTML, CSS, and JavaScript interfaces to
+both login and lock screens while keeping login authority in greetd and
+current-user reauthentication in an isolated PAM worker.
 
-Fomalhaut is not a web server and does not implement PAM. A Rust host talks to
-greetd, discovers trusted desktop sessions, and exposes a small, versioned
-protocol to the local theme. Themes never receive the greetd socket, session
-commands, or arbitrary process execution capabilities.
+Fomalhaut is not a web server. Trusted Rust hosts expose a small, versioned,
+role-aware protocol to the local theme. Themes never receive the greetd socket,
+PAM worker, session-lock handle, session commands, or arbitrary process
+execution capabilities.
 
 > [!IMPORTANT]
 > Fomalhaut is currently alpha software. The greetd, Cage, and Wayland login
@@ -33,6 +33,8 @@ commands, or arbitrary process execution capabilities.
 - Optional, policy-gated power controls through systemd-logind.
 - Fractional display scaling and a theme system that can replace the entire
   login experience.
+- An `ext-session-lock-v1` locker with one WebView per output, systemd readiness,
+  and fail-closed GTK fallback handling.
 - A constrained local WebView with remote resources, arbitrary navigation,
   downloads, pop-ups, and developer tools disabled by default.
 
@@ -42,12 +44,12 @@ from sources you trust and have reviewed.
 ## Installation
 
 The source installer is the currently supported installation path. It builds
-the greeter and Nocturne theme, installs them, and updates the Fomalhaut and
-greetd configuration files.
+the greeter, locker, and Nocturne theme; installs the PAM policy and systemd
+user unit; and updates the Fomalhaut and greetd configuration files.
 
 You will need:
 
-- Linux with greetd, Cage, D-Bus, GTK 4, and WebKitGTK 6.0;
+- Linux with greetd, Cage, D-Bus, PAM, GTK 4, gtk4-layer-shell, and WebKitGTK 6.0;
 - the latest stable Rust toolchain with Cargo;
 - Bun canary and Git; and
 - a regular user account with `sudo` access for system installation.
@@ -108,6 +110,11 @@ time.
 By default, this installs:
 
 - `/usr/local/bin/fomalhaut`
+- `/usr/local/bin/fomalhaut-lock`
+- `/usr/local/lib/systemd/user/fomalhaut-lock.service`
+- `/usr/local/share/doc/fomalhaut-lock/niri.kdl`
+- `/usr/local/share/doc/fomalhaut-lock/swayidle.conf`
+- `/etc/pam.d/fomalhaut-lock`
 - `/etc/fomalhaut/themes/nocturne`
 - `/etc/fomalhaut/config.toml`
 - `/etc/greetd/config.toml`
@@ -136,6 +143,19 @@ System configuration lives at `/etc/fomalhaut/config.toml`. It controls the
 theme, display scale, account provider, session search paths, and optional power
 actions. The format, greetd/Cage example, and external theme setup are documented
 in the [configuration guide](docs/CONFIGURATION.md).
+
+Inside a supported Wayland session, reload the installed user unit and start a
+lock with verifiable readiness:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user start fomalhaut-lock.service
+```
+
+The command returns only after the compositor confirms the session lock. The
+niri shortcut, compositor-neutral swayidle command, PAM policy, compatibility
+limits, and upgrade behavior are in the
+[configuration guide](docs/CONFIGURATION.md).
 
 ## Workspace
 

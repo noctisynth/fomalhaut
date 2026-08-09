@@ -1,12 +1,13 @@
-# greetd-fomalhaut AUR packaging
+# Fomalhaut AUR packaging
 
 <!-- SPDX-FileCopyrightText: 2026 Fomalhaut contributors -->
 <!-- SPDX-License-Identifier: 0BSD -->
 
 This directory is the source for the independently maintained
-`greetd-fomalhaut` AUR repository. The rendered `PKGBUILD`, `.SRCINFO`, example
-greetd configuration, and packaging `LICENSE` are published to AUR; the
-template, renderer, and this README remain in the upstream repository.
+`greetd-fomalhaut` and `fomalhaut-lock` AUR repositories. Each repository
+receives its rendered `PKGBUILD`, `.SRCINFO`, and packaging `LICENSE`;
+`greetd-fomalhaut` also receives the example greetd configuration. The
+templates, renderer, and this README remain in the upstream repository.
 
 The packaging metadata is licensed under 0BSD so it can follow Arch packaging
 policy. Fomalhaut itself remains AGPL-3.0-only, and the generated `PKGBUILD`
@@ -29,6 +30,13 @@ official fingerprint pinned in the reviewed workflow before using it as
 fingerprint is independently verified and committed; no known-hosts secret is
 needed.
 
-Configure required reviewers on `aur-production`. Automatic runs publish a new
-`fomalhaut-v*` application tag with `pkgrel=1`. Use the workflow's manual `tag`
-and `pkgrel` inputs for packaging-only revisions.
+Configure required reviewers on `aur-production`. Automatic runs consume the
+schema-v1 `semifold-publish` output from the calling Semifold CI workflow. A
+main package release synchronizes the corresponding AUR `pkgver`; a release of
+only a binary dependency rebuilds the same `pkgver` with the next integer
+`pkgrel`. The source archive is pinned to the Semifold publish commit, and the
+workflow no longer probes crates.io or infers releases from tags.
+
+Use the workflow's manual package, immutable source ref, and `pkgrel` inputs
+for packaging-only revisions. A revision of an existing `pkgver` must increase
+the current AUR `pkgrel`.

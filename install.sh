@@ -175,8 +175,10 @@ install_arch_dependencies() {
     glibc
     greetd
     gtk4
+    gtk4-layer-shell
     libgcc
     libsoup3
+    pam
     python
     webkitgtk-6.0
   )
@@ -463,8 +465,8 @@ PY
 cd -- "$SCRIPT_DIR"
 [[ -f Cargo.lock && -f bun.lock && -f package.json ]] || die "run from a complete Fomalhaut checkout"
 
-log_step "Building the release binary"
-run_build_command cargo build --release --locked -p fomalhaut
+log_step "Building the release binaries"
+run_build_command cargo build --release --locked -p fomalhaut -p fomalhaut-lock
 
 log_step "Installing frozen Bun dependencies"
 run_build_command bun install --frozen-lockfile
@@ -473,8 +475,17 @@ log_step "Building the Nocturne theme"
 run_build_command bun run build:theme
 
 binary_source="$SCRIPT_DIR/target/release/fomalhaut"
+lock_binary_source="$SCRIPT_DIR/target/release/fomalhaut-lock"
 theme_source="$SCRIPT_DIR/packages/fomalhaut-theme/dist"
 [[ -x "$binary_source" ]] || die "release binary was not produced"
+[[ -x "$lock_binary_source" ]] || die "locker release binary was not produced"
+[[ -f "$SCRIPT_DIR/packaging/pam/fomalhaut-lock" ]] || die "locker PAM policy is missing"
+[[ -f "$SCRIPT_DIR/packaging/systemd/fomalhaut-lock.service.in" ]] \
+  || die "locker systemd service template is missing"
+[[ -f "$SCRIPT_DIR/packaging/idle/swayidle.conf" ]] \
+  || die "locker swayidle example is missing"
+[[ -f "$SCRIPT_DIR/packaging/niri/fomalhaut-lock.kdl" ]] \
+  || die "locker niri example is missing"
 [[ -f "$theme_source/index.html" && -f "$theme_source/theme.toml" ]] || die "theme build is incomplete"
 if find "$theme_source" -type l -print -quit | grep -q .; then
   die "theme build contains a symbolic link"
@@ -484,15 +495,44 @@ if [[ "$system_root" == "/" ]]; then
   sudo -v
 fi
 
+runtime_binary="$prefix/bin/fomalhaut"
+runtime_lock_binary="$prefix/bin/fomalhaut-lock"
+service_source="$SCRIPT_DIR/target/fomalhaut-lock.service"
+python3 - "$SCRIPT_DIR/packaging/systemd/fomalhaut-lock.service.in" \
+  "$service_source" "$runtime_lock_binary" <<'PY' \
+  || die "locker systemd service could not be generated"
+from pathlib import Path
+import sys
+
+template_path, output_path, executable = map(Path, sys.argv[1:])
+template = template_path.read_text(encoding="utf-8")
+if template.count("@FOMALHAUT_LOCK@") != 1:
+    raise SystemExit("service template must contain one executable placeholder")
+if not executable.is_absolute():
+    raise SystemExit("locker executable path must be absolute")
+rendered = template.replace("@FOMALHAUT_LOCK@", str(executable))
+Path(output_path).write_text(rendered, encoding="utf-8")
+PY
+
 fomalhaut_config="$(rooted /etc/fomalhaut/config.toml)"
 greetd_config="$(rooted /etc/greetd/config.toml)"
+pam_config="$(rooted /etc/pam.d/fomalhaut-lock)"
+service_config="$(rooted "$prefix/lib/systemd/user/fomalhaut-lock.service")"
+swayidle_path="$(rooted "$prefix/share/doc/fomalhaut-lock/swayidle.conf")"
+niri_path="$(rooted "$prefix/share/doc/fomalhaut-lock/niri.kdl")"
 preflight_toml "$fomalhaut_config" "$greetd_config"
+for managed_file in "$pam_config" "$service_config" "$swayidle_path" "$niri_path"; do
+  if [[ -L "$managed_file" || ( -e "$managed_file" && ! -f "$managed_file" ) ]]; then
+    die "refusing to install over non-regular managed file: $managed_file"
+  fi
+done
 
 install_id="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short=12 HEAD)-$$"
-runtime_binary="$prefix/bin/fomalhaut"
 binary_path="$(rooted "$runtime_binary")"
+lock_binary_path="$(rooted "$runtime_lock_binary")"
 binary_directory="${binary_path%/*}"
 binary_temporary="$binary_directory/.fomalhaut.new.$install_id"
+lock_binary_temporary="$binary_directory/.fomalhaut-lock.new.$install_id"
 
 if [[ -f "$binary_path" && ! -L "$binary_path" && -x "$binary_path" ]] \
   && run_privileged cmp -s -- "$binary_source" "$binary_path"; then
@@ -505,6 +545,65 @@ else
   run_privileged install -m 0755 -- "$binary_source" "$binary_temporary"
   run_privileged mv -fT -- "$binary_temporary" "$binary_path"
   log_success "Installed $runtime_binary"
+fi
+
+if [[ -f "$lock_binary_path" && ! -L "$lock_binary_path" && -x "$lock_binary_path" ]] \
+  && run_privileged cmp -s -- "$lock_binary_source" "$lock_binary_path"; then
+  log_unchanged "Unchanged $runtime_lock_binary"
+else
+  run_privileged install -d -m 0755 -- "$binary_directory"
+  if [[ -e "$lock_binary_path" || -L "$lock_binary_path" ]]; then
+    run_privileged cp -a -- "$lock_binary_path" "$lock_binary_path.bak.$install_id"
+  fi
+  run_privileged install -m 0755 -- "$lock_binary_source" "$lock_binary_temporary"
+  run_privileged mv -fT -- "$lock_binary_temporary" "$lock_binary_path"
+  log_success "Installed $runtime_lock_binary"
+fi
+
+if [[ -f "$service_config" ]] \
+  && run_privileged cmp -s -- "$service_source" "$service_config"; then
+  log_unchanged "Unchanged $prefix/lib/systemd/user/fomalhaut-lock.service"
+else
+  run_privileged install -d -m 0755 -- "${service_config%/*}"
+  if [[ -f "$service_config" ]]; then
+    run_privileged cp -a -- "$service_config" "$service_config.bak.$install_id"
+  fi
+  service_temporary="${service_config%/*}/.fomalhaut-lock.service.new.$install_id"
+  run_privileged install -m 0644 -- "$service_source" "$service_temporary"
+  run_privileged mv -fT -- "$service_temporary" "$service_config"
+  log_success "Installed $prefix/lib/systemd/user/fomalhaut-lock.service"
+fi
+
+swayidle_source="$SCRIPT_DIR/packaging/idle/swayidle.conf"
+run_privileged install -d -m 0755 -- "${swayidle_path%/*}"
+if [[ -f "$swayidle_path" ]] \
+  && run_privileged cmp -s -- "$swayidle_source" "$swayidle_path"; then
+  log_unchanged "Unchanged $prefix/share/doc/fomalhaut-lock/swayidle.conf"
+else
+  run_privileged install -m 0644 -- "$swayidle_source" "$swayidle_path"
+  log_success "Installed $prefix/share/doc/fomalhaut-lock/swayidle.conf"
+fi
+
+niri_source="$SCRIPT_DIR/packaging/niri/fomalhaut-lock.kdl"
+if [[ -f "$niri_path" ]] \
+  && run_privileged cmp -s -- "$niri_source" "$niri_path"; then
+  log_unchanged "Unchanged $prefix/share/doc/fomalhaut-lock/niri.kdl"
+else
+  run_privileged install -m 0644 -- "$niri_source" "$niri_path"
+  log_success "Installed $prefix/share/doc/fomalhaut-lock/niri.kdl"
+fi
+
+pam_source="$SCRIPT_DIR/packaging/pam/fomalhaut-lock"
+if [[ -f "$pam_config" ]]; then
+  if run_privileged cmp -s -- "$pam_source" "$pam_config"; then
+    log_unchanged "Unchanged /etc/pam.d/fomalhaut-lock"
+  else
+    log_warning "Preserved administrator PAM policy at /etc/pam.d/fomalhaut-lock"
+  fi
+else
+  run_privileged install -d -m 0755 -- "${pam_config%/*}"
+  run_privileged install -m 0644 -- "$pam_source" "$pam_config"
+  log_success "Installed /etc/pam.d/fomalhaut-lock"
 fi
 
 readonly theme_runtime="/etc/fomalhaut/themes/nocturne"

@@ -7,6 +7,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+fomalhaut-config = { version = "0.1.0-alpha", path = "../fomalhaut-config" }
+fomalhaut-core = { version = "0.1.0-alpha.1", path = "../fomalhaut-core" }
+fomalhaut-gtk = { version = "0.1.0-alpha", path = "../fomalhaut-gtk" }
+fomalhaut-pam = { version = "0.1.0-alpha", path = "../fomalhaut-pam" }
+fomalhaut-web = { version = "0.1.0-alpha.1", path = "../fomalhaut-web" }
+gtk4 = "0.11.4"
+gtk4-session-lock = { version = "=0.4.0", features = ["v1_2"] }
+tokio = { version = "1.53.1", features = ["rt"] }
 
 [lints]
 workspace = true

@@ -1,14 +1,28 @@
 name: AUR
 
 on:
-  workflow_run:
-    workflows: [Semifold CI]
-    types: [completed]
+  workflow_call:
+    inputs:
+      semifold_publish:
+        description: Semifold publish workflow output JSON
+        required: true
+        type: string
+      source_sha:
+        description: Immutable source commit from the Semifold publish run
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
-      tag:
-        description: Fomalhaut application tag (defaults to latest)
-        required: false
+      package:
+        description: AUR package to rebuild
+        required: true
+        type: choice
+        options:
+          - greetd-fomalhaut
+          - fomalhaut-lock
+      source_ref:
+        description: Immutable Git commit or tag to package
+        required: true
         type: string
       pkgrel:
         description: Arch package release number
@@ -21,140 +35,110 @@ permissions:
 
 env:
   AUR_SSH_ED25519_FINGERPRINT: "SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4"
+  HTTP_USER_AGENT: "Fomalhaut-AUR-CI/1 (+https://github.com/noctisynth/fomalhaut)"
 
 concurrency:
-  group: aur-greetd-fomalhaut
+  group: fomalhaut-aur-production
   cancel-in-progress: false
 
 jobs:
   resolve:
-    name: Resolve release
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    name: Resolve package updates
     runs-on: ubuntu-26.04
     outputs:
       needed: ${{ steps.release.outputs.needed }}
-      tag: ${{ steps.release.outputs.tag }}
-      upstream-version: ${{ steps.release.outputs.upstream-version }}
-      pkgver: ${{ steps.release.outputs.pkgver }}
-      pkgrel: ${{ steps.release.outputs.pkgrel }}
+      matrix: ${{ steps.release.outputs.matrix }}
     steps:
-      - name: Checkout
+      - name: Checkout packaging source
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Resolve and verify application release
+      - name: Test AUR release resolver
+        run: python3 packaging/aur/test_resolve.py
+      - name: Resolve Semifold publish results
         id: release
         env:
-          MANUAL_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
-          REQUESTED_TAG: ${{ inputs.tag }}
-          REQUESTED_PKGREL: ${{ inputs.pkgrel }}
+          MANUAL_PACKAGE: ${{ inputs.package }}
+          MANUAL_PKGREL: ${{ inputs.pkgrel }}
+          MANUAL_SOURCE_REF: ${{ inputs.source_ref }}
+          SEMIFOLD_PUBLISH: ${{ inputs.semifold_publish }}
+          SEMIFOLD_SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
 
-          tag="${REQUESTED_TAG}"
-          if [[ -z "${tag}" ]]; then
-            tag="$(git for-each-ref --sort=-creatordate --format='%(refname:short)' \
-              'refs/tags/fomalhaut-v*' | sed -n '1p')"
+          if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
+            matrix="$(python3 packaging/aur/resolve.py manual \
+              --package "${MANUAL_PACKAGE}" \
+              --source-ref "${MANUAL_SOURCE_REF}" \
+              --pkgrel "${MANUAL_PKGREL}")"
+          else
+            matrix="$(python3 packaging/aur/resolve.py automatic \
+              --publish-json "${SEMIFOLD_PUBLISH}" \
+              --source-sha "${SEMIFOLD_SOURCE_SHA}")"
           fi
-
-          if [[ -z "${tag}" ]]; then
-            echo "No fomalhaut-v* application release exists; AUR is unchanged."
-            echo "needed=false" >>"${GITHUB_OUTPUT}"
-            exit 0
+          if [[ "${matrix}" == '{"include":[]}' ]]; then
+            needed=false
+            echo "Semifold publish results require no AUR update."
+          else
+            needed=true
           fi
-          if [[ ! "${tag}" =~ ^fomalhaut-v([0-9A-Za-z.+-]+)$ ]]; then
-            echo "Invalid Fomalhaut application tag: ${tag}" >&2
-            exit 1
-          fi
-
-          upstream_version="${BASH_REMATCH[1]}"
-          pkgrel="${REQUESTED_PKGREL:-1}"
-          if [[ ! "${pkgrel}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "pkgrel must be a positive integer" >&2
-            exit 1
-          fi
-
-          git checkout --detach "${tag}"
-          manifest_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' \
-            crates/fomalhaut/Cargo.toml | sed -n '1p')"
-          if [[ "${manifest_version}" != "${upstream_version}" ]]; then
-            echo "Tag version ${upstream_version} does not match fomalhaut manifest ${manifest_version}" >&2
-            exit 1
-          fi
-
-          curl --fail --silent --show-error --retry 5 \
-            "https://crates.io/api/v1/crates/fomalhaut/${upstream_version}" >/dev/null
-
-          pkgver="${upstream_version//-/.}"
-          target_version="${pkgver}-${pkgrel}"
-          aur_version="$(curl --fail --silent --show-error --retry 5 \
-            'https://aur.archlinux.org/rpc/v5/info/greetd-fomalhaut' |
-            jq -r 'if .resultcount == 0 then "" else .results[0].Version end')"
-
-          needed=true
-          if [[ -n "${aur_version}" ]]; then
-            aur_pkgver="${aur_version%-*}"
-            aur_pkgrel="${aur_version##*-}"
-            if [[ "${aur_pkgver}" == "${pkgver}" && "${MANUAL_RELEASE}" != "true" ]]; then
-              needed=false
-              echo "AUR already contains ${aur_version} for ${pkgver}; nothing to publish."
-            elif [[ "${aur_version}" == "${target_version}" ]]; then
-              needed=false
-              echo "AUR already contains ${target_version}; nothing to publish."
-            elif [[ "${aur_pkgver}" == "${pkgver}" && "${aur_pkgrel}" =~ ^[0-9]+$ ]] &&
-              ((pkgrel <= aur_pkgrel)); then
-              echo "Manual pkgrel ${pkgrel} must be greater than current AUR pkgrel ${aur_pkgrel}" >&2
-              exit 1
-            fi
-          fi
-
           {
             echo "needed=${needed}"
-            echo "tag=${tag}"
-            echo "upstream-version=${upstream_version}"
-            echo "pkgver=${pkgver}"
-            echo "pkgrel=${pkgrel}"
+            echo "matrix=${matrix}"
           } >>"${GITHUB_OUTPUT}"
 
   build:
-    name: Build Arch package
+    name: Build ${{ matrix.aur_package }}
     needs: resolve
     if: needs.resolve.outputs.needed == 'true'
     runs-on: ubuntu-26.04
     container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     steps:
       - name: Checkout packaging templates
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - name: Install Arch build dependencies
-        run: >-
-          pacman -Syu --noconfirm --needed
-          cage cargo curl dbus git glib2 greetd gtk4 jq libgcc libsoup3 namcap
-          openssh webkitgtk-6.0
+        env:
+          AUR_PACKAGE: ${{ matrix.aur_package }}
+        run: |
+          set -euo pipefail
+
+          common=(cargo curl git glib2 gtk4 libgcc libsoup3 namcap openssh webkitgtk-6.0)
+          if [[ "${AUR_PACKAGE}" == greetd-fomalhaut ]]; then
+            pacman -Syu --noconfirm --needed "${common[@]}" cage dbus greetd
+          else
+            pacman -Syu --noconfirm --needed \
+              "${common[@]}" clang gtk4-layer-shell pam
+          fi
       - name: Render AUR repository
         env:
           AUR_MAINTAINER_NAME: ${{ vars.AUR_MAINTAINER_NAME }}
           AUR_MAINTAINER_EMAIL: ${{ vars.AUR_MAINTAINER_EMAIL }}
-          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-          PACKAGE_RELEASE: ${{ needs.resolve.outputs.pkgrel }}
+          AUR_PACKAGE: ${{ matrix.aur_package }}
+          SOURCE_REF: ${{ matrix.source_ref }}
+          UPSTREAM_VERSION: ${{ matrix.upstream_version }}
+          PACKAGE_RELEASE: ${{ matrix.pkgrel }}
         run: |
           set -euo pipefail
 
-          source_url="https://github.com/noctisynth/fomalhaut/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-          source_sha256="$(curl --fail --location --silent --show-error --retry 5 "${source_url}" | sha256sum)"
+          source_url="https://github.com/noctisynth/fomalhaut/archive/${SOURCE_REF}.tar.gz"
+          source_sha256="$(curl --fail --location --silent --show-error --retry 5 \
+            --user-agent "${HTTP_USER_AGENT}" "${source_url}" | sha256sum)"
           source_sha256="${source_sha256%% *}"
-
           bash packaging/aur/render.sh \
-            "${RELEASE_TAG}" \
+            "${AUR_PACKAGE}" \
+            "${SOURCE_REF}" \
+            "${UPSTREAM_VERSION}" \
             "${PACKAGE_RELEASE}" \
             "${source_sha256}" \
             "${AUR_MAINTAINER_NAME}" \
             "${AUR_MAINTAINER_EMAIL}" \
-            target/aur
+            "target/aur/${AUR_PACKAGE}"
       - name: Build and inspect package
+        env:
+          AUR_PACKAGE: ${{ matrix.aur_package }}
         run: |
           set -euo pipefail
 
@@ -162,36 +146,39 @@ jobs:
           chown -R builder:builder "${GITHUB_WORKSPACE}"
           runuser -u builder -- bash -c \
             'cd "$1" && makepkg --printsrcinfo >.SRCINFO && makepkg --cleanbuild --noconfirm' \
-            _ "${GITHUB_WORKSPACE}/target/aur"
-
-          cd target/aur
+            _ "${GITHUB_WORKSPACE}/target/aur/${AUR_PACKAGE}"
+          cd "target/aur/${AUR_PACKAGE}"
           namcap PKGBUILD
           namcap ./*.pkg.tar.zst
       - name: Upload verified AUR metadata
         uses: actions/upload-artifact@v7
         with:
-          name: greetd-fomalhaut-${{ needs.resolve.outputs.pkgver }}-${{ needs.resolve.outputs.pkgrel }}
+          name: ${{ matrix.aur_package }}-${{ matrix.pkgver }}-${{ matrix.pkgrel }}
           path: |
-            target/aur/PKGBUILD
-            target/aur/.SRCINFO
-            target/aur/greetd-fomalhaut.toml
-            target/aur/LICENSE
+            target/aur/${{ matrix.aur_package }}/PKGBUILD
+            target/aur/${{ matrix.aur_package }}/.SRCINFO
+            target/aur/${{ matrix.aur_package }}/*.toml
+            target/aur/${{ matrix.aur_package }}/LICENSE
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
 
   publish:
-    name: Publish AUR
+    name: Publish ${{ matrix.aur_package }}
     needs: [resolve, build]
+    if: needs.resolve.outputs.needed == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-26.04
     environment:
       name: aur-production
-      url: https://aur.archlinux.org/packages/greetd-fomalhaut
+      url: https://aur.archlinux.org/packages/${{ matrix.aur_package }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     steps:
       - name: Download verified AUR metadata
         uses: actions/download-artifact@v8
         with:
-          name: greetd-fomalhaut-${{ needs.resolve.outputs.pkgver }}-${{ needs.resolve.outputs.pkgrel }}
+          name: ${{ matrix.aur_package }}-${{ matrix.pkgver }}-${{ matrix.pkgrel }}
           path: aur-metadata
       - name: Configure dedicated AUR SSH identity
         env:
@@ -203,7 +190,6 @@ jobs:
             echo "AUR SSH private key is not configured" >&2
             exit 1
           fi
-
           install -d -m 700 "${HOME}/.ssh"
           printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" >"${HOME}/.ssh/aur"
           ssh-keyscan -t ed25519 aur.archlinux.org >"${HOME}/.ssh/known_hosts"
@@ -211,7 +197,6 @@ jobs:
             echo "AUR SSH host key scan returned no keys" >&2
             exit 1
           fi
-
           mapfile -t fingerprints < <(
             ssh-keygen -E sha256 -lf "${HOME}/.ssh/known_hosts" |
               awk '{print $2}' |
@@ -224,37 +209,40 @@ jobs:
             printf 'Received: %s\n' "${fingerprints[*]:-none}" >&2
             exit 1
           fi
-
           chmod 600 "${HOME}/.ssh/aur" "${HOME}/.ssh/known_hosts"
       - name: Push AUR repository
         env:
           AUR_MAINTAINER_NAME: ${{ vars.AUR_MAINTAINER_NAME }}
           AUR_MAINTAINER_EMAIL: ${{ vars.AUR_MAINTAINER_EMAIL }}
+          AUR_PACKAGE: ${{ matrix.aur_package }}
           GIT_SSH_COMMAND: >-
             ssh -i ~/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile=~/.ssh/known_hosts
-          UPSTREAM_VERSION: ${{ needs.resolve.outputs.upstream-version }}
-          PACKAGE_RELEASE: ${{ needs.resolve.outputs.pkgrel }}
+          UPSTREAM_VERSION: ${{ matrix.upstream_version }}
+          PACKAGE_RELEASE: ${{ matrix.pkgrel }}
         run: |
           set -euo pipefail
 
           git -c init.defaultBranch=master clone \
-            ssh://aur@aur.archlinux.org/greetd-fomalhaut.git aur-repository
+            "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" aur-repository
           install -m 644 aur-metadata/PKGBUILD aur-repository/PKGBUILD
           install -m 644 aur-metadata/.SRCINFO aur-repository/.SRCINFO
-          install -m 644 aur-metadata/greetd-fomalhaut.toml \
-            aur-repository/greetd-fomalhaut.toml
           install -m 644 aur-metadata/LICENSE aur-repository/LICENSE
+          if [[ -f aur-metadata/greetd-fomalhaut.toml ]]; then
+            install -m 644 aur-metadata/greetd-fomalhaut.toml \
+              aur-repository/greetd-fomalhaut.toml
+          fi
 
           cd aur-repository
           git config user.name "${AUR_MAINTAINER_NAME}"
           git config user.email "${AUR_MAINTAINER_EMAIL}"
-          git add PKGBUILD .SRCINFO greetd-fomalhaut.toml LICENSE
-
+          git add PKGBUILD .SRCINFO LICENSE
+          if [[ -f greetd-fomalhaut.toml ]]; then
+            git add greetd-fomalhaut.toml
+          fi
           if git diff --cached --quiet; then
             echo "AUR repository already contains the rendered metadata."
             exit 0
           fi
-
           git commit -m "Update to ${UPSTREAM_VERSION}-${PACKAGE_RELEASE}"
           git push origin master

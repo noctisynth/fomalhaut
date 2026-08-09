@@ -488,11 +488,22 @@ dependencies = [
 [[package]]
 name = "fomalhaut-lock"
 version = "0.1.0-alpha"
+dependencies = [
+ "fomalhaut-config",
+ "fomalhaut-core",
+ "fomalhaut-gtk",
+ "fomalhaut-pam",
+ "fomalhaut-web",
+ "gtk4",
+ "gtk4-session-lock",
+ "tokio",
+]
 
 [[package]]
 name = "fomalhaut-pam"
 version = "0.1.0-alpha"
 dependencies = [
+ "fomalhaut-core",
  "pam-client",
 ]
 
@@ -654,6 +665,7 @@ dependencies = [
  "gdk-pixbuf",
  "gdk4-sys",
  "gio",
+ "gl",
  "glib",
  "libc",
  "pango",
@@ -715,6 +727,26 @@ dependencies = [
  "libc",
  "system-deps",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "gl"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a94edab108827d67608095e269cf862e60d920f144a5026d3dbcfd8b877fb404"
+dependencies = [
+ "gl_generator",
+]
+
+[[package]]
+name = "gl_generator"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a95dfc23a2b4a9a2f5ab41d194f8bfda3cabec42af4e39f08c339eb2a0c124d"
+dependencies = [
+ "khronos_api",
+ "log",
+ "xml-rs",
 ]
 
 [[package]]
@@ -876,6 +908,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtk4-session-lock"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2267b4acc07f3125a5cea6d27254a737125a722de4fcc45aa3ad1f1f543af35"
+dependencies = [
+ "gdk4",
+ "glib",
+ "glib-sys",
+ "gtk4",
+ "gtk4-session-lock-sys",
+ "libc",
+]
+
+[[package]]
+name = "gtk4-session-lock-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "141184b5b7b5951ae55012c338a0f681ee58af63b5d4ff7e3166c6f2229b1f9b"
+dependencies = [
+ "gdk4-sys",
+ "glib-sys",
+ "gobject-sys",
+ "gtk4-sys",
+ "libc",
+ "system-deps",
+]
+
+[[package]]
 name = "gtk4-sys"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1004,6 +1064,12 @@ dependencies = [
  "futures-util",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "khronos_api"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "lazy_static"
@@ -2046,6 +2112,12 @@ name = "xdg"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fb433233f2df9344722454bc7e96465c9d03bff9d77c248f9e7523fe79585b5"
+
+[[package]]
+name = "xml-rs"
+version = "0.8.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "zbus"

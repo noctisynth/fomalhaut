@@ -63,6 +63,20 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
 发现节点保留，不进入发布计划。真实 PAM、session-lock、多输出 WebView 和 compositor 验证仍
 属于后续未完成事项。
 
+随后完成首个 locker 实现切片：`fomalhaut-pam` 已实现真实 UID/NSS identity、一次性 PAM
+子进程、固定 service/API 子集、有界类型化 IPC、secret 缓冲区清理以及取消、超时、断开、
+超限和回答不重放；`fomalhaut-lock` 已组合唯一 session-lock handle、共享 controller/PAM
+transaction、每 monitor WebView、native-only unlock、可信 GTK fallback 和 systemd readiness。
+Arch 的 `gtk4-layer-shell 1.3.0` 已通过 pkg-config/编译验证，CI、源码安装器、PAM 策略、
+systemd unit 和基础文档已同步。随后根据实际 niri 部署补充 compositor-neutral 启动边界，并决定
+把 greeter/locker 拆成两个独立 AUR 包、让 AUR 消费 Semifold publish output；对应模板、resolver
+与 reusable workflow 已完成，并以 10 个 fixture、真实 AUR RPC 和两个有效 `.SRCINFO` 验证。
+Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk` 与 `fomalhaut-web` 的
+联合 changeset。最终复核通过 workspace 162 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK
+7 个测试、参考主题 25 个测试和生产构建，以及隔离 system-root 的首次/幂等安装。自动化覆盖
+不替代真实 PAM module fixture、niri/第二种 compositor、多输出 hotplug/scale 和 suspend 验证，
+这些事项继续保持未完成。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -90,14 +104,15 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
       并用 fake `ReauthBackend` 覆盖 locker 权能分离与全部状态转换。
 - [x] 让现有 `fomalhaut` 只组合 greetd `LoginBackend`，不再由 core 或 Web crate 直接依赖
       greetd transport/type。
-- [ ] 让 `fomalhaut-lock` 只组合 reauth/session-lock 权能；两个宿主不得通过运行时布尔开关
+- [x] 让 `fomalhaut-lock` 只组合 reauth/session-lock 权能；两个宿主不得通过运行时布尔开关
       共享越权 API。
 - [x] 用 Semifold CLI 同步新增 Rust package 列表并把 release channel 全部设置为 `alpha`。
 - [x] 用 `smif commit` 为首个 backend-neutral/greetd 迁移切片建立联合 changeset，覆盖
       `fomalhaut-core`、`fomalhaut-greetd`、`fomalhaut-web` 和 `fomalhaut`。
-- [ ] 随后续 crate 实现同步 CI、package payload 与已发布 crate 的兼容说明；未实现的
-      `fomalhaut-pam` 和 `fomalhaut-lock` 不提前发布。`fomalhaut-config`、`fomalhaut-gtk`
-      已分别通过独立 package payload 验证，但联合发布后的下游验证仍按下项完成。
+- [x] 随 crate 实现同步 CI、源码安装器、AUR package payload 与兼容说明；
+      `fomalhaut-pam`、`fomalhaut-lock` 和共享 `fomalhaut-gtk` 变更进入同一待发布 changeset。
+- [ ] 在 Semifold CI 联合版本事务后验证新增 `fomalhaut-pam`、`fomalhaut-lock` 与更新后的
+      `fomalhaut-gtk` 最终发布 tarball；本地 path workspace 编译不能替代 registry 依赖验证。
 - [ ] 在 Semifold CI 联合更新 `fomalhaut-core` 与 `fomalhaut-greetd` 版本/包间依赖后验证
       `fomalhaut-greetd` 的最终发布 tarball；本地版本事务前的 `cargo package` 会按 registry
       解析尚未包含新 core API 的已发布 `fomalhaut-core 0.1.0-alpha.1`，不能替代该验证。
@@ -133,7 +148,7 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
 - [x] 增加 `lock.acquired`、`lock.failed`、`lock.released` 事件与快照 sequence
       watermark；SDK 已覆盖 bootstrap watermark、重复/乱序和错误角色事件，GTK host 继续
       覆盖页面 epoch。
-- [ ] `fomalhaut-lock` 多输出宿主落地后，补充多个 WebView 共享同一 controller/transaction
+- [x] 补充多个 WebView 共享同一 controller/transaction
       的集成测试，验证每个页面的 snapshot watermark 与后续事件衔接。
 - [x] 只扩展现有 `fomalhaut-sdk`：生成 mode/state 判别联合，提供模式收窄的
       greeter `auth.begin(username)` 与 locker `auth.begin()` facade，不新建 locker SDK。
@@ -265,50 +280,57 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
 
 ### Session-lock 原型与宿主
 
-- [ ] 使用 `gtk4-session-lock 0.4.0` 完成最小 GTK4 原型，确认与 workspace
-      GTK4 0.11/GLib 0.22 基线的编译和运行兼容性；依赖必须由针对
-      `fomalhaut-lock` package 的 Cargo CLI 添加。
-- [ ] 在目标 Arch 环境验证底层 `gtk4-layer-shell` 1.2+ monitor API 和当前
+- [x] 使用针对 `fomalhaut-lock` package 的 Cargo CLI 加入精确 `gtk4-session-lock 0.4.0`，
+      完成与 workspace GTK4 0.11/GLib 0.22 基线及 monitor API 的 native 编译验证。
+- [x] 在目标 Arch 环境验证底层 `gtk4-layer-shell` 1.2+ monitor API 和当前
       1.3.x 版本，并将系统依赖写入 CI、安装器与打包元数据。
-- [ ] 在请求 lock 前检查 compositor 广告 `ext-session-lock-v1` 且 PAM worker 已可用；
+- [x] 在请求 lock 前检查 compositor 广告 `ext-session-lock-v1` 且 PAM worker 已可用；
       不支持协议或前置初始化失败时明确退出，不回退到全屏/layer-shell 伪锁屏。
-- [ ] 由 locker 主进程独占 session-lock handle，实现 `configure`、`locked`、
-      `finished` 与授权后 unlock 的完整顺序；下游只能产生 `UnlockAuthorized`。
-- [ ] 为每个当前和新增 monitor 创建未 realize `GtkWindow` + WebView，处理
+- [x] 由 locker 主进程独占 session-lock handle，实现 `monitor`、`locked`、`failed`、
+      `unlocked` 与授权后 unlock 的完整顺序；下游只能产生 `UnlockAuthorization`。
+- [x] 为每个当前和新增 monitor 创建未 realize `GtkWindow` + WebView，处理
       hotplug、scale 和输出移除，不复用已绑定或已销毁窗口。
-- [ ] 只在收到 `locked` 后发出 readiness；认证成功后由 host 执行 unlock，
+- [x] 只在收到 `locked` 后发出 readiness；认证成功后由 host 执行 unlock，
       完成 Wayland/GDK roundtrip 后才退出。
 
 ### 当前用户 PAM 重新认证
 
-- [ ] 通过真实 UID/session 和系统账户 API 推导锁屏 identity；`auth.begin` 不接收
+- [x] 通过当前进程一致的真实/有效/保存/filesystem UID 和固定 NSS 查询推导锁屏 identity，
+      拒绝 root 与 credential-changing 进程；`auth.begin` 不接收
       username，不允许前端选择、替换或伪造认证目标。
-- [ ] 实现 `fomalhaut-pam::ReauthBackend`；每次 transaction 新建一次性子进程 worker，
+- [x] 实现 `fomalhaut-pam::ReauthBackend`；每次 transaction 新建一次性子进程 worker，
       严格封装已选 API 子集，transaction 完成后退出，不把可阻塞 PAM 调用或 module
       panic 留在 locker 主进程。
-- [ ] 定义有界、类型化 PAM worker IPC 与状态机；限制消息数和消息/回答长度，同一时刻
+- [x] 定义有界、类型化 PAM worker IPC 与状态机；限制消息数和消息/回答长度，同一时刻
       最多一个待回答 prompt，并覆盖乱序、重复、未知和超限消息。
-- [ ] 实现取消、超时、IPC 断开、panic 和异常退出的 fail-closed 语义；终止并回收旧
+- [x] 实现取消、超时、IPC 断开、panic 和异常退出的 fail-closed 语义；终止并回收旧
       worker，保持 session lock，丢弃未消费回答，不向新 transaction 重放。
-- [ ] 清零 Rust 可控的 secret 缓冲区并审计所有日志/错误/IPC 生命周期；记录
+- [x] 清零 Rust 可控的 secret 缓冲区并审计所有日志/错误/IPC 生命周期；记录
       `pam-client`/PAM module 内部副本无法验证即时清零的限制，以一次性 worker 限制其
       生命周期，但不得声称已消除此风险。
-- [ ] 安装受控 `/etc/pam.d/fomalhaut-lock` service，定义发行版默认策略、升级
-      不覆盖规则与可测试 PAM module/service fixture；fixture 覆盖 echo-on/off、info/error、
+- [x] 提供受控 `/etc/pam.d/fomalhaut-lock` Arch 默认策略，并让源码安装器保留不同的管理员
+      策略、AUR package 使用 `backup` 管理该文件。
+- [ ] 建立可测试 PAM module/service fixture；fixture 覆盖 echo-on/off、info/error、
       密码、OTP/MFA、批量消息、账户过期、`PAM_MAXTRIES`、取消、超时、worker abort 和
       回答不重放；不使用 setuid 或 shadow fallback。
 
 ### 失败关闭、主题与集成
 
-- [ ] 实现不依赖 Web renderer 的可信 GTK fallback；在已锁定后遇到 renderer、
+- [x] 实现不依赖 Web renderer 的可信 GTK fallback；在已锁定后遇到 renderer、
       主题、controller 或 PAM worker 崩溃时保持 lock，显示脱敏故障/重试 UI。
-- [ ] 多个 WebView 共享同一 controller/auth transaction，host 管理 `ViewId`/
+- [x] 多个 WebView 共享同一 controller/auth transaction，host 管理 `ViewId`/
       `PageEpoch`，每个页面通过快照 watermark 与后续 sequence 初始化。
-- [ ] 让 minimal theme 和 React/Nocturne 在 locker mode 展示当前 identity、多轮 prompt、
+- [x] 让 minimal theme 和 React/Nocturne 在 locker mode 展示当前 identity、多轮 prompt、
       message、busy 和 lock lifecycle，不展示用户/session 切换；popup 只使用页面内组件。
-- [ ] 实现 swayidle/systemd user service/suspend hook 集成与可验证 readiness；如果支持
-      fork/background，父进程只能在 `locked` 后返回成功。
-- [ ] 在 Sway 和至少另一个 `ext-session-lock-v1` compositor 完成实机验证，
+- [x] 实现并由隔离测试验证 `Type=notify` readiness 与 compositor-neutral systemd user unit；
+      locker 保持前台、不自行 fork，且只在 compositor `locked` 与 controller
+      `lock.acquired` 后通过 `NOTIFY_SOCKET` 发出 readiness。
+- [x] 提供并用 niri 26.04 配置验证器验证 niri KDL 快捷键和通用 swayidle
+      timeout/lock/before-sleep 示例，明确
+      swayidle 可在 niri 等 Wayland compositor 上运行，不把 locker 设计为 Sway 专用。
+- [ ] 在真实 niri 用户 session 安装并验证 systemd unit、快捷键、swayidle timeout/lock 和
+      before-sleep/suspend 阻塞 readiness 链路。
+- [ ] 在 niri 和至少另一个 `ext-session-lock-v1` compositor 完成实机验证，
       并明确记录 X11、不支持该协议以及限制第三方 locker 的桌面环境为非兼容范围。
 
 ## P1：现有 greeter 纵向切片
@@ -505,7 +527,7 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
       回答不重放，并审计日志、panic 路径与 IPC 中的 secret 泄漏。
 - [ ] 精确终止 WebKitWebProcess 验证 GTK fallback 可用、lock 仍被持有且能启动
       新的 PAM transaction；主题或 renderer 不得直接调用 unlock。
-- [ ] 建立 Sway + 至少一个其他 compositor 的回归矩阵，记录
+- [ ] 建立 niri + 至少一个其他 compositor 的回归矩阵，记录
       `ext-session-lock-v1`/`gtk4-layer-shell` 最低版本和已知差异。
 
 ## P2：安全加固
@@ -577,15 +599,19 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
 
 ## P2：打包与首个发行版
 
-- [ ] 确定 greeter/locker 的发行包拆分方案，并让源码安装器原子安装
+- [x] 确定发行边界：源码安装器仍可一次安装完整套件，AUR 按独立 Semifold 版本拆成
+      `greetd-fomalhaut` 与 `fomalhaut-lock` 两个可同时安装的源码包。
+- [x] 让源码安装器原子安装
       `/usr/bin/fomalhaut`、`/usr/bin/fomalhaut-lock`、共享/角色主题、PAM service 与
-      swayidle/systemd 集成示例。
-- [ ] 在 Arch/CI/AUR 元数据中加入经实际验证的 PAM 和 `gtk4-layer-shell` 1.2+
+      systemd 集成资产。
+- [x] 将源码安装器的 idle 文档资产改为 niri 优先、compositor-neutral 的 KDL/swayidle 示例。
+- [x] 在 Arch/CI/AUR 元数据中加入经实际验证的 PAM 和 `gtk4-layer-shell` 1.2+
       构建/运行依赖，同时保持 Cage/greetd 仅为 greeter 路径依赖。
 - [x] 让安装器通过结构化 TOML updater 安全迁移 `[frontend].path` 到
       `[themes].default`，保留管理员的 `greeter`/`locker` 覆盖、PAM 策略和其他配置。
-- [ ] 为新 Rust crate 补齐 crates.io metadata、Semifold package/channel、changeset、CI 构建与
-      `cargo package` payload 验证，不在本地执行 version/publish。
+- [ ] 新 Rust crate 的 crates.io metadata、Semifold package/channel、changeset 和 CI 构建已补齐；
+      仍需在 Semifold 联合版本事务后完成最终 `cargo package` payload/registry 依赖验证，且不在
+      本地执行 version/publish。
 - [x] 添加根目录安全安装器：支持首次/更新构建、原子二进制与主题部署、TOML 备份验证更新、
       显式 greetd restart 和临时 system-root 集成测试。
 - [x] 让源码安装器在 Arch 上检查构建与运行包，按 `paru`、`yay`、`sudo pacman` 优先级安装
@@ -604,25 +630,34 @@ SDK 静态检查与 7 个测试，以及参考主题静态检查、25 个测试�
 - [x] 确认当前应用没有稳定的用户 CLI surface，首个发行版不需要 shell completions 或 man
       page；安装器继续以 `--help` 记录其参数。
 - [ ] 准备 Nix 或其他后续目标发行版的打包方案。
-- [x] 添加 `greetd-fomalhaut` AUR 源码包模板：将上游预发布 SemVer 映射为合法 Arch
+- [x] 将现有单包模板拆为 `greetd-fomalhaut` 与 `fomalhaut-lock` 两个 AUR 源码包：分别映射
+      自己主 package 的预发布 SemVer 为合法 Arch
       `pkgver`，以 `pkgrel` 表达纯打包修订，并把 greetd、Cage、D-Bus、GTK4 和 WebKitGTK
-      6.0 声明为必需运行时依赖；按 ELF `NEEDED` 显式声明当前 Arch 的直接 ABI 提供者。
-- [x] 让 AUR 包安装 `/usr/bin/fomalhaut`、AGPL-3.0-only 许可证、配置文档和不覆盖系统配置的
-      greetd/Cage 示例；AUR 打包元数据单独使用 0BSD，并明确其不重新许可上游软件。
-- [x] 添加由成功 `Semifold CI` 和手动调度触发的 AUR workflow，只跟踪
-      `fomalhaut-v*`：校验 crates.io 可见性、避免重复版本、计算源码 SHA-256，并在干净 Arch
-      环境执行 frozen 构建、测试、`.SRCINFO` 生成和 `namcap`；自动发布不得降低已有
-      `pkgrel`，手动打包修订只接受严格递增值。
-- [x] 使用受保护的 `aur-production` Environment、人工审批和专用 SSH key 推送独立
-      `greetd-fomalhaut` AUR Git 仓库。
+      6.0 限于 greeter，PAM/gtk4-layer-shell/clang 限于 locker；按 ELF `NEEDED` 显式声明直接
+      ABI 提供者。
+- [x] 让两个 AUR 包分别安装自己的二进制、许可证、配置文档与角色集成资产；打包元数据使用
+      0BSD，并明确其不重新许可上游软件。
+- [x] 将 `semifold ci` step/job 接入 schema v1 `semifold-version`/`semifold-publish` output；
+      AUR 自动流程只消费 publish output，不再扫描 tag 或 curl crates.io API。
+- [x] 实现并用 10 个 fixture 与真实 AUR RPC 验证 AUR 版本决策：主 package 发布时同步
+      `pkgver`/重置 `pkgrel=1`，仅对应依赖 package
+      本次 `succeeded` 时保持 `pkgver` 并递增 AUR 当前 `pkgrel`；普通
+      `registry-version-exists` dependency skip 不得误触发重建，未知 schema/status/版本一律
+      fail closed。
+- [x] 让自动与手动 AUR run 共享单一非取消 concurrency group，在每次实际执行时重新读取当前
+      AUR 版本，避免两个 run 并发计算并推送相同 `pkgrel`。
+- [ ] 在干净 Arch 环境分别完成不可变 source archive 校验、frozen 构建、目标测试、`.SRCINFO`
+      和 `namcap`，并保留严格递增的手动打包修订入口。
+- [ ] 使用受保护的 `aur-production` Environment、人工审批和专用 SSH key 分别推送
+      `greetd-fomalhaut` 与 `fomalhaut-lock` AUR Git 仓库。
 - [ ] 在 GitHub 配置 AUR maintainer variables、`AUR_SSH_PRIVATE_KEY` secret 和
       `aur-production` 审批规则；最终应用标签产生后完成首次 clean Arch build、`namcap`、
       自动扫描并核验固定的 AUR Ed25519 主机指纹、人工审批和 AUR 推送验证。
 - [ ] 编写升级和前端协议兼容说明。
 - [x] 使用 Semifold 生成的 status 与 CI workflow，由 GitHub Actions 独占 version 和
       publish。
-- [x] 将 status 与 CI workflow 的 Semifold CLI pin 到本地 `0.3.0-rc.1` 对应的 action 版本
-      `v0.3.0-rc.1`。
+- [x] 将 status 与 CI workflow 的 Semifold CLI 从 `v0.3.0-rc.1` 升级并 pin 到已审计的
+      `../semifold` 最新源码版本 `v0.3.0-rc.6`。
 - [x] 为四个 Rust crate 补齐 crates.io 所需 description、license 和 repository metadata，
       并为 `fomalhaut-sdk` 补齐 npm repository metadata。
 - [x] 在 Semifold CI 发布前使用 frozen `bun.lock` 安装依赖并构建 SDK，确保 npm payload
@@ -700,7 +735,7 @@ locker 产品线。
 
 ### L1：失败关闭 session-lock 原型
 
-- `gtk4-session-lock` 在 Sway 上为所有输出建立 lock surface，且只在 `locked`
+- `gtk4-session-lock` 在 niri 上为所有输出建立 lock surface，且只在 `locked`
   后报告 ready。
 - 主进程独占 lock handle，renderer/主题崩溃会进入 GTK fallback 而不解锁。
 - 不支持 `ext-session-lock-v1` 时在锁前失败，不使用伪锁屏回退。
@@ -709,10 +744,11 @@ locker 产品线。
 
 - 已审计 PAM backend 只重新认证当前 UID/session，覆盖密码、MFA、失败、取消和重试。
 - minimal theme 和 Nocturne 的同一单页都能按 mode 完成 greeter/locker 交互。
-- swayidle/systemd/suspend readiness、hotplug、scale 与 unlock roundtrip 已经实机验证。
+- niri 快捷键、swayidle/systemd/suspend readiness、hotplug、scale 与 unlock roundtrip
+  已经实机验证。
 
 ### L3：locker 首个可发布版本
 
-- Sway 与至少另一 compositor 的安全/可靠性回归矩阵通过。
-- 二进制、PAM service、共享/分角色主题、systemd/swayidle 示例和系统依赖已进入安装/打包流程。
+- niri 与至少另一 compositor 的安全/可靠性回归矩阵通过。
+- 二进制、PAM service、共享/分角色主题、systemd/niri/swayidle 示例和系统依赖已进入安装/打包流程。
 - threat model、JavaScript secret 限制、非支持平台与故障排查文档完整。

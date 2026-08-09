@@ -2,14 +2,13 @@
 
 [English](README.md)
 
-Fomalhaut（北落师门）是一个基于
-[greetd](https://git.sr.ht/~kennylevinsen/greetd)、使用 WebKitGTK 在本地渲染界面的
-Linux 登录 greeter。它让登录界面可以完全由 HTML、CSS 和 JavaScript 定制，同时仍由 greetd
-负责认证和用户会话管理。
+Fomalhaut（北落师门）是一套使用 WebKitGTK 在本地渲染界面的
+[greetd](https://git.sr.ht/~kennylevinsen/greetd) 显示管理器 greeter 和 Wayland 会话锁屏。
+它让登录与锁屏界面都可以完全由 HTML、CSS 和 JavaScript 定制，同时由 greetd 保持登录权威，
+由隔离的 PAM worker 完成当前用户重新认证。
 
-Fomalhaut 不是 Web 服务器，也不实现 PAM。Rust 宿主负责与 greetd 通信、发现可信桌面会话，
-并通过精简且版本化的协议连接本地主题。主题无法获得 greetd socket、会话命令或任意进程执行
-能力。
+Fomalhaut 不是 Web 服务器。可信 Rust 宿主通过精简、版本化且区分角色的协议连接本地主题。
+主题无法获得 greetd socket、PAM worker、session-lock handle、会话命令或任意进程执行能力。
 
 > [!IMPORTANT]
 > Fomalhaut 目前处于 alpha 阶段。greetd、Cage 和 Wayland 登录链路已经在真实系统中验证，
@@ -28,18 +27,20 @@ Fomalhaut 不是 Web 服务器，也不实现 PAM。Rust 宿主负责与 greetd 
 - 支持多轮 PAM 认证，包括密码、明文输入和任意后续提示。
 - 通过 systemd-logind 提供可选、受策略限制的电源操作。
 - 支持小数显示缩放，并允许主题替换完整登录体验。
+- 提供基于 `ext-session-lock-v1` 的 locker，每个输出一个 WebView，支持 systemd readiness 和
+  失败关闭的 GTK fallback。
 - 使用受限的本地 WebView，默认禁用远程资源、任意导航、下载、弹窗和开发者工具。
 
 主题可以读取用户在其页面中输入的认证信息，因此只应安装来源可信且已经审查的主题。
 
 ## 安装
 
-目前支持的安装方式是仓库自带的源码安装器。它会构建 greeter 和 Nocturne 主题，完成系统安装，
-并更新 Fomalhaut 与 greetd 配置。
+目前支持的安装方式是仓库自带的源码安装器。它会构建 greeter、locker 和 Nocturne 主题，
+安装 PAM 策略与 systemd 用户服务，并更新 Fomalhaut 与 greetd 配置。
 
 安装前需要准备：
 
-- 已安装 greetd、Cage、D-Bus、GTK 4 和 WebKitGTK 6.0 的 Linux 系统；
+- 已安装 greetd、Cage、D-Bus、PAM、GTK 4、gtk4-layer-shell 和 WebKitGTK 6.0 的 Linux 系统；
 - 最新 stable Rust 工具链及 Cargo；
 - Bun canary 和 Git；
 - 一个可以通过 `sudo` 完成系统安装的普通用户账户。
@@ -95,6 +96,11 @@ sudo systemctl enable --now greetd.service
 默认安装以下内容：
 
 - `/usr/local/bin/fomalhaut`
+- `/usr/local/bin/fomalhaut-lock`
+- `/usr/local/lib/systemd/user/fomalhaut-lock.service`
+- `/usr/local/share/doc/fomalhaut-lock/niri.kdl`
+- `/usr/local/share/doc/fomalhaut-lock/swayidle.conf`
+- `/etc/pam.d/fomalhaut-lock`
 - `/etc/fomalhaut/themes/nocturne`
 - `/etc/fomalhaut/config.toml`
 - `/etc/greetd/config.toml`
@@ -117,6 +123,16 @@ greetd 启动 Fomalhaut 后，可以选择发现的用户或使用手工登录�
 系统配置文件位于 `/etc/fomalhaut/config.toml`，可以设置主题、显示缩放、用户 provider、会话
 搜索目录和可选电源操作。配置格式、greetd/Cage 示例和外部主题用法见
 [配置文档](docs/CONFIGURATION.md)。
+
+在受支持的 Wayland session 中，重载已安装的用户服务并启动一次具有可验证 readiness 的锁屏：
+
+```sh
+systemctl --user daemon-reload
+systemctl --user start fomalhaut-lock.service
+```
+
+只有 compositor 确认 session 已锁定后，第二条命令才会返回。niri 快捷键、可跨 compositor
+使用的 swayidle 命令、PAM 策略、兼容范围和升级行为详见[配置文档](docs/CONFIGURATION.md)。
 
 ## Workspace
 

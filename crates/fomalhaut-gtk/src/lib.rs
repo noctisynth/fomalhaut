@@ -74,6 +74,8 @@ pub enum ControllerOutput<A> {
     Ready(Vec<ResourceAsset>),
     /// One response/event transaction completed.
     Batch(ControllerBatch<A>),
+    /// Unsolicited native or cross-view events for the current page.
+    Events(Vec<String>),
     /// The controller stopped because a sanitized fatal error occurred.
     Fatal(&'static str),
 }
@@ -708,19 +710,7 @@ fn connect_controller_outputs<C, A>(
                     pending.reply.return_value(&response);
 
                     if let Some(web_view) = web_view.upgrade() {
-                        for script in batch.event_scripts {
-                            web_view.evaluate_javascript(
-                                &script,
-                                None,
-                                None,
-                                None::<&gio::Cancellable>,
-                                |result| {
-                                    if result.is_err() {
-                                        eprintln!("Fomalhaut failed to deliver a controller event");
-                                    }
-                                },
-                            );
-                        }
+                        deliver_event_scripts(&web_view, batch.event_scripts);
                     }
                     if let Some(terminal) = batch.terminal {
                         finish_terminal(
@@ -731,6 +721,11 @@ fn connect_controller_outputs<C, A>(
                             &callbacks,
                         );
                         return glib::ControlFlow::Break;
+                    }
+                }
+                Ok(ControllerOutput::Events(event_scripts)) => {
+                    if let Some(web_view) = web_view.upgrade() {
+                        deliver_event_scripts(&web_view, event_scripts);
                     }
                 }
                 Ok(ControllerOutput::Fatal(message)) => {
@@ -759,6 +754,16 @@ fn connect_controller_outputs<C, A>(
             }
         }
     });
+}
+
+fn deliver_event_scripts(web_view: &WebView, event_scripts: Vec<String>) {
+    for script in event_scripts {
+        web_view.evaluate_javascript(&script, None, None, None::<&gio::Cancellable>, |result| {
+            if result.is_err() {
+                eprintln!("Fomalhaut failed to deliver a controller event");
+            }
+        });
+    }
 }
 
 fn finish_terminal<C: BridgeController, A>(

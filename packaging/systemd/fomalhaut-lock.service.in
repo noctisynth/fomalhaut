@@ -1,0 +1,15 @@
+[Unit]
+Description=Fomalhaut Wayland session locker
+Documentation=https://github.com/noctisynth/fomalhaut
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=@FOMALHAUT_LOCK@
+TimeoutStartSec=0
+Restart=no
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes

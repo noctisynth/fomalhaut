@@ -21,7 +21,7 @@ jobs:
       - name: Install native packages
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libwebkitgtk-6.0-dev
+          sudo apt-get install --no-install-recommends libgtk4-layer-shell-dev libpam0g-dev libwebkitgtk-6.0-dev
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -60,6 +60,12 @@ jobs:
 
       - name: Rust tests
         run: cargo test --workspace --all-targets
+
+      - name: Packaging tests
+        run: |
+          python3 packaging/aur/test_resolve.py
+          bash -n packaging/aur/render.sh
+          bash -n install.sh
 
       - name: Check SDK
         run: bun run check:sdk

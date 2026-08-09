@@ -26,6 +26,7 @@ pub struct ControllerBatch {
     events: Vec<EventEnvelope>,
     session_started: bool,
     unlock_authorized: bool,
+    trusted_fallback: bool,
 }
 
 impl ControllerBatch {
@@ -51,6 +52,15 @@ impl ControllerBatch {
         }
         self.unlock_authorized = false;
         Some(UnlockAuthorization { private: () })
+    }
+
+    /// Returns whether a locker authentication service failure requires trusted native fallback.
+    ///
+    /// Ordinary authentication rejection remains a normal frontend state and returns `false`.
+    /// Greeter batches also always return `false`.
+    #[must_use]
+    pub const fn requires_trusted_fallback(&self) -> bool {
+        self.trusted_fallback
     }
 
     /// Serializes the batch into one reply and ordered JavaScript event calls.
@@ -405,6 +415,7 @@ impl<B: LoginBackend> GreeterController<B> {
                 events: Vec::new(),
                 session_started: self.client.session_started(),
                 unlock_authorized: false,
+                trusted_fallback: false,
             });
         }
 
@@ -495,6 +506,7 @@ impl<B: LoginBackend> GreeterController<B> {
             events,
             session_started: self.client.session_started(),
             unlock_authorized: false,
+            trusted_fallback: false,
         })
     }
 
@@ -717,10 +729,12 @@ impl<B: ReauthBackend> LockerController<B> {
                 events: Vec::new(),
                 session_started: false,
                 unlock_authorized: false,
+                trusted_fallback: false,
             });
         }
 
         let previous_state = self.auth.authentication;
+        let previous_backend_state = self.client.state();
         let mut operation = self.execute(request).await;
         let mut detail_events = match operation.as_mut() {
             Ok(events) => std::mem::take(events),
@@ -736,7 +750,18 @@ impl<B: ReauthBackend> LockerController<B> {
             }
         };
         detail_events.extend(core_events);
-        self.auth.update_state(self.client.state());
+        let backend_state = self.client.state();
+        self.auth.update_state(backend_state);
+
+        let trusted_fallback = operation.is_err()
+            && !matches!(
+                previous_backend_state,
+                CoreAuthState::Failed | CoreAuthState::Disconnected
+            )
+            && matches!(
+                backend_state,
+                CoreAuthState::Failed | CoreAuthState::Disconnected
+            );
 
         let unlock_authorized = operation.is_ok()
             && previous_state != AuthState::Authenticated
@@ -758,6 +783,7 @@ impl<B: ReauthBackend> LockerController<B> {
             events,
             session_started: false,
             unlock_authorized,
+            trusted_fallback,
         })
     }
 
@@ -1735,6 +1761,7 @@ mod tests {
             .await
             .expect("authentication failure remains protocol-safe");
         assert!(failed.take_unlock_authorization().is_none());
+        assert!(!failed.requires_trusted_fallback());
         assert_eq!(
             json(controller.snapshot().expect("failure snapshot is valid"))["lock"],
             "locked"
@@ -1760,6 +1787,7 @@ mod tests {
             ))
             .await
             .expect("worker disconnect returns a sanitized response");
+        assert!(disconnected.requires_trusted_fallback());
         let (response, events) = disconnected.into_parts();
         assert_eq!(json(&response)["error"]["code"], "internal");
         assert!(!json(response).to_string().contains("private worker detail"));

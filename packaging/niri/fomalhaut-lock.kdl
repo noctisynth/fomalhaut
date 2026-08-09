@@ -1,0 +1,7 @@
+// Merge these snippets into ~/.config/niri/config.kdl.
+// swayidle works with niri through the standard Wayland idle protocols.
+spawn-at-startup "swayidle" "-w" "timeout" "300" "systemctl --user start fomalhaut-lock.service" "lock" "systemctl --user start fomalhaut-lock.service" "before-sleep" "systemctl --user start fomalhaut-lock.service"
+
+binds {
+    Super+Alt+L hotkey-overlay-title="Lock the Screen: Fomalhaut" { spawn "systemctl" "--user" "start" "fomalhaut-lock.service"; }
+}
