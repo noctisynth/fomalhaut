@@ -18,7 +18,7 @@ backend-neutral Rust crate 边界写入设计。下方已完成项仍只证明�
 同日完成 Rust PAM application/client wrapper 的生态与源码审计，并确认首阶段采用精确
 固定的 `pam-client 0.5.0`。选型完成不代表 locker 认证已经实现或通过安全验收；一次性
 子进程 worker、限定 API、有界 IPC、secret 生命周期和 PAM fixture 仍是未完成门槛，
-当前 manifest 尚未增加 PAM 依赖。
+审计当时 manifest 尚未增加 PAM 依赖，随后已按下方记录完成精确依赖接入。
 
 同日开始首个 P0 实现切片：`fomalhaut-core` 已改为 backend-neutral 认证领域层，现有 greetd
 client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web greeter controller
@@ -40,6 +40,10 @@ binding。greeter 继续在自身 crate
 组合普通全屏窗口、session discovery、greetd worker 和 session-start 退出策略，原有行为保持
 不变；`fomalhaut-gtk` 的独立 package payload 和 registry 依赖解析已验证。该切片将 workspace
 测试增至 124 个。
+
+随后为 `fomalhaut-pam` 精确加入 `pam-client = 0.5.0`，禁用默认 `cli` feature；最终依赖树
+不包含 `rpassword`，并已通过当前系统 PAM headers、bindgen/libclang 和 workspace lint/编译
+基线。该步骤只完成依赖接入，不表示一次性 worker、`ReauthBackend` 或 PAM fixture 已实现。
 
 ## P0：greeter/locker 产品与 crate 边界
 
@@ -93,9 +97,11 @@ binding。greeter 继续在自身 crate
       路径，并继续对 workspace 自有生产代码执行 `unsafe_code = "forbid"`。
 - [x] 将 wrapper 的 COSMIC/Pop!_OS 生产采用依据、维护风险、已知限制、一次性子进程
       隔离和 fail-closed 结论先同步到 `docs/DESIGN.md` 与本清单；审计期间未修改 manifest。
-- [ ] 创建 `fomalhaut-pam` 后，通过限定该 package 的 Cargo CLI 精确添加
-      `pam-client 0.5.0`，检查 manifest/lockfile 实际变更；不得顺带添加其他 wrapper、
-      自行实现未经审计 FFI，或使用 setuid/shadow fallback。
+- [x] 创建 `fomalhaut-pam` 后，通过限定该 package 的 Cargo CLI 精确添加
+      `pam-client 0.5.0` 并禁用默认 `cli`/`rpassword` 路径，检查 manifest/lockfile 实际变更；
+      不得顺带添加其他 wrapper、自行实现未经审计 FFI，或使用 setuid/shadow fallback。
+- [x] 验证 `fomalhaut-pam` 的当前系统编译链和独立 package payload，并用 `smif commit`
+      建立仅覆盖该 crate 的依赖接入 changeset；这不代表 reauth worker 功能完成。
 - [ ] 持续跟踪 `pam-client` 的上游维护、安全问题和新版本；升级、扩大 API 子集或改变
       worker 隔离模型前必须重新审计并先更新设计与 TODO。
 

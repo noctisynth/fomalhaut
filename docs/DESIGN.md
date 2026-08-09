@@ -212,6 +212,10 @@ core 不负责：
 - `authenticate` 和 `acct_mgmt`；
 - 仅在 PAM 策略确有需要时调用 `reinitialize_credentials`。
 
+`fomalhaut-pam` 只作为 library wrapper 使用该依赖，必须禁用 `pam-client` 默认启用的
+`cli` feature，避免引入其 `rpassword` 终端交互路径；所有 conversation 都由一次性 worker
+中的受限 `ConversationHandler` 驱动。
+
 不得调用 `pam-client 0.5.0` 接受 `None` 的 `set_item`/`set_*` 路径，也不得把该依赖的
 unsafe 实现引入 workspace 自有生产代码；自有 crate 继续保持 `unsafe_code = "forbid"`。
 Rust 侧持有的回答仍须在可控生命周期内清零，但 wrapper/PAM module 内部的 `strdup` 等副本
