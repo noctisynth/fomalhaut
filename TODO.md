@@ -102,7 +102,12 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
 再次部署后，当前 niri 设备在创建首个 monitor window 时触发 SIGSEGV；core dump 位于
 `gtk4-layer-shell` 销毁无效 `GdkSurface` 的路径。对照 `gtk4-session-lock` 官方示例确认，
 `assign_window_to_monitor()` 已负责 realize/map，宿主不得随后调用普通 GTK `present()`。
-实现已移除这次重复映射；在重建、重装和实机启动通过前，session-lock 启动回归仍保持未完成。
+实现移除这次重复映射后，复测仍在相同 native 栈崩溃。进一步将 core 映射到上游源码后确认
+当前 GTK 4.22.4 + `gtk4-layer-shell 1.3.0` 命中上游 issue #122：1.3.0 在 lock 失败或解锁时
+先 unrealize `GtkApplicationWindow`，GTK 4.22+ 随后从 application 移除窗口时访问已失效的
+`GdkSurface`；修复提交 `4419f1b` 尚未发布。设计因此改为由 session-lock 独占普通
+`GtkWindow`，application 只持有主循环 hold，并把 Rust surface 清理延迟到 native destroy
+返回后；在实现、重建、重装和实机启动通过前，session-lock 启动回归仍保持未完成。
 
 ## P0：greeter/locker 产品与 crate 边界
 
@@ -326,7 +331,9 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
       `ApplicationHoldGuard`，覆盖零窗口启动回归，避免 `activate` 返回后静默成功退出。
 - [ ] 重新部署并在当前 niri session 验证 monitor window 只由
       `assign_window_to_monitor()` 映射，不再因额外 `present()` 触发 `GdkSurface` SIGSEGV；
-      确认取得 lock、正常解锁和 compositor 销毁窗口的完整生命周期。
+      lock surface 使用不隶属 `GtkApplication` 的普通 `GtkWindow`，destroy signal 返回后再
+      清理 Rust surface；确认锁失败可控退出、取得 lock、正常解锁和 compositor 销毁窗口的
+      完整生命周期，覆盖 GTK 4.22+ / gtk4-layer-shell 1.3.0 issue #122 回归。
 
 ### 当前用户 PAM 重新认证
 

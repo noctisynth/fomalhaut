@@ -356,6 +356,15 @@ locker 的 GTK application 在 PAM worker 预热、请求 session lock 和收到
 退出或 compositor 确认授权释放；否则 `activate` 返回后的“零窗口、零 hold”会让 application
 以成功状态立即退出，controller 轮询和 session-lock 请求都不会发生。
 
+session-lock surface 使用不注册到 `GtkApplication` 的普通 `GtkWindow`，而不是
+`GtkApplicationWindow`；GTK application 只通过上述 hold 管理进程主循环。该边界规避
+`gtk4-layer-shell 1.3.0` 与 GTK 4.22+ 的已知失败/解锁路径缺陷：1.3.0 会先 unrealize
+application-owned window，再由 `gtk_window_destroy()` 从 application 移除窗口，而 GTK 4.22+
+在移除期间仍访问已经失效的 `GdkSurface`，导致 SIGSEGV（上游 issue #122，未发布修复提交
+`4419f1b`）。native `destroy` signal 只安排空闲回调清理 Rust `MonitorSurface`，不得在 signal
+栈内同步释放最后一个宿主引用。即使未来系统库包含上游修复，也保留这一单一所有权模型，避免
+`GtkApplication` 与 session-lock 库同时管理 lock surface 的映射和销毁。
+
 ### 4.10 Host controller 与线程边界
 
 真实认证接入采用两层实现，保持 controller 可在无图形环境测试：

@@ -109,7 +109,6 @@ impl LockHost {
             .ok_or(HostError::SurfaceIdentifierExhausted)?;
         let surface = MonitorSurface::new(
             identifier,
-            &self.application,
             Rc::clone(&self.worker),
             self.theme_directory.clone(),
             self.zoom_level,
@@ -119,9 +118,12 @@ impl LockHost {
             .assign_window_to_monitor(surface.window(), monitor);
         let weak_host = Rc::downgrade(self);
         surface.window().connect_destroy(move |_| {
-            if let Some(host) = weak_host.upgrade() {
-                host.remove_surface(identifier);
-            }
+            let pending_host = weak_host.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(host) = pending_host.upgrade() {
+                    host.remove_surface(identifier);
+                }
+            });
         });
         // `assign_window_to_monitor` realizes and maps the lock surface itself.
         // Presenting it again would route the window through GTK's ordinary
@@ -265,7 +267,7 @@ fn poll_native_events(state: &Rc<LockHost>, events: Receiver<NativeEvent>) {
 
 struct MonitorSurface {
     identifier: u64,
-    window: gtk::ApplicationWindow,
+    window: gtk::Window,
     stack: gtk::Stack,
     fallback_label: gtk::Label,
     worker: Rc<WorkerHandle>,
@@ -277,7 +279,6 @@ struct MonitorSurface {
 impl MonitorSurface {
     fn new(
         identifier: u64,
-        application: &ApplicationHandle,
         worker: Rc<WorkerHandle>,
         theme_directory: Option<PathBuf>,
         zoom_level: f64,
@@ -295,8 +296,7 @@ impl MonitorSurface {
         let stack = gtk::Stack::new();
         stack.add_named(&fallback, Some("fallback"));
         stack.set_visible_child_name("fallback");
-        let window = gtk::ApplicationWindow::builder()
-            .application(application.application())
+        let window = gtk::Window::builder()
             .title("Fomalhaut Lock")
             .child(&stack)
             .build();
@@ -327,7 +327,7 @@ impl MonitorSurface {
         self.identifier
     }
 
-    const fn window(&self) -> &gtk::ApplicationWindow {
+    const fn window(&self) -> &gtk::Window {
         &self.window
     }
 
