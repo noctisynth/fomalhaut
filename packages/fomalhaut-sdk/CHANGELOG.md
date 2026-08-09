@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.0-alpha.2
+
+### New Features
+
+- [`a0dc068`](https://github.com/noctisynth/fomalhaut/commit/a0dc068969a9f16459122cca953b924812364daa): Add the role-discriminated greeter and locker protocol, capability-separated controllers, and generated schema bindings.
+
+    Bootstrap the shared TypeScript SDK into mode-generic clients and update both bundled themes for single-page greeter and locker support.
+
 ## v0.1.0-alpha.1
 
 ### New Features
