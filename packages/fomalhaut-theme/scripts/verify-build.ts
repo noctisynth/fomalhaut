@@ -6,6 +6,8 @@ const maximumAssetBytes = 8 * 1024 * 1024;
 const failures: string[] = [];
 const networkApiPattern =
   /\b(?:fetch|WebSocket|EventSource|XMLHttpRequest)\s*\(|\bnavigator\.sendBeacon\s*\(/;
+const costlyCompositingClassPattern =
+  /\b(?:backdrop-blur(?:-[a-z0-9-]+)?|blur-(?:2xl|3xl))\b/;
 
 for await (const entry of new Bun.Glob("**/*.{ts,tsx}").scan({
   cwd: path.join(process.cwd(), "src"),
@@ -14,6 +16,9 @@ for await (const entry of new Bun.Glob("**/*.{ts,tsx}").scan({
   const source = await Bun.file(path.join(process.cwd(), "src", entry)).text();
   if (networkApiPattern.test(source)) {
     failures.push(`src/${entry} calls a network API`);
+  }
+  if (costlyCompositingClassPattern.test(source)) {
+    failures.push(`src/${entry} enables a prohibited compositing blur`);
   }
 }
 
@@ -52,6 +57,9 @@ for await (const entry of new Bun.Glob("**/*").scan({
     const css = await file.text();
     if (/url\(["']?https?:/i.test(css)) {
       failures.push(`${entry} contains a remote CSS resource`);
+    }
+    if (/backdrop-filter\s*:|\.blur-(?:2xl|3xl)\{/i.test(css)) {
+      failures.push(`${entry} contains a prohibited compositing blur`);
     }
   }
   if (entry.endsWith(".js")) {

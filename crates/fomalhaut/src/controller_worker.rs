@@ -13,12 +13,11 @@ use fomalhaut_config::{PowerConfig, UserDiscoveryConfig};
 use fomalhaut_greetd::GreeterClient;
 use fomalhaut_gtk::{BridgeController, ControllerBatch, ControllerOutput, SubmitError};
 use fomalhaut_logind::LogindPowerControl;
+use fomalhaut_user::discover_users;
 use fomalhaut_web::{
     controller::{GreeterController, TrustedSession},
     protocol::RequestEnvelope,
 };
-
-use crate::users::discover_users;
 
 const CHANNEL_CAPACITY: usize = 8;
 

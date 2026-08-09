@@ -1,4 +1,4 @@
-//! Bounded system user discovery and trusted avatar ingestion.
+//! Shared bounded Linux user discovery and trusted avatar ingestion.
 
 use std::{
     collections::HashSet,
@@ -108,6 +108,60 @@ pub fn discover_users(config: UserDiscoveryConfig) -> Result<DiscoveredUsers, Us
     receiver
         .recv_timeout(DISCOVERY_TIMEOUT)
         .map_err(|_| UserDiscoveryError::Timeout)?
+}
+
+/// Looks up the AccountsService avatar for an identity already fixed by real UID and NSS.
+///
+/// Any service, property, identity-match, or file-validation failure is a cosmetic miss. The
+/// caller must keep using its existing trusted authentication identity.
+#[must_use]
+pub fn discover_current_avatar(uid: u32, username: &str) -> Option<ResourceAsset> {
+    let connection = zbus::blocking::connection::Builder::system()
+        .ok()?
+        .method_timeout(ACCOUNTS_METHOD_TIMEOUT)
+        .build()
+        .ok()?;
+    let accounts = Proxy::new(
+        &connection,
+        ACCOUNTS_DESTINATION,
+        ACCOUNTS_PATH,
+        ACCOUNTS_INTERFACE,
+    )
+    .ok()?;
+    let object_path: OwnedObjectPath = accounts.call("FindUserById", &(i64::from(uid),)).ok()?;
+    let user = Proxy::new(
+        &connection,
+        ACCOUNTS_DESTINATION,
+        object_path.as_str(),
+        USER_INTERFACE,
+    )
+    .ok()?;
+    let discovered_uid = u32::try_from(user.get_property::<u64>("Uid").ok()?).ok()?;
+    let discovered_username = user.get_property::<String>("UserName").ok()?;
+    let icon_file = user
+        .get_property::<String>("IconFile")
+        .ok()
+        .filter(|path| !path.is_empty())?;
+    current_avatar_from_properties(
+        uid,
+        username,
+        discovered_uid,
+        &discovered_username,
+        Path::new(&icon_file),
+    )
+}
+
+fn current_avatar_from_properties(
+    expected_uid: u32,
+    expected_username: &str,
+    discovered_uid: u32,
+    discovered_username: &str,
+    icon_file: &Path,
+) -> Option<ResourceAsset> {
+    if discovered_uid != expected_uid || discovered_username != expected_username {
+        return None;
+    }
+    read_avatar(icon_file, expected_uid, 1)
 }
 
 fn discover_users_now(config: UserDiscoveryConfig) -> Result<DiscoveredUsers, UserDiscoveryError> {
@@ -439,8 +493,9 @@ fn avatar_content_type(body: &[u8]) -> Option<&'static str> {
 mod tests {
     use super::{
         AccountsDiscoveryError, DiscoverySource, MAX_AVATAR_BYTES, MAX_NSS_ENTRIES, RawUser,
-        UserDiscoveryError, avatar_content_type, build_public_users, discover_users_with,
-        is_login_shell, parse_passwd, read_avatar, run_bounded_command,
+        UserDiscoveryError, avatar_content_type, build_public_users,
+        current_avatar_from_properties, discover_users_with, is_login_shell, parse_passwd,
+        read_avatar, run_bounded_command,
     };
     use fomalhaut_config::{UserDiscoveryConfig, UserProvider};
     use std::{
@@ -644,6 +699,15 @@ mod tests {
         let asset = read_avatar(&png, uid, 7).expect("a user-owned PNG is accepted");
         assert_eq!(asset.uri(), "fomalhaut://avatar/7");
         assert_eq!(asset.content_type(), "image/png");
+
+        let current = current_avatar_from_properties(uid, "alice", uid, "alice", &png)
+            .expect("matching current-account properties expose the validated avatar");
+        assert_eq!(current.uri(), "fomalhaut://avatar/1");
+        assert!(current_avatar_from_properties(uid, "alice", uid, "bob", &png).is_none());
+        assert!(
+            current_avatar_from_properties(uid, "alice", uid.saturating_add(1), "alice", &png,)
+                .is_none()
+        );
 
         let link = directory.join("avatar-link.png");
         symlink(&png, &link).expect("the final-component symlink fixture can be created");

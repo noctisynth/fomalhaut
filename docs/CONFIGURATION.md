@@ -119,6 +119,11 @@ auth      include  system-auth
 account   include  system-auth
 ```
 
+如果 AccountsService 可用，locker 会用已经固定的 UID 和 NSS 用户名只读匹配当前用户对象，
+并通过与 greeter 相同的安全内存代理显示头像；它不会读取 `[users]` 枚举策略。服务不可用、
+身份属性不匹配、头像缺失或文件验证失败时只显示主题 fallback，不影响 session lock 或 PAM
+认证。AccountsService 因此也是 `fomalhaut-lock` 的可选资料增强，不是锁屏依赖。
+
 管理员应按发行版和本地认证要求审查该文件。后续源码安装发现已有不同策略时只会保留并警告，
 不会自动覆盖。PAM worker、renderer、主题或 controller 在已经锁定后失败时，locker 继续持有
 session lock，并切换到可信 GTK 故障/重试界面；取消认证也不会解锁。密码错误、账户策略拒绝和
@@ -338,6 +343,8 @@ command = "dbus-run-session env XCURSOR_SIZE=48 cage -s -m last -d -- /usr/bin/f
 `1.0`。
 
 ## 用户发现
+
+下列枚举配置只用于 greeter；locker 始终绑定当前 session 用户，不枚举或切换账户。
 
 默认配置等价于：
 

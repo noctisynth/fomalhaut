@@ -443,6 +443,7 @@ dependencies = [
  "fomalhaut-gtk",
  "fomalhaut-logind",
  "fomalhaut-session",
+ "fomalhaut-user",
  "fomalhaut-web",
  "greetd_ipc",
  "gtk4",
@@ -495,6 +496,7 @@ dependencies = [
  "fomalhaut-gtk",
  "fomalhaut-logind",
  "fomalhaut-pam",
+ "fomalhaut-user",
  "fomalhaut-web",
  "gtk4",
  "gtk4-session-lock",
@@ -524,6 +526,17 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "fomalhaut-core",
  "freedesktop-desktop-entry",
+]
+
+[[package]]
+name = "fomalhaut-user"
+version = "0.1.0-alpha"
+dependencies = [
+ "fomalhaut-config",
+ "fomalhaut-gtk",
+ "fomalhaut-web",
+ "libc",
+ "zbus",
 ]
 
 [[package]]

@@ -109,6 +109,16 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
 `GtkWindow`，application 只持有主循环 hold，并把 Rust surface 清理延迟到 native destroy
 返回后；在实现、重建、重装和实机启动通过前，session-lock 启动回归仍保持未完成。
 
+随后实机验证发现 locker 身份摘要始终使用 `avatarUrl = null`，而 Nocturne 在
+2560×1600、240 Hz 输出上使用两个 viewport 级 blur 和多处 backdrop-filter，造成键盘与指针
+反馈明显卡顿。第二个头像消费者已经满足设计中提取共享用户集成的条件；现已新增
+`fomalhaut-user` crate 统一 AccountsService/NSS/头像安全边界，locker 只按已经固定的当前 UID
+与用户名匹配头像，并把同一资源分发给每个 monitor WebView；参考主题已改用静态多层 gradient
+和半透明实色，并由构建检查拒绝重新引入高代价 blur。自动化验证已通过 workspace 165 个 Rust
+测试、Clippy/rustfmt/rustdoc、参考主题 26 个测试和生产构建，以及 12 个 AUR resolver fixture。
+隔离 `--system-root` 的首次和幂等安装也已通过。仍需重新安装到真实系统，并在 locker 与
+greeter 上确认头像、输入延迟和视觉一致性。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -557,6 +567,10 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
       `fetch(` 禁令。
 - [x] 让 `dist/` 包含相对资源引用、`index.html` 和 `theme.toml`，补齐 store、组件、DOM 清空、
       文件命名与构建契约测试，并把 format/typecheck/test/build 接入根脚本和 CI。
+- [x] 移除 Nocturne 的 viewport 级 `filter: blur()` 与交互控件 `backdrop-filter`，改用静态
+      多层 gradient 和半透明实色，并添加构建产物回归检查。
+- [ ] 在 2560×1600、240 Hz 的真实 niri locker 中复测键盘/指针响应，并在 greeter 中确认
+      性能优化没有破坏共用页面的视觉与交互。
 - [ ] 在真实 WebKitGTK/Cage 中验证 React module script、CSS、用户/session、认证与退出流程。
 
 ## P1：用户发现与头像
@@ -575,8 +589,15 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
       头像失败 fallback。
 - [x] 更新配置、协议和主题作者文档；AUR 将 `accountsservice` 声明为显示名和头像的可选增强
       依赖。
+- [x] 用 Cargo CLI 创建 `fomalhaut-user`，迁移 greeter 的 AccountsService/NSS/头像安全读取与
+      测试，并让 greeter 行为保持不变。
+- [x] locker 以真实 UID/NSS 用户名调用共享的当前用户头像发现，把同一内存头像资源注册到每个
+      monitor WebView；失败只回退无头像，不改变 PAM 身份或 session-lock 生命周期。
+- [x] 将 AccountsService 作为 `fomalhaut-lock` 的可选头像增强写入发行包，并让 AUR package
+      测试覆盖新的共享 crate。
 - [ ] 在真实 greeter 环境验证 AccountsService 可用/不可用、NSS fallback、禁用枚举和无头像
       场景。
+- [ ] 在真实 locker 环境验证 AccountsService 头像存在、缺失、服务不可用和属性不匹配场景。
 
 ## P2：locker 安全与可靠性
 

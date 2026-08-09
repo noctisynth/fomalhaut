@@ -138,6 +138,7 @@ fomalhaut/
 │   ├── fomalhaut-greetd/     # greetd login backend
 │   ├── fomalhaut-pam/        # 当前用户 reauth backend
 │   ├── fomalhaut-session/    # 可信 session discovery
+│   ├── fomalhaut-user/       # 共享 Linux 用户资料与头像发现
 │   ├── fomalhaut-config/     # 共享严格配置
 │   ├── fomalhaut-logind/     # 共享非交互 logind 电源 backend
 │   ├── fomalhaut-web/        # 协议、主题与 controller
@@ -641,12 +642,13 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   连接 TTY 时启用，并遵守 `NO_COLOR`。重定向、管道和无颜色环境必须输出不含转义序列的纯文本，
   不得为了样式引入新的运行时工具依赖。
 
-### 4.14 用户发现与头像资源
+### 4.14 `fomalhaut-user` 用户发现与头像资源
 
-用户发现是 Linux 宿主集成，不属于 greetd IPC core。首阶段在最终 `fomalhaut` crate 中以
-内部 provider trait 隔离系统来源，并把已经过滤、验证的公开摘要交给 `fomalhaut-web`
-controller；provider 稳定并出现其他宿主复用需求后，再评估提取独立 crate，不能为抽象而让
-`fomalhaut-core` 依赖 D-Bus、NSS 或文件系统。
+用户发现是 Linux 宿主集成，不属于 greetd IPC core。greeter 与 locker 都需要可信用户资料和
+同一套头像安全读取规则后，这项能力从 `fomalhaut` 可执行程序的内部模块提取为共享
+`fomalhaut-user` crate。该 crate 隔离 AccountsService、NSS 和头像文件系统访问，并把已经
+过滤、验证的公开摘要与内存头像资源交给产品宿主；`fomalhaut-core`、认证 backend 和主题均
+不得依赖或直接访问 D-Bus、NSS、头像路径或文件系统。
 
 `/etc/fomalhaut/config.toml` 增加严格的 `[users]` 配置：
 
@@ -694,7 +696,16 @@ AccountsService 的 `IconFile` 是宿主路径，绝不能直接作为 `file://`
   `avatar` host，只允许 GET 和已注册 ID，返回固定 MIME、`Cache-Control: no-store`，不开放
   目录、原始路径、上传或任意读取。
 - NSS 用户、缺失头像和任何验证失败都返回 `avatarUrl = null`。失败日志只报告稳定类别，不
-  输出用户名、UID、IconFile、真实目标或图像内容。头像不是登录必要条件。
+输出用户名、UID、IconFile、真实目标或图像内容。头像不是登录必要条件。
+
+locker 不读取 greeter 的 `[users]` 枚举策略，也不枚举或切换账户。它继续先由
+`fomalhaut-pam` 根据真实进程 UID 与 NSS 固定认证身份，再由 `fomalhaut-user` 只读调用
+AccountsService `FindUserById` 查找同一 UID；返回对象的 `Uid` 与 `UserName` 必须同时匹配
+已经固定的身份，才可使用其 `IconFile`。任何 D-Bus、属性、匹配或头像验证失败都只退化为
+`avatarUrl = null`，不得改变 PAM 目标、阻止 session lock 或进入认证 fallback。locker 在 PAM
+worker 准备完成后即可发起 compositor lock；资料增强和 logind 能力发现位于 GTK 主线程之外，
+并可与 compositor lock handshake 重叠，不能把头像 I/O 变成锁屏前的安全延迟。每个 monitor
+WebView 收到相同的已验证头像资源和 URI，资源仍由各 WebView 的内存 scheme handler 提供。
 
 ## 5. Core API
 
@@ -1302,6 +1313,13 @@ prompt 在原位置替换。主题不得为了让两个输入同时可编辑而�
 用户切换入口位于主体列表，session 控件固定在右下设备区。界面不使用居中的网页 Card、Toast
 或大面积按钮容器；错误与 PAM message 在认证输入附近原位显示。视图切换和 focus 使用克制的
 160–240ms 过渡，并遵守 `prefers-reduced-motion`。
+
+参考主题必须在 greeter 普通窗口与 locker session-lock surface 上保持同一视觉结构，同时把
+锁屏输入响应放在装饰效果之前。全屏夜空使用直接绘制的静态多层 CSS gradient，不使用覆盖
+viewport 的 `filter: blur()` 元素；输入、按钮、菜单和用户 tile 使用半透明实色与边框，不在
+每次键盘、指针或 focus 重绘时叠加 `backdrop-filter`。短时 opacity/transform 过渡与 loading
+spinner 可以保留，但不得引入连续背景动画。自动化检查应阻止参考主题重新引入 viewport 级
+blur 或 backdrop-filter；最终流畅性仍须在高 DPI/高刷新率的真实 greeter 与 locker 中验证。
 
 普通浏览器中的 Vite 开发服务器没有 WebKit bridge，因此项目提供只在
 `import.meta.env.DEV` 分支动态加载的 `development-transport.ts`，以实现

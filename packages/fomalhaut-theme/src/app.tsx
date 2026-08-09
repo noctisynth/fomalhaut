@@ -85,14 +85,14 @@ function Background() {
     <div className="pointer-events-none absolute inset-0" aria-hidden="true">
       <div
         className={cn(
-          "absolute -top-[35%] -left-[20%] size-[75vw] rounded-full blur-3xl",
-          "bg-[radial-gradient(circle,rgba(242,214,162,0.12),transparent_62%)]",
+          "absolute inset-0",
+          "bg-[radial-gradient(circle_at_top_left,rgba(242,214,162,0.12),transparent_42%)]",
         )}
       />
       <div
         className={cn(
-          "absolute -right-[20%] -bottom-[45%] size-[95vw] rounded-full blur-3xl",
-          "bg-[radial-gradient(circle,rgba(57,120,214,0.30),transparent_60%)]",
+          "absolute inset-0",
+          "bg-[radial-gradient(circle_at_bottom_right,rgba(57,120,214,0.30),transparent_48%)]",
         )}
       />
       <div
@@ -146,7 +146,7 @@ function UnavailableView({ message }: { message: string | null }) {
     <div
       className={cn(
         "w-full max-w-md rounded-2xl border border-white/10",
-        "bg-black/20 p-6 backdrop-blur-xl",
+        "bg-black/40 p-6",
       )}
     >
       <Alert variant="destructive">
@@ -219,7 +219,7 @@ function UserSelectionView() {
         <button
           className={cn(
             "group flex min-h-24 items-center gap-4 rounded-2xl border p-4 text-left",
-            "border-white/10 bg-white/5 backdrop-blur-md transition duration-200",
+            "border-white/10 bg-[#0a1730]/85 transition duration-200",
             "hover:-translate-y-0.5 hover:border-primary/50 hover:bg-white/10",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70",
             "disabled:pointer-events-none disabled:opacity-50 motion-reduce:transform-none",
@@ -262,7 +262,7 @@ function AccountTile({
     <button
       className={cn(
         "group flex min-h-24 items-center gap-4 rounded-2xl border p-4 text-left",
-        "border-white/10 bg-white/5 backdrop-blur-md transition duration-200",
+        "border-white/10 bg-[#0a1730]/85 transition duration-200",
         "hover:-translate-y-0.5 hover:border-primary/50 hover:bg-white/10",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70",
         "disabled:pointer-events-none disabled:opacity-50 motion-reduce:transform-none",
@@ -434,7 +434,7 @@ function AuthenticationBackButton({ label }: { label: string }) {
     <Button
       className={cn(
         "fixed top-28 left-6 z-20 gap-2 rounded-full border-white/10",
-        "bg-black/10 backdrop-blur-md sm:left-10",
+        "bg-[#0a1730]/85 sm:left-10",
       )}
       type="button"
       variant="outline"
@@ -498,7 +498,7 @@ function ManualAuthenticationForm({
       <div className="space-y-2">
         <Label htmlFor="manual-username">Username</Label>
         <InputGroup
-          className="h-12 border-white/15 bg-black/20 backdrop-blur-xl"
+          className="h-12 border-white/15 bg-[#081426]/90"
           data-disabled={busy || Boolean(username)}
         >
           <InputGroupAddon>
@@ -539,7 +539,7 @@ function ManualAuthenticationForm({
           {prompt?.message ?? "Password"}
         </Label>
         <InputGroup
-          className="h-12 border-white/15 bg-black/20 backdrop-blur-xl"
+          className="h-12 border-white/15 bg-[#081426]/90"
           data-disabled={busy || !prompt}
         >
           <InputGroupAddon>
@@ -586,7 +586,7 @@ function ManualAuthenticationForm({
       </div>
       {canRetry && (
         <Button
-          className="w-full rounded-xl border-white/15 bg-white/10 backdrop-blur-xl"
+          className="w-full rounded-xl border-white/15 bg-[#102a52]/90"
           type="button"
           variant="outline"
           disabled={busy}
@@ -618,7 +618,7 @@ function PromptForm({ prompt }: { prompt: Prompt }) {
   return (
     <form className="w-full space-y-2" onSubmit={submit}>
       <Label htmlFor="prompt-response">{prompt.message}</Label>
-      <InputGroup className="h-12 border-white/15 bg-black/20 backdrop-blur-xl">
+      <InputGroup className="h-12 border-white/15 bg-[#081426]/90">
         <InputGroupAddon>
           <LockKeyhole aria-hidden="true" />
         </InputGroupAddon>
@@ -668,7 +668,7 @@ function AuthenticationWaiting({
   if ((authentication === "failed" || error) && allowRetry) {
     return (
       <Button
-        className="w-full rounded-xl border-white/15 bg-white/10 backdrop-blur-xl"
+        className="w-full rounded-xl border-white/15 bg-[#102a52]/90"
         type="button"
         variant="outline"
         disabled={busy}
@@ -683,7 +683,7 @@ function AuthenticationWaiting({
     <div
       className={cn(
         "flex h-12 w-full items-center justify-center gap-3 rounded-xl border",
-        "border-white/10 bg-black/10 text-sm text-muted-foreground backdrop-blur-xl",
+        "border-white/10 bg-[#081426]/90 text-sm text-muted-foreground",
       )}
     >
       <LoaderCircle className="size-4 animate-spin text-primary motion-reduce:animate-none" />
@@ -772,7 +772,7 @@ function SessionControl() {
         <SelectTrigger
           id="session"
           className={cn(
-            "w-52 border-white/10 bg-black/20 text-starlight backdrop-blur-xl",
+            "w-52 border-white/10 bg-[#081426]/90 text-starlight",
             "focus-visible:border-primary/60 focus-visible:ring-primary/30",
           )}
         >
@@ -838,7 +838,7 @@ function PowerMenu() {
         <div
           className={cn(
             "absolute bottom-12 left-0 w-64 rounded-2xl border border-white/10",
-            "bg-black/50 p-2 shadow-2xl backdrop-blur-2xl",
+            "bg-[#081426]/95 p-2 shadow-2xl",
           )}
         >
           {confirmation ? (
@@ -901,7 +901,7 @@ function PowerMenu() {
         </div>
       )}
       <Button
-        className="rounded-full border-white/10 bg-black/20 backdrop-blur-xl"
+        className="rounded-full border-white/10 bg-[#081426]/90"
         type="button"
         size="icon"
         variant="outline"

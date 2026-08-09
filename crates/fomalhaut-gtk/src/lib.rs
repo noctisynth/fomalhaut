@@ -81,6 +81,7 @@ pub enum ControllerOutput<A> {
 }
 
 /// Validated in-memory resource served by the native URI scheme.
+#[derive(Clone)]
 pub struct ResourceAsset {
     uri: String,
     body: Vec<u8>,

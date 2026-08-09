@@ -12,9 +12,12 @@ use std::{
 
 use fomalhaut_config::PowerConfig;
 use fomalhaut_core::ReauthBackend;
-use fomalhaut_gtk::{BridgeController, ControllerBatch, ControllerOutput, SubmitError};
+use fomalhaut_gtk::{
+    BridgeController, ControllerBatch, ControllerOutput, ResourceAsset, SubmitError,
+};
 use fomalhaut_logind::LogindPowerControl;
 use fomalhaut_pam::{CurrentUserIdentity, PamReauthBackend};
+use fomalhaut_user::discover_current_avatar;
 use fomalhaut_web::{
     bridge::event_dispatch_script,
     controller::LockerController,
@@ -275,7 +278,7 @@ fn run_worker(
             return;
         }
     };
-    let identity = match IdentitySummary::new(
+    let fallback_identity = match IdentitySummary::new(
         identity.username().to_owned(),
         identity.display_name().to_owned(),
         None,
@@ -288,19 +291,30 @@ fn run_worker(
             return;
         }
     };
-    let power = LogindPowerControl::discover(&power_config);
-    let mut controller = LockerController::with_power_control(backend, identity, power);
-    let mut views = HashMap::new();
     if native.send(NativeEvent::BackendReady).is_err() {
         return;
     }
+    let avatar = discover_current_avatar(identity.uid(), identity.username());
+    let identity_with_avatar = avatar.as_ref().and_then(|asset| {
+        IdentitySummary::new(
+            identity.username().to_owned(),
+            identity.display_name().to_owned(),
+            Some(asset.uri().to_owned()),
+        )
+        .ok()
+    });
+    let (identity, resources) = match identity_with_avatar {
+        Some(identity) => (identity, avatar.into_iter().collect::<Vec<_>>()),
+        None => (fallback_identity, Vec::new()),
+    };
+    let power = LogindPowerControl::discover(&power_config);
+    let mut controller = LockerController::with_power_control(backend, identity, power);
+    let mut views = HashMap::new();
 
     while let Ok(command) = commands.recv() {
         match command {
             WorkerCommand::Register { view, output } => {
-                if output.send(ControllerOutput::Ready(Vec::new())).is_ok() {
-                    views.insert(view, output);
-                }
+                attach_view(view, output, &resources, &mut views);
             }
             WorkerCommand::Detach { view } => {
                 views.remove(&view);
@@ -398,6 +412,20 @@ fn run_worker(
         }
     }
     let _ = runtime.block_on(controller.cancel_for_lifecycle());
+}
+
+fn attach_view(
+    view: u64,
+    output: SyncSender<ControllerOutput<LockerViewAction>>,
+    resources: &[ResourceAsset],
+    views: &mut HashMap<u64, SyncSender<ControllerOutput<LockerViewAction>>>,
+) {
+    if output
+        .send(ControllerOutput::Ready(resources.to_vec()))
+        .is_ok()
+    {
+        views.insert(view, output);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -515,13 +543,13 @@ mod tests {
         AuthConversation, AuthEvent, AuthState, AuthenticatedIdentity, BackendError,
         ConversationBackend, PromptId, PromptKind, ReauthBackend, Secret,
     };
-    use fomalhaut_gtk::ControllerOutput;
+    use fomalhaut_gtk::{ControllerOutput, ResourceAsset};
     use fomalhaut_web::{
         controller::LockerController,
         protocol::{IdentitySummary, RuntimeMode, decode_request_for_mode},
     };
 
-    use super::{LockerViewAction, NativeEvent, handle_request};
+    use super::{LockerViewAction, NativeEvent, attach_view, handle_request};
 
     struct FakeReauth {
         conversation: AuthConversation,
@@ -595,6 +623,28 @@ mod tests {
             .mark_lock_acquired()
             .expect("test lock can be acquired");
         controller
+    }
+
+    #[test]
+    fn every_monitor_receives_the_same_validated_avatar_resource() {
+        let resource = ResourceAsset::avatar(1, b"\x89PNG\r\n\x1a\nfixture".to_vec(), "image/png")
+            .expect("the test avatar metadata is valid");
+        let resources = vec![resource];
+        let mut views = HashMap::new();
+
+        for view in [1, 2] {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            attach_view(view, sender, &resources, &mut views);
+            let ControllerOutput::Ready(received) = receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("the registered view receives initial resources")
+            else {
+                panic!("the first view output must contain resources");
+            };
+            assert_eq!(received.len(), 1);
+            assert_eq!(received[0].uri(), "fomalhaut://avatar/1");
+        }
+        assert_eq!(views.len(), 2);
     }
 
     #[test]

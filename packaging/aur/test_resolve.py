@@ -62,6 +62,14 @@ class AutomaticResolutionTests(unittest.TestCase):
             [("greetd-fomalhaut", "4"), ("fomalhaut-lock", "3")],
         )
 
+    def test_user_integration_release_increments_both_pkgrel_values(self):
+        payload = output(package("fomalhaut-user", "0.1.1-alpha.1"))
+        matrix = resolver.resolve_automatic(payload, SOURCE, MANIFESTS, AUR)
+        self.assertEqual(
+            [(entry["aur_package"], entry["pkgrel"]) for entry in matrix["include"]],
+            [("greetd-fomalhaut", "4"), ("fomalhaut-lock", "3")],
+        )
+
     def test_pam_release_only_rebuilds_locker(self):
         payload = output(package("fomalhaut-pam", "0.2.0-alpha.1"))
         matrix = resolver.resolve_automatic(payload, SOURCE, MANIFESTS, AUR)

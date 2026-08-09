@@ -22,6 +22,7 @@ depends=(
   'pam'
   'webkitgtk-6.0'
 )
+optdepends=('accountsservice: current user avatar')
 makedepends=('cargo' 'clang')
 backup=('etc/pam.d/fomalhaut-lock')
 source=("${_upstream_name}-${_source_ref}.tar.gz::${url}/archive/${_source_ref}.tar.gz")
@@ -42,7 +43,8 @@ build() {
 check() {
   cd "${_source_dir}"
   CARGO_TARGET_DIR=target cargo test --frozen \
-    --package fomalhaut-lock --package fomalhaut-logind --package fomalhaut-pam --all-targets
+    --package fomalhaut-lock --package fomalhaut-logind --package fomalhaut-pam \
+    --package fomalhaut-user --all-targets
 }
 
 package() {
