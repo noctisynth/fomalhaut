@@ -197,6 +197,7 @@ install_arch_dependencies() {
   local -a required_packages=(
     base-devel
     cage
+    clang
     dbus
     diffutils
     git

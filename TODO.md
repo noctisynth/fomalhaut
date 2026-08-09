@@ -698,8 +698,9 @@ greeter 上确认头像、输入延迟和视觉一致性。
       本地执行 version/publish。
 - [x] 添加根目录安全安装器：支持首次/更新构建、原子二进制与主题部署、TOML 备份验证更新、
       显式 greetd restart 和临时 system-root 集成测试。
-- [x] 让源码安装器在 Arch 上检查构建与运行包，按 `paru`、`yay`、`sudo pacman` 优先级安装
-      缺失的系统依赖；Rust 与 Bun 工具链由用户自行提供。
+- [x] 让源码安装器在 Arch 上检查构建与运行包（包括 PAM bindgen 所需的 `clang`/libclang），
+      按 `paru`、`yay`、`sudo pacman` 优先级安装缺失的系统依赖；Rust 与 Bun 工具链由用户
+      自行提供；Ubuntu CI 对应安装 `libclang-dev`。
 - [x] 让源码安装器达到内容级幂等：连续相同安装不新增二进制/配置备份或主题 release。
 - [x] 让源码安装器首次创建 Fomalhaut 配置时默认允许 poweroff、reboot 和 suspend，并验证原地
       更新保留缺失、显式关闭或自定义的既有电源策略。

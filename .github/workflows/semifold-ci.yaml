@@ -26,7 +26,11 @@ jobs:
       - name: Install native packages
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libgtk4-layer-shell-dev libpam0g-dev libwebkitgtk-6.0-dev
+          sudo apt-get install --no-install-recommends \
+            libclang-dev \
+            libgtk4-layer-shell-dev \
+            libpam0g-dev \
+            libwebkitgtk-6.0-dev
       - name: Setup Semifold
         uses: noctisynth/setup-semifold@main
         with:

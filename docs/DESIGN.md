@@ -605,6 +605,9 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
 - 当前 Rust 使用 `cargo build --release --locked -p fomalhaut -p fomalhaut-lock`，安装交易
   同时构建并安装两个二进制。前端先执行
   `bun install --frozen-lockfile` 再调用 workspace 的 `build:theme`，不得隐式更新 lockfile。
+- `fomalhaut-lock` 的 `pam-client` 依赖通过 `pam-sys` 在构建时运行 bindgen，因此构建环境必须
+  提供可加载的 libclang。Arch 源码安装器与 locker AUR 构建安装 `clang`，Ubuntu CI 安装
+  `libclang-dev`；这是构建期依赖，不应扩大已安装 locker 的运行时依赖集合。
 - 安装必须内容级幂等：构建后的二进制、主题树或 updater 生成的 TOML 与当前安装内容完全相同
   时，分别跳过备份、替换、release 创建和 symlink 切换。确有变化的二进制先写入同目录临时
   文件，保留现有文件的带时间戳备份后通过 rename 切换。变化的主题安装到只读 release 目录，
