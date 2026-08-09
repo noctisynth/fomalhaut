@@ -14,6 +14,9 @@ import {
 } from "fomalhaut-sdk";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
+const AUTHENTICATION_FAILURE_MESSAGE = "Authentication failed. Try again.";
+const MAX_AUTHENTICATION_MESSAGES = 16;
+
 export type ThemePhase = "loading" | "ready" | "failed";
 
 export type ThemeScreen =
@@ -216,7 +219,7 @@ export function createThemeStore(
       }));
     }),
     client.on("auth.failed", (_, envelope) =>
-      clearPrompt(store, envelope.sequence),
+      recordAuthenticationFailure(store, envelope.sequence),
     ),
     client.on("auth.cancelled", (_, envelope) =>
       clearPrompt(store, envelope.sequence),
@@ -337,4 +340,32 @@ function clearPrompt(store: ThemeStore, sequence: number): void {
       ? { ...state.snapshot, prompt: null, sequence }
       : null,
   }));
+}
+
+function recordAuthenticationFailure(
+  store: ThemeStore,
+  sequence: number,
+): void {
+  store.setState((state) => {
+    if (!state.snapshot) {
+      return { snapshot: null };
+    }
+
+    const messages = state.snapshot.messages;
+    const latestMessage = messages.at(-1);
+    return {
+      snapshot: {
+        ...state.snapshot,
+        prompt: null,
+        messages:
+          latestMessage?.level === "error"
+            ? messages
+            : [
+                ...messages.slice(-(MAX_AUTHENTICATION_MESSAGES - 1)),
+                { level: "error", text: AUTHENTICATION_FAILURE_MESSAGE },
+              ],
+        sequence,
+      },
+    };
+  });
 }

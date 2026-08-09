@@ -264,12 +264,18 @@ describe("SPA authentication UI", () => {
         data: {},
       });
     });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Authentication failed. Try again.",
+    );
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(transport.requests.at(-1)).toMatchObject({
       method: "auth.begin",
       params: { username: "alice" },
     });
+    expect(
+      screen.queryByText("Authentication failed. Try again."),
+    ).not.toBeInTheDocument();
   });
 
   test("selects a session through the shadcn select popup", async () => {

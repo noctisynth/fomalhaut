@@ -201,6 +201,32 @@ test("does not cancel again after greetd has released a failed attempt", async (
   expect(runtime.store.getState().screen.name).toBe("user-selection");
 });
 
+test("records a generic authentication error when PAM provides no message", async () => {
+  const transport = new MockTransport(snapshot([alice, bob]));
+  const client = await createFomalhautClient(transport);
+  const runtime = createThemeStore(client);
+  await runtime.initialize();
+  await runtime.store.getState().chooseKnownUser(alice);
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "state.changed",
+    data: { state: "failed" },
+  });
+  transport.emit({
+    protocol: 1,
+    sequence: 2,
+    event: "auth.failed",
+    data: {},
+  });
+
+  expect(runtime.store.getState().snapshot).toMatchObject({
+    prompt: null,
+    messages: [{ level: "error", text: "Authentication failed. Try again." }],
+    sequence: 2,
+  });
+});
+
 test("clears PAM failure feedback before retrying the same user", async () => {
   const transport = new MockTransport(snapshot([alice, bob]));
   const client = await createFomalhautClient(transport);
@@ -229,7 +255,12 @@ test("clears PAM failure feedback before retrying the same user", async () => {
     data: {},
   });
 
-  expect(runtime.store.getState().snapshot?.messages).toHaveLength(1);
+  expect(runtime.store.getState().snapshot?.messages).toEqual([
+    {
+      level: "error",
+      text: "Authenticator could not perform the requested operation",
+    },
+  ]);
   expect(await runtime.store.getState().retryAuthentication()).toBe(true);
   expect(runtime.store.getState().snapshot?.messages).toEqual([]);
   expect(runtime.store.getState().error).toBeNull();
