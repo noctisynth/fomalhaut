@@ -72,28 +72,39 @@ run_build_command() {
 }
 
 usage() {
-  cat <<'EOF'
-Build and install Fomalhaut and the Nocturne reference theme.
-
-Usage: ./install.sh [options]
-
-Options:
-  --display-scale SCALE  Set one [display].scale for both roles (0.5 through 4.0).
-  --greeter-scale SCALE  Set the greeter scale; requires --locker-scale.
-  --locker-scale SCALE   Set the locker scale; requires --greeter-scale.
-  --cursor-size SIZE     Set Cage XCURSOR_SIZE (default: 48).
-  --greeter-user USER    Set greetd default_session.user (default: greeter).
-  --prefix PATH           Install the binary below PATH/bin (default: /usr/local).
-  --system-root PATH      Install into a staging root without sudo or restart.
-  --restart               Restart greetd after a successful system installation.
-  -h, --help              Show this help.
-
-Existing TOML files are parsed, backed up, selectively updated, revalidated,
-and atomically replaced. On Arch Linux, missing build and runtime packages are
-installed with paru, yay, or sudo pacman in that order.
-Fresh Fomalhaut configurations enable poweroff, reboot, and suspend; existing
-power policy is preserved during updates.
-EOF
+  printf '%s%sBuild and install Fomalhaut and the Nocturne reference theme.%s\n\n' \
+    "$color_bold" "$color_blue" "$color_reset"
+  printf '%sUsage:%s %s./install.sh%s %s[options]%s\n\n' \
+    "$color_bold" "$color_reset" "$color_green" "$color_reset" "$color_dim" "$color_reset"
+  printf '%sOptions:%s\n' "$color_bold" "$color_reset"
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--display-scale SCALE' "$color_reset" \
+    'Set one [display].scale for both roles (0.5 through 4.0).'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--greeter-scale SCALE' "$color_reset" \
+    'Set the greeter scale; requires --locker-scale.'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--locker-scale SCALE' "$color_reset" \
+    'Set the locker scale; requires --greeter-scale.'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--cursor-size SIZE' "$color_reset" \
+    'Set Cage XCURSOR_SIZE (default: 48).'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--greeter-user USER' "$color_reset" \
+    'Set greetd default_session.user (default: greeter).'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--prefix PATH' "$color_reset" \
+    'Install the binary below PATH/bin (default: /usr/local).'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--system-root PATH' "$color_reset" \
+    'Install into a staging root without sudo or restart.'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--restart' "$color_reset" \
+    'Restart greetd after a successful system installation.'
+  printf '  %s%-23s%s %s\n\n' "$color_cyan" '-h, --help' "$color_reset" \
+    'Show this help.'
+  printf '%sExisting TOML files are parsed, backed up, selectively updated, revalidated,%s\n' \
+    "$color_dim" "$color_reset"
+  printf '%sand atomically replaced. On Arch Linux, missing build and runtime packages are%s\n' \
+    "$color_dim" "$color_reset"
+  printf '%sinstalled with paru, yay, or sudo pacman in that order.%s\n' \
+    "$color_dim" "$color_reset"
+  printf '%sFresh Fomalhaut configurations enable poweroff, reboot, and suspend; existing%s\n' \
+    "$color_dim" "$color_reset"
+  printf '%spower policy is preserved during updates.%s\n' \
+    "$color_dim" "$color_reset"
 }
 
 die() {
