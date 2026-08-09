@@ -64,18 +64,19 @@ cd fomalhaut
 ```
 
 > [!IMPORTANT]
-> Set `--display-scale` explicitly during installation. Fomalhaut runs in its
-> own Cage session and does not inherit the scale configured in your desktop
-> environment. Many current laptops and HiDPI displays need `1.5` or `2.0`;
-> unscaled displays normally use `1.0`. The accepted range is `0.5` through
-> `4.0`.
+> Set the display scale explicitly during installation. The greeter runs in its
+> own Cage session and often needs `1.5` or `2.0` on a HiDPI display, while the
+> locker already runs inside the desktop compositor's scaled coordinate space
+> and normally uses `1.0`. Pass `--greeter-scale` and `--locker-scale` together,
+> or use `--display-scale` when both roles genuinely need the same value. The
+> accepted range is `0.5` through `4.0`.
 
 ### New installation
 
 Build and install Fomalhaut with the scale appropriate for your display:
 
 ```sh
-./install.sh --display-scale 1.5
+./install.sh --greeter-scale 1.5 --locker-scale 1.0
 ```
 
 The installer does not enable greetd automatically. From a text console, or
@@ -90,7 +91,7 @@ sudo systemctl enable --now greetd.service
 Install Fomalhaut without using `--restart`:
 
 ```sh
-./install.sh --display-scale 1.5
+./install.sh --greeter-scale 1.5 --locker-scale 1.0
 ```
 
 Save your work and switch to a text console. Check which display manager is in
@@ -124,11 +125,11 @@ The `--restart` option is intended only for updates on a system that already
 uses greetd; it restarts the service but does not enable it:
 
 ```sh
-./install.sh --display-scale 1.5 --restart
+./install.sh --greeter-scale 1.5 --locker-scale 1.0 --restart
 ```
 
-Use `./install.sh --help` to see scale, cursor size, greeter account,
-installation prefix, and staging options. See the
+Use `./install.sh --help` to see shared and per-role scale, cursor size,
+greeter account, installation prefix, and staging options. See the
 [configuration and installation guide](docs/CONFIGURATION.md) for the complete
 setup and upgrade behavior.
 

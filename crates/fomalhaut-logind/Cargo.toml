@@ -1,0 +1,15 @@
+[package]
+name = "fomalhaut-logind"
+version = "0.1.0-alpha"
+edition.workspace = true
+description = "Non-interactive systemd-logind power backend for Fomalhaut"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fomalhaut-config = { version = "0.1.0-alpha", path = "../fomalhaut-config" }
+fomalhaut-web = { version = "0.1.0-alpha.1", path = "../fomalhaut-web" }
+zbus = "5.18.0"
+
+[lints]
+workspace = true

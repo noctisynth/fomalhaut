@@ -214,6 +214,22 @@ describe("SPA authentication UI", () => {
     });
   });
 
+  test("offers advertised power actions in locker mode", async () => {
+    const transport = new MockTransport(lockerSnapshot(null, ["suspend"]));
+    await renderTheme(transport);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Power menu" }));
+    expect(screen.getByRole("button", { name: "Suspend" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Suspend" }));
+    await user.click(screen.getByRole("button", { name: "Confirm suspend" }));
+
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "power.request",
+      params: { action: "suspend" },
+    });
+  });
+
   test("retries the same user after authentication failure", async () => {
     const transport = new MockTransport(
       snapshot([

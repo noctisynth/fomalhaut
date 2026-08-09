@@ -67,6 +67,11 @@ resolver = "nodejs"
 path = "."
 resolver = "nodejs"
 
+[packages.fomalhaut-logind]
+path = "crates/fomalhaut-logind"
+resolver = "rust"
+channel = "alpha"
+
 [resolver.rust.pre-check]
 type = "http"
 url = "https://crates.io/api/v1/crates/{{ package.name }}/{{ package.version }}"

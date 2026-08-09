@@ -1,4 +1,4 @@
-//! Non-interactive systemd-logind power backend.
+//! Shared non-interactive systemd-logind power backend.
 
 use std::time::Duration;
 
@@ -14,12 +14,15 @@ const LOGIN1_PATH: &str = "/org/freedesktop/login1";
 const LOGIN1_INTERFACE: &str = "org.freedesktop.login1.Manager";
 const LOGIN1_METHOD_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Non-interactive logind capability discovery and power execution.
 pub struct LogindPowerControl {
     connection: Option<Connection>,
     capabilities: Capabilities,
 }
 
 impl LogindPowerControl {
+    /// Discovers the intersection of administrator policy and logind `yes` capabilities.
+    #[must_use]
     pub fn discover(config: &PowerConfig) -> Self {
         if config.actions().is_empty() {
             return Self {

@@ -8,6 +8,8 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 system_root="/"
 prefix="/usr/local"
 display_scale=""
+greeter_scale=""
+locker_scale=""
 cursor_size="48"
 greeter_user="greeter"
 restart_greetd=false
@@ -76,13 +78,15 @@ Build and install Fomalhaut and the Nocturne reference theme.
 Usage: ./install.sh [options]
 
 Options:
-  --display-scale SCALE  Set [display].scale (0.5 through 4.0).
+  --display-scale SCALE  Set one [display].scale for both roles (0.5 through 4.0).
+  --greeter-scale SCALE  Set the greeter scale; requires --locker-scale.
+  --locker-scale SCALE   Set the locker scale; requires --greeter-scale.
   --cursor-size SIZE     Set Cage XCURSOR_SIZE (default: 48).
-  --greeter-user USER   Set greetd default_session.user (default: greeter).
-  --prefix PATH          Install the binary below PATH/bin (default: /usr/local).
-  --system-root PATH     Install into a staging root without sudo or restart.
-  --restart              Restart greetd after a successful system installation.
-  -h, --help             Show this help.
+  --greeter-user USER    Set greetd default_session.user (default: greeter).
+  --prefix PATH           Install the binary below PATH/bin (default: /usr/local).
+  --system-root PATH      Install into a staging root without sudo or restart.
+  --restart               Restart greetd after a successful system installation.
+  -h, --help              Show this help.
 
 Existing TOML files are parsed, backed up, selectively updated, revalidated,
 and atomically replaced. On Arch Linux, missing build and runtime packages are
@@ -108,6 +112,16 @@ while (($# > 0)); do
     --display-scale)
       require_value "$1" "${2-}"
       display_scale="$2"
+      shift 2
+      ;;
+    --greeter-scale)
+      require_value "$1" "${2-}"
+      greeter_scale="$2"
+      shift 2
+      ;;
+    --locker-scale)
+      require_value "$1" "${2-}"
+      locker_scale="$2"
       shift 2
       ;;
     --cursor-size)
@@ -148,6 +162,10 @@ done
 [[ "$greeter_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "--greeter-user is not a safe account name"
 [[ "$cursor_size" =~ ^[0-9]+$ ]] || die "--cursor-size must be an integer"
 ((cursor_size >= 16 && cursor_size <= 256)) || die "--cursor-size must be between 16 and 256"
+[[ -z "$display_scale" || ( -z "$greeter_scale" && -z "$locker_scale" ) ]] \
+  || die "--display-scale cannot be combined with role-specific scale options"
+[[ -z "$greeter_scale" && -z "$locker_scale" || -n "$greeter_scale" && -n "$locker_scale" ]] \
+  || die "--greeter-scale and --locker-scale must be provided together"
 
 log_title "Fomalhaut source installer"
 
@@ -218,8 +236,11 @@ for command in cargo bun python3 git install cp mv ln find grep chmod chown cat 
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable after dependency setup: $command"
 done
 
-if [[ -n "$display_scale" ]]; then
-  python3 - "$display_scale" <<'PY' || die "--display-scale must be a finite number from 0.5 through 4.0"
+validate_scale() {
+  local option="$1"
+  local raw="$2"
+  [[ -n "$raw" ]] || return 0
+  python3 - "$raw" <<'PY' || die "$option must be a finite number from 0.5 through 4.0"
 import math
 import sys
 
@@ -230,7 +251,11 @@ except ValueError:
 if not math.isfinite(value) or not 0.5 <= value <= 4.0:
     raise SystemExit(1)
 PY
-fi
+}
+
+validate_scale "--display-scale" "$display_scale"
+validate_scale "--greeter-scale" "$greeter_scale"
+validate_scale "--locker-scale" "$locker_scale"
 
 if [[ "$system_root" == "/" ]]; then
   command -v getent >/dev/null 2>&1 || die "getent is required to validate the greeter account"
@@ -303,6 +328,19 @@ def typed_value(kind: str, raw: str):
         if not math.isfinite(value):
             raise ValueError("non-finite TOML float")
         return value
+    if kind == "display-scale-shared":
+        value = float(raw)
+        if not math.isfinite(value):
+            raise ValueError("non-finite shared display scale")
+        return value
+    if kind == "display-scale-roles":
+        values = raw.split(",")
+        if len(values) != 2:
+            raise ValueError("role display scale requires greeter and locker values")
+        greeter, locker = map(float, values)
+        if not math.isfinite(greeter) or not math.isfinite(locker):
+            raise ValueError("non-finite role display scale")
+        return {"greeter": greeter, "locker": locker}
     raise ValueError(f"unsupported TOML value kind: {kind}")
 
 def encoded_value(kind: str, raw: str) -> str:
@@ -337,7 +375,90 @@ def table_ranges(current_lines):
             tables.append((match.group(1).strip(), line_index))
     return tables
 
+def remove_table(current_lines, table_name, allowed_keys):
+    tables = table_ranges(current_lines)
+    starts = [line_index for name, line_index in tables if name == table_name]
+    if len(starts) > 1:
+        raise SystemExit(f"refusing to modify duplicate TOML section [{table_name}]")
+    if not starts:
+        return None
+    start = starts[0]
+    later_starts = [line_index for _, line_index in tables if line_index > start]
+    end = min(later_starts, default=len(current_lines))
+    assignment_pattern = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=")
+    assignments = []
+    for line_index in range(start + 1, end):
+        match = assignment_pattern.match(current_lines[line_index])
+        if match:
+            assignments.append(match.group(1))
+    if set(assignments) != set(allowed_keys) or len(assignments) != len(allowed_keys):
+        expected = ", ".join(allowed_keys)
+        raise SystemExit(
+            f"refusing to replace [{table_name}]: expected exactly {expected}"
+        )
+    del current_lines[start:end]
+    return start
+
+def update_display_scale(current_lines, kind, raw):
+    removed_table_index = remove_table(
+        current_lines, "display.scale", ("greeter", "locker")
+    )
+    tables = table_ranges(current_lines)
+    starts = [line_index for name, line_index in tables if name == "display"]
+    if len(starts) > 1:
+        raise SystemExit("refusing to modify duplicate TOML section [display]")
+    if not starts:
+        if removed_table_index is None:
+            if current_lines and current_lines[-1].strip():
+                current_lines.append("")
+            removed_table_index = len(current_lines)
+        current_lines.insert(removed_table_index, "[display]")
+        starts = [removed_table_index]
+
+    start = starts[0]
+    tables = table_ranges(current_lines)
+    later_starts = [line_index for _, line_index in tables if line_index > start]
+    end = min(later_starts, default=len(current_lines))
+    scale_pattern = re.compile(r"^\s*scale(?:\.(?:greeter|locker))?\s*=")
+    matches = [
+        line_index for line_index in range(start + 1, end)
+        if scale_pattern.match(current_lines[line_index])
+    ]
+    insertion_index = matches[0] if matches else None
+    for line_index in reversed(matches):
+        del current_lines[line_index]
+    if insertion_index is not None:
+        while insertion_index > start + 1 and not current_lines[insertion_index - 1].strip():
+            del current_lines[insertion_index - 1]
+            insertion_index -= 1
+    if insertion_index is None:
+        tables = table_ranges(current_lines)
+        later_starts = [line_index for _, line_index in tables if line_index > start]
+        insertion_index = min(later_starts, default=len(current_lines))
+        while insertion_index > start + 1 and not current_lines[insertion_index - 1].strip():
+            insertion_index -= 1
+    value = typed_value(kind, raw)
+    if kind == "display-scale-shared":
+        rendered = [f"scale = {value}"]
+    else:
+        rendered = [
+            f"scale.greeter = {value['greeter']}",
+            f"scale.locker = {value['locker']}",
+        ]
+    needs_separator = (
+        insertion_index < len(current_lines)
+        and table_pattern.match(current_lines[insertion_index]) is not None
+    )
+    current_lines[insertion_index:insertion_index] = rendered
+    if needs_separator:
+        current_lines.insert(insertion_index + len(rendered), "")
+
 for section, key, kind, raw in updates:
+    if kind in ("display-scale-shared", "display-scale-roles"):
+        if section != "display" or key != "scale":
+            raise SystemExit("display scale updates must target [display].scale")
+        update_display_scale(lines, kind, raw)
+        continue
     tables = table_ranges(lines)
     starts = [line_index for name, line_index in tables if name == section]
     if len(starts) > 1:
@@ -656,9 +777,11 @@ run_privileged install -d -m 0755 -- "${fomalhaut_config%/*}" "${greetd_config%/
 
 fomalhaut_updates=(frontend path remove-table "" themes default string "$theme_runtime")
 if [[ -n "$display_scale" ]]; then
-  fomalhaut_updates+=(display scale float "$display_scale")
+  fomalhaut_updates+=(display scale display-scale-shared "$display_scale")
+elif [[ -n "$greeter_scale" ]]; then
+  fomalhaut_updates+=(display scale display-scale-roles "$greeter_scale,$locker_scale")
 elif [[ ! -e "$fomalhaut_config" ]]; then
-  fomalhaut_updates+=(display scale float "1.0")
+  fomalhaut_updates+=(display scale display-scale-shared "1.0")
 fi
 if [[ ! -e "$fomalhaut_config" ]]; then
   fomalhaut_updates+=(power actions string-array '["poweroff", "reboot", "suspend"]')

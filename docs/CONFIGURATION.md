@@ -8,14 +8,16 @@ session 默认目录；文件存在但无法读取、包含未知字段或验证
 仓库根目录的安装器会锁定依赖构建 release 二进制和 React 参考主题，并安装到系统目录：
 
 ```sh
-./install.sh --display-scale 1.5
+./install.sh --greeter-scale 1.5 --locker-scale 1.0
 ```
 
 ### 显示缩放
 
-建议安装时显式传入 `--display-scale`。Fomalhaut 运行在独立的 Cage 会话中，不会继承 KDE、
-GNOME 等桌面环境的缩放设置；现在许多笔记本和 HiDPI 显示器需要 `1.5` 或 `2.0`。无需缩放的
-显示器通常使用 `1.0`，允许范围为 `0.5` 到 `4.0`。
+两个角色确实使用相同页面 zoom 时，可以传入 `--display-scale 1.5`。greeter 运行在独立 Cage
+中、locker 运行在 niri 等现有 compositor 中时，通常应改用成对的
+`--greeter-scale`/`--locker-scale`：Cage 不继承桌面输出缩放，而 locker 已由现有 compositor
+处理逻辑坐标和输出 scale。共享参数不能与角色参数混用，两个角色参数也不能只提供一个；全部
+倍率允许范围均为 `0.5` 到 `4.0`。
 
 如果首次安装时省略该选项，新配置会使用 `1.0`；更新安装时省略则保留已有配置值。光标大小
 由独立的 `--cursor-size` 控制。
@@ -28,7 +30,7 @@ GNOME 等桌面环境的缩放设置；现在许多笔记本和 HiDPI 显示器�
 使用适合显示器的缩放倍率运行安装器：
 
 ```sh
-./install.sh --display-scale 1.5
+./install.sh --greeter-scale 1.5 --locker-scale 1.0
 ```
 
 安装器不会自动启用 greetd。请从文本控制台执行以下命令；如果当前仍在图形会话中，请先保存
@@ -43,7 +45,7 @@ sudo systemctl enable --now greetd.service
 先运行安装器，不要使用 `--restart`：
 
 ```sh
-./install.sh --display-scale 1.5
+./install.sh --greeter-scale 1.5 --locker-scale 1.0
 ```
 
 保存工作并切换到文本控制台。通过 `display-manager.service` 确认当前服务，先禁用并停止原显示
@@ -94,7 +96,7 @@ AccountsService 是可选的用户资料增强，不会被强制安装。`--syst
 确认可以退出当前会话并且 greetd 已经启用时，可执行：
 
 ```sh
-./install.sh --display-scale 1.5 --restart
+./install.sh --greeter-scale 1.5 --locker-scale 1.0 --restart
 ```
 
 使用非默认安装前缀时传入绝对 `--prefix`。`--system-root /tmp/fomalhaut-root` 只用于在隔离目录
@@ -119,7 +121,9 @@ account   include  system-auth
 
 管理员应按发行版和本地认证要求审查该文件。后续源码安装发现已有不同策略时只会保留并警告，
 不会自动覆盖。PAM worker、renderer、主题或 controller 在已经锁定后失败时，locker 继续持有
-session lock，并切换到可信 GTK 故障/重试界面；取消认证也不会解锁。
+session lock，并切换到可信 GTK 故障/重试界面；取消认证也不会解锁。密码错误、账户策略拒绝和
+达到尝试次数属于普通 PAM 拒绝，继续由当前 Web 主题展示 `auth.failed` 并允许重试，不进入原生
+故障页。
 
 源码安装器提供 `Type=notify` 用户服务。安装或更新后先让当前用户的 systemd manager 重读 unit：
 
@@ -131,6 +135,18 @@ systemctl --user start fomalhaut-lock.service
 第二条命令只在 compositor 已发出 `locked`、controller 已记录 `lock.acquired` 且 locker 发送
 `READY=1` 后返回；认证解锁后进程正常退出。服务不需要 enable，它由锁屏触发器按需启动。
 直接执行 `fomalhaut-lock` 时进程同样保持前台，但没有 systemd readiness 消费者。
+
+该 user unit 显式使用 `NoNewPrivileges=no`。这是 PAM 兼容边界，不表示 Fomalhaut 自身以 root
+运行或带有 setuid bit：Arch 的 `pam_unix` 需要透明执行系统安装的 setuid `unix_chkpwd` helper，
+`NoNewPrivileges=yes` 会阻止该 helper 获得校验受保护密码数据库所需的身份。unit 仍保留
+`LockPersonality=yes` 与 `RestrictSUIDSGID=yes`，后者禁止创建新的 SUID/SGID 文件。管理员若替换
+PAM stack，应同时复核这一权限要求，不能在未验证真实密码认证的情况下自行启用
+`NoNewPrivileges`。
+
+unit 同时使用 `UnsetEnvironment=GDK_SCALE GDK_DPI_SCALE`，只为 locker 服务清除 user manager
+可能继承的工具包缩放变量。niri/GTK 仍负责输出缩放，额外页面 zoom 只由 locker 的配置值决定。
+直接执行二进制进行调试时也应先确认没有设置这两个变量；正常使用优先通过上述 systemd user
+service 启动。
 
 niri 用户可以把安装到 `/usr/local/share/doc/fomalhaut-lock/niri.kdl` 的两段配置合并进
 `~/.config/niri/config.kdl`。顶层启动项负责 idle/挂起集成：
@@ -281,12 +297,13 @@ actions = ["poweroff", "reboot", "suspend"]
 `[power]`、显式空数组和自定义 allowlist 都会原样保留。Fomalhaut 会通过系统 D-Bus 查询
 systemd-logind，`state.get` 的 `capabilities.power` 只包含同时出现在配置中且对应 `Can*` 方法
 返回 `yes` 的动作。`no`、`na`、`challenge` 或 logind 不可用都不会向主题发布能力，因此
-greeter 不依赖 Polkit 交互 agent。
+greeter 和 locker 都不依赖 Polkit 交互 agent。
 
-主题只能用 `power.request` 请求 capability 中存在的枚举动作。宿主会先取消进行中的 greetd
-认证，再调用 logind 的非交互 `PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)`；不会
-执行 shell 命令或回退到 `systemctl`。发行版的 Polkit/logind 策略仍须允许 `greeter` 用户执行
-相应操作，否则该动作不会显示或会返回脱敏错误。
+主题只能用 `power.request` 请求 capability 中存在的枚举动作。greeter 会先取消进行中的 greetd
+认证，locker 会先取消当前 PAM transaction，再调用共享 backend 的非交互 `PowerOff(false)`、
+`Reboot(false)` 或 `Suspend(false)`；不会执行 shell 命令或回退到 `systemctl`。locker 的电源请求
+不会授权解锁或释放 session lock，suspend/resume 后仍保持锁定。发行版的 Polkit/logind 策略仍
+须允许对应运行用户执行动作，否则该动作不会显示或会返回脱敏错误。
 
 ## 页面缩放
 
@@ -298,15 +315,26 @@ greeter 不依赖 Polkit 交互 agent。
 scale = 1.5
 ```
 
-默认值为 `1.0`，允许范围为 `0.5` 到 `4.0`。该倍率通过 WebKit 的 `zoom-level` 缩放整个主题，
-不会修改主题代码，也不影响 Cage 绘制的鼠标光标。光标大小可在 greetd 命令中独立设置，例如：
+该标量同时应用于 greeter 和 locker。需要分别设置时使用 dotted keys，并且两个角色必须同时
+出现：
+
+```toml
+[display]
+scale.greeter = 1.5
+scale.locker = 1.0
+```
+
+配置缺失时两者默认均为 `1.0`，每个值允许范围为 `0.5` 到 `4.0`。倍率通过 WebKit 的
+`zoom-level` 缩放整个主题，不会修改主题代码，也不影响 Cage 绘制的鼠标光标。光标大小可在
+greetd 命令中独立设置，例如：
 
 ```toml
 command = "dbus-run-session env XCURSOR_SIZE=48 cage -s -m last -d -- /usr/bin/fomalhaut"
 ```
 
-配置 `[display].scale` 后不应再设置 `GDK_SCALE`，以免工具包缩放与页面 zoom 叠加。对于桌面环境
-使用 `150%` 缩放的输出，通常配置 `scale = 1.5`。
+配置 `[display].scale` 后不应再设置 `GDK_SCALE` 或 `GDK_DPI_SCALE`，以免工具包缩放与页面 zoom
+叠加。对于独立 Cage greeter 和使用 `150%` 输出缩放的 niri locker，通常分别配置 `1.5` 与
+`1.0`。
 
 ## 用户发现
 

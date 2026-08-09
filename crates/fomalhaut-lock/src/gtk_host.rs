@@ -17,7 +17,7 @@ use fomalhaut_gtk::{
 use fomalhaut_pam::CurrentUserIdentity;
 use fomalhaut_web::{protocol::RuntimeMode, theme::ThemeSource};
 use gtk4 as gtk;
-use gtk4::{gdk, glib, prelude::*};
+use gtk4::{gdk, gio, glib, prelude::*};
 use gtk4_session_lock::{Instance, is_supported};
 
 use crate::controller_worker::{LockerViewAction, NativeEvent, ViewController, WorkerHandle};
@@ -35,15 +35,18 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
     if !is_supported() {
         return Err(HostError::SessionLockUnsupported);
     }
+    let application_hold = application.application().hold();
     let config = AppConfig::load().map_err(|_| HostError::Configuration)?;
     let locker = config.for_locker();
     let theme_directory = locker.theme_directory().map(PathBuf::from);
     validate_theme(theme_directory.as_ref())?;
     let identity = CurrentUserIdentity::discover().map_err(|_| HostError::Identity)?;
-    let (worker, native) = WorkerHandle::spawn(identity).map_err(|_| HostError::WorkerSpawn)?;
+    let (worker, native) = WorkerHandle::spawn(identity, locker.power().clone())
+        .map_err(|_| HostError::WorkerSpawn)?;
     let instance = Instance::new();
     let state = Rc::new(LockHost {
         application,
+        _application_hold: application_hold,
         instance,
         worker,
         theme_directory,
@@ -68,6 +71,7 @@ fn validate_theme(theme_directory: Option<&PathBuf>) -> Result<(), HostError> {
 
 struct LockHost {
     application: ApplicationHandle,
+    _application_hold: gio::ApplicationHoldGuard,
     instance: Instance,
     worker: Rc<WorkerHandle>,
     theme_directory: Option<PathBuf>,

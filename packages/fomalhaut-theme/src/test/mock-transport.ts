@@ -72,6 +72,7 @@ export function snapshot(
 
 export function lockerSnapshot(
   prompt: StateSnapshot["prompt"] = null,
+  power: StateSnapshot["capabilities"]["power"] = [],
 ): StateSnapshotFor<"locker"> {
   return {
     mode: "locker",
@@ -89,6 +90,6 @@ export function lockerSnapshot(
       displayName: "Alice",
       avatarUrl: null,
     },
-    capabilities: { power: [] },
+    capabilities: { power },
   };
 }

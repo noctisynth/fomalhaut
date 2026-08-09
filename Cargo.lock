@@ -441,6 +441,7 @@ dependencies = [
  "fomalhaut-core",
  "fomalhaut-greetd",
  "fomalhaut-gtk",
+ "fomalhaut-logind",
  "fomalhaut-session",
  "fomalhaut-web",
  "greetd_ipc",
@@ -492,11 +493,21 @@ dependencies = [
  "fomalhaut-config",
  "fomalhaut-core",
  "fomalhaut-gtk",
+ "fomalhaut-logind",
  "fomalhaut-pam",
  "fomalhaut-web",
  "gtk4",
  "gtk4-session-lock",
  "tokio",
+]
+
+[[package]]
+name = "fomalhaut-logind"
+version = "0.1.0-alpha"
+dependencies = [
+ "fomalhaut-config",
+ "fomalhaut-web",
+ "zbus",
 ]
 
 [[package]]

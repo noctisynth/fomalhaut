@@ -23,7 +23,7 @@ use crate::{
 
 const WORKER_CHANNEL_CAPACITY: usize = 8;
 const WORKER_STEP_TIMEOUT: Duration = Duration::from_secs(30);
-const WORKER_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
+const WORKER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 const WORKER_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Failure while preparing the first isolated PAM worker before acquiring the session lock.
@@ -71,7 +71,9 @@ impl PamReauthBackend {
             WorkerFailure::Timeout
             | WorkerFailure::Disconnected
             | WorkerFailure::Protocol
-            | WorkerFailure::Exit => PamBackendError::NotReady,
+            | WorkerFailure::ExitTimeout
+            | WorkerFailure::ExitStatus
+            | WorkerFailure::Reader => PamBackendError::NotReady,
         })?;
         Ok(Self {
             identity,
@@ -152,7 +154,9 @@ impl PamReauthBackend {
                     WorkerFailure::Spawn
                     | WorkerFailure::Timeout
                     | WorkerFailure::Disconnected
-                    | WorkerFailure::Exit,
+                    | WorkerFailure::ExitTimeout
+                    | WorkerFailure::ExitStatus
+                    | WorkerFailure::Reader,
                 ) => {
                     self.fail_worker();
                     return Err(BackendError::Unavailable);
@@ -225,7 +229,11 @@ impl PamReauthBackend {
             self.conversation.disconnect();
             return Err(BackendError::Unavailable);
         };
-        if worker.finish().is_err() {
+        if let Err(failure) = worker.finish() {
+            eprintln!(
+                "Fomalhaut PAM worker terminal cleanup failed: {}",
+                failure.diagnostic()
+            );
             worker.terminate();
             self.conversation.disconnect();
             return Err(BackendError::Unavailable);
@@ -293,7 +301,23 @@ enum WorkerFailure {
     Timeout,
     Disconnected,
     Protocol,
-    Exit,
+    ExitTimeout,
+    ExitStatus,
+    Reader,
+}
+
+impl WorkerFailure {
+    const fn diagnostic(self) -> &'static str {
+        match self {
+            Self::Spawn => "spawn",
+            Self::Timeout => "message timeout",
+            Self::Disconnected => "IPC disconnected",
+            Self::Protocol => "IPC protocol",
+            Self::ExitTimeout => "exit timeout",
+            Self::ExitStatus => "non-zero or unavailable exit status",
+            Self::Reader => "reader thread",
+        }
+    }
 }
 
 trait WorkerFactory: Send {
@@ -397,26 +421,27 @@ impl ProcessWorker {
         let deadline = Instant::now() + WORKER_EXIT_TIMEOUT;
         let status = loop {
             let Some(child) = self.child.as_mut() else {
-                return Err(WorkerFailure::Exit);
+                return Err(WorkerFailure::ExitStatus);
             };
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => {
                     thread::sleep(WORKER_EXIT_POLL_INTERVAL);
                 }
-                Ok(None) | Err(_) => return Err(WorkerFailure::Exit),
+                Ok(None) => return Err(WorkerFailure::ExitTimeout),
+                Err(_) => return Err(WorkerFailure::ExitStatus),
             }
         };
         self.child.take();
         if let Some(reader) = self.reader.take()
             && reader.join().is_err()
         {
-            return Err(WorkerFailure::Exit);
+            return Err(WorkerFailure::Reader);
         }
         if status.success() {
             Ok(())
         } else {
-            Err(WorkerFailure::Exit)
+            Err(WorkerFailure::ExitStatus)
         }
     }
 }
@@ -609,7 +634,7 @@ mod tests {
             if self.terminal_seen {
                 Ok(())
             } else {
-                Err(WorkerFailure::Exit)
+                Err(WorkerFailure::ExitStatus)
             }
         }
 

@@ -139,6 +139,7 @@ fomalhaut/
 │   ├── fomalhaut-pam/        # 当前用户 reauth backend
 │   ├── fomalhaut-session/    # 可信 session discovery
 │   ├── fomalhaut-config/     # 共享严格配置
+│   ├── fomalhaut-logind/     # 共享非交互 logind 电源 backend
 │   ├── fomalhaut-web/        # 协议、主题与 controller
 │   ├── fomalhaut-gtk/        # 共享 GTK4/WebKitGTK host 能力
 │   ├── fomalhaut/            # greeter 可执行程序
@@ -288,7 +289,15 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
   不让 locker 读取 session 启动等无关权能。
 - 实现通用主题与 greeter/locker 角色覆盖的确定性选择。
 
-### 4.6 `fomalhaut-web`
+### 4.6 `fomalhaut-logind`
+
+- 封装 greeter 与 locker 共同使用的非交互 systemd-logind 电源 backend。
+- 将管理员 `PowerConfig` 与 logind `CanPowerOff`、`CanReboot`、`CanSuspend` 返回的 `yes`
+  求交集，并只执行 `PowerOff(false)`、`Reboot(false)`、`Suspend(false)`。
+- 实现 `fomalhaut-web` 定义的 `PowerControl` seam，但不依赖 GTK、greetd、PAM 或
+  session-lock；两个产品宿主不得各自复制一份 D-Bus 实现。
+
+### 4.7 `fomalhaut-web`
 
 - 从主题目录加载静态资源。
 - 实现自定义资源 scheme，例如 `fomalhaut://theme/`。
@@ -299,7 +308,7 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 该 crate 不包含正式产品主题。仓库中的 minimal theme 仅用于示例、开发和测试。
 它不依赖 GTK/WebKitGTK、`gtk4-session-lock`、greetd 或 PAM。
 
-### 4.7 `fomalhaut-gtk`
+### 4.8 `fomalhaut-gtk`
 
 - 共享 GTK4 application、WebKitGTK 6.0 `WebView`、资源 scheme、bridge 连接、
   安全 policy、页面 epoch 和 renderer 状态观测。
@@ -315,12 +324,13 @@ greetd worker 和“登录 session 已启动后退出”的策略仍由 `fomalha
 不依赖 greetd、PAM、配置解析或 session-lock binding。角色终态通过泛型 terminal action
 交回可执行程序处理，为 locker 后续独占 unlock handle 保留边界。
 
-### 4.8 `fomalhaut` 与 `fomalhaut-lock`
+### 4.9 `fomalhaut` 与 `fomalhaut-lock`
 
 `fomalhaut` 暂时保留现有 greeter 二进制名，组合 `LoginBackend`、session discovery、
 greeter controller 和普通 GTK 窗口，继续由 greetd/Cage 启动。
 
-`fomalhaut-lock` 组合 `ReauthBackend`、locker controller 和 `ext-session-lock-v1`。它运行在
+`fomalhaut-lock` 组合 `ReauthBackend`、共享 logind 电源 backend、locker controller 和
+`ext-session-lock-v1`。它运行在
 已登录的普通用户 Wayland session 中，不执行 session discovery、`StartSession` 或任意
 用户切换。只有该宿主持有 session-lock handle 并能最终解锁。
 
@@ -332,7 +342,21 @@ renderer 或单个页面故障会切换到不依赖 WebKit 的 GTK fallback，�
 `ViewId` 重建页面。自动化测试已覆盖多视图 watermark/事件路由、慢页面隔离与单次 native
 unlock；真实 compositor 的多输出、hotplug、scale 与异常释放仍须按 TODO 做系统验证。
 
-### 4.9 Host controller 与线程边界
+普通 PAM 拒绝（包括密码错误、账户策略拒绝和达到尝试次数）是可恢复的认证结果：controller
+必须保留 WebView，向主题发布 `auth.failed`、公开消息和可重试状态，不得切换可信 GTK
+fallback。只有 PAM worker 无法启动、IPC/协议损坏、终态进程无法在有界时间内干净退出、
+controller 不变量破坏或 renderer/theme 失效等基础设施故障才能进入可信 fallback。PAM worker
+向父进程发送 `Authenticated` 或 `Rejected` 后仍须完成 PAM context 清理；父进程以明确、足够的
+有界退出等待确认该终态，不得用过短的清理窗口把正常 PAM 结果稳定误判为 worker 崩溃。内部
+诊断只能记录超时、非零退出、IPC、协议等脱敏类别，不记录认证回答或原始 PAM description。
+
+locker 的 GTK application 在 PAM worker 预热、请求 session lock 和收到首个 `monitor` 之间
+允许暂时没有任何窗口。这是正常的异步启动阶段，不能依赖 GTK 的窗口引用隐式维持主循环。
+`activate` 必须在启动异步工作前取得 `ApplicationHoldGuard`，由 `LockHost` 持有到明确的失败
+退出或 compositor 确认授权释放；否则 `activate` 返回后的“零窗口、零 hold”会让 application
+以成功状态立即退出，controller 轮询和 session-lock 请求都不会发生。
+
+### 4.10 Host controller 与线程边界
 
 真实认证接入采用两层实现，保持 controller 可在无图形环境测试：
 
@@ -401,7 +425,7 @@ controller 保存的当前 core `PromptId` 比较，实际调用 core 时传回�
 greetd `Success` 后输出 session-started 终态。真实 Cage 退出与 greetd 接管不由 stub 结果
 替代，继续作为系统端到端验证项。
 
-### 4.10 Monorepo 版本与发布
+### 4.11 Monorepo 版本与发布
 
 Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包版本和发布：
 
@@ -461,7 +485,7 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 `version = "0.1.0-alpha"`。初始化完成后，正常版本变更必须交给 Semifold，不再手工修改
 版本号。
 
-### 4.11 Arch Linux 与 AUR 发布
+### 4.12 Arch Linux 与 AUR 发布
 
 Arch Linux 按两个一等产品和独立 Semifold 版本发布两个版本化 AUR 源码包，不使用 `-git` 或
 `-bin` 后缀：
@@ -478,6 +502,10 @@ AUR 自动发布直接消费同一次 `semifold ci` 的 `semifold-publish` schem
 tag、解析日志或再次请求 crates.io API。只有 apply 模式的 publish output 才能触发；version
 分支 output 不代表 package 已发布。对每个 AUR 包分别维护主 package 与会进入对应二进制的
 Rust 依赖集合：
+
+`fomalhaut-logind` 是两个主 package 的共同 Rust 依赖；其 Semifold publish 成功而任一主 package
+未发布时，对应的两个 AUR 包都按各自当前主版本增加 `pkgrel`。AUR resolver 的显式依赖集合必须
+同步包含该 package，不能只依赖 Cargo 构建时的传递发现。
 
 - publish output 显示主 package `succeeded` 时，使用其 SemVer 同步 `pkgver` 并重置
   `pkgrel=1`；恢复执行中 `skipped` 且 `skip-reason=registry-version-exists` 也可作为该版本已在
@@ -541,7 +569,7 @@ AUR 发布由可被 `Semifold CI` 调用、也可手动调度的 reusable GitHub
   不需要额外维护 known-hosts secret。workflow 不在日志中输出私钥，不代表用户在本地创建
   AUR package，也不绕过 AUR 的 maintainer 审核责任。
 
-### 4.12 源码工作区安装器
+### 4.13 源码工作区安装器
 
 仓库根目录提供可执行的 `install.sh`，用于开发机从当前 checkout 构建并安装 Fomalhaut 与
 React 参考主题。它不是 AUR/package manager 的替代品，也不参与发布版本计算；重复运行必须
@@ -582,8 +610,13 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
 - 安装器已通过同一个可验证 updater 将旧 `[frontend].path` 迁移为
   `[themes].default`，并独立保留管理员已有的 `[themes].greeter`/`locker`。迁移只删除
   仅含 `path` 的旧 `[frontend]` table；出现其他键时拒绝修改，避免丢失未知管理员配置。
-  新结构下仍在明确传入缩放参数或首次创建文件时维护
-  `[display].scale`。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
+  新结构下仍在明确传入缩放参数或首次创建文件时维护 `[display].scale`。安装器接受互斥的
+  两种缩放参数形式：`--display-scale SCALE` 写入 greeter/locker 共用的标量；
+  `--greeter-scale SCALE --locker-scale SCALE` 必须成对出现，并写入角色专用的
+  `scale.greeter`/`scale.locker` dotted keys。共享参数不得与任一角色参数混用，所有值都在写入前
+  使用与 Rust 配置相同的有限浮点数和 `0.5..=4.0` 边界校验。没有显式缩放参数时，升级必须保留
+  管理员现有的标量或角色表，不得在两种表示之间隐式迁移。首次创建配置且未传缩放参数时写入
+  共享 `scale = 1.0`。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
   `[power].actions = ["poweroff", "reboot", "suspend"]`，使标准源码安装立即提供经过 logind
   能力过滤的电源菜单；已有配置无论是缺少 `[power]`、显式空数组还是自定义 allowlist，都视为
   管理员策略并原样保留，重复安装和升级不得借机扩大权限。其他 section 和注释同样尽量原样
@@ -599,7 +632,7 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   连接 TTY 时启用，并遵守 `NO_COLOR`。重定向、管道和无颜色环境必须输出不含转义序列的纯文本，
   不得为了样式引入新的运行时工具依赖。
 
-### 4.13 用户发现与头像资源
+### 4.14 用户发现与头像资源
 
 用户发现是 Linux 宿主集成，不属于 greetd IPC core。首阶段在最终 `fomalhaut` crate 中以
 内部 provider trait 隔离系统来源，并把已经过滤、验证的公开摘要交给 `fomalhaut-web`
@@ -939,16 +972,19 @@ success/error 不变量。无法解析出请求 ID 的畸形 JSON 不生成一�
 公开状态快照的 greeter 分支保留经过过滤的用户摘要、session 摘要和当前选择的
 session ID。用户摘要只有用户名、显示名和可选的不透明头像 URL；session 摘要只有
 ID、显示名和 X11 / Wayland 类型。capability 由可信宿主按角色生成，主题不得
-仅根据 mode 自行假定能力存在。电源功能默认关闭；启用后，greeter 宿主通过系统
-D-Bus 查询 systemd-logind 的 `CanPowerOff`、`CanReboot` 和 `CanSuspend`。只有返回 `yes` 的
-动作才加入公开列表；`no`、`na`、`challenge`、D-Bus 不可用和查询失败都按不可用处理。
-Fomalhaut 不运行 Polkit agent，也不为 greeter 发起交互授权。
+仅根据 mode 自行假定能力存在。电源功能默认关闭；启用后，greeter 与 locker 都通过共享的
+`fomalhaut-logind` backend 在系统 D-Bus 查询 systemd-logind 的 `CanPowerOff`、`CanReboot` 和
+`CanSuspend`。只有返回 `yes` 的动作才加入公开列表；`no`、`na`、`challenge`、D-Bus 不可用和
+查询失败都按不可用处理。Fomalhaut 不运行 Polkit agent，也不为任一角色发起交互授权。
 
-收到已发布能力对应的请求时，controller 先取消仍在进行的 greetd 认证会话并清理 prompt，
-再通过 systemd-logind 的 `PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)` 执行动作。
-这里的 `false` 明确禁止 D-Bus 方法发起交互授权。电源后端故障不得使 greeter 启动失败：启动
-时退化为空 capability；请求与能力查询之间发生竞态时，调用失败只返回稳定、脱敏错误，不
-回退到 `systemctl`、shell 或任意命令执行。
+收到已发布能力对应的请求时，controller 先取消仍在进行的角色认证并清理 prompt：greeter
+取消 greetd session，locker 取消当前一次性 PAM transaction。随后通过 systemd-logind 的
+`PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)` 执行动作。这里的 `false` 明确禁止
+D-Bus 方法发起交互授权。locker 发起电源操作时不产生 unlock authorization，也不释放
+session-lock；尤其 suspend/resume 后必须仍由 compositor lock 覆盖，主题可以重新开始新的 PAM
+transaction。电源后端故障不得使 greeter 或 locker 启动失败：启动时退化为空 capability；
+请求与能力查询之间发生竞态时，调用失败只返回稳定、脱敏错误，不回退到 `systemctl`、shell
+或任意命令执行。
 
 v1 事件至少包含：
 
@@ -1410,6 +1446,19 @@ compositor-neutral 的唯一推荐启动入口；niri 快捷键使用 `spawn "sy
 locker 或集成只支持 Sway。挂起前必须等待命令成功，避免设备已挂起但 session 尚未锁定的竞态。
 直接启动二进制时没有 systemd readiness 消费者，进程仍保持前台直到授权解锁。
 
+locker 的 PAM stack 可能按发行版策略执行已有的特权校验 helper；当前 Arch
+`pam_unix.so` 会透明调用 setuid `unix_chkpwd` 读取受保护的密码数据库。因此 user unit 不得设置
+`NoNewPrivileges=yes`，该选项会通过 `execve` 阻止 helper 获得其文件授予的身份并使正确密码也
+无法验证。unit 显式保留 `NoNewPrivileges=no`，同时继续使用 `LockPersonality=yes` 和
+`RestrictSUIDSGID=yes`；后者只禁止进程创建新的 SUID/SGID 文件，不阻止 PAM 执行管理员已安装的
+helper。Fomalhaut 自身二进制仍无 setuid bit、不直接读取 shadow，也不实现 PAM 之外的提权或
+认证 fallback。
+
+该 user unit 还必须使用 `UnsetEnvironment=GDK_SCALE GDK_DPI_SCALE` 清除 user manager 可能继承的
+工具包缩放变量。locker 的基础输出缩放由现有 compositor/GTK 负责，额外 WebKit zoom 只来自
+`[display].scale` 的 locker 值，避免 shell 或桌面环境变量与角色配置重复叠加。该清理只影响
+locker 服务进程，不修改用户会话的全局环境。
+
 首阶段 locker 只承诺兼容选定的 `ext-session-lock-v1` compositor。X11 和由桌面环境
 内建、不允许第三方 session-lock client 的平台属于显式兼容性边界，不宣称支持。
 
@@ -1438,7 +1487,9 @@ locker 或集成只支持 Sway。挂起前必须等待命令成功，避免设�
 ### 11.2 必须实施的防护
 
 - greeter 只以专用低权限 `greeter` 用户运行；locker 只以当前普通 session
-  用户运行。两者都不安装 setuid bit，不自行读取 `/etc/shadow`。
+  用户运行。两者都不安装 setuid bit，不自行读取 `/etc/shadow`；locker 允许系统 PAM stack
+  按管理员策略执行发行版已有的 `unix_chkpwd` 等 helper，因此不得用 `NoNewPrivileges` 破坏
+  PAM 的既有权限模型。
 - 正式模式不监听 TCP。
 - 不把 greetd socket、PAM worker 通道或未来 daemon IPC 暴露给前端。
 - locker 用系统 UID/账户数据 API 获取当前真实 UID 和对应账户，不从主题、
@@ -1512,6 +1563,14 @@ actions = ["poweroff", "reboot", "suspend"]
 scale = 1.5
 ```
 
+需要让两个角色使用不同 WebKit zoom 时，`scale` 改用 TOML dotted-key table 形式：
+
+```toml
+[display]
+scale.greeter = 1.5
+scale.locker = 1.0
+```
+
 - `themes` 中的每个字段都是可选绝对主题目录；选择顺序是角色专用、
   `default`、内嵌 minimal theme。入口和协议版本由目录内必需的 `theme.toml`
   决定，避免配置与清单出现两个互相冲突的入口来源。旧 `[frontend].path`
@@ -1524,10 +1583,18 @@ scale = 1.5
   顺序，宿主固定按 poweroff、reboot、suspend 排列，并与 logind 当前返回 `yes` 的动作求交集。
   这是运行时和非标准部署的 fail-closed 默认；标准源码安装器首次创建配置时显式写入全部三个
   动作，后续升级不改写既有电源策略。
-- `display` 缺失时页面缩放倍率为 `1.0`。`scale` 是应用于 WebKit `zoom-level` 的有限浮点数，
-  允许范围为 `0.5..=4.0`；它缩放整个主题页面内容并支持小数倍率，不负责 Cage 光标大小，
-  也不尝试从不可靠的 EDID 物理尺寸自动推断 DPI。管理员应按照 greeter 所在输出显式配置，
-  例如与桌面环境的 `1.5` 倍缩放保持一致。
+- `display` 缺失时 greeter/locker 页面缩放倍率都为 `1.0`。`scale` 是严格的 untagged union：
+  可以是同时应用于两个角色的单个有限浮点数，也可以是只包含 `greeter`、`locker` 且两者都
+  必须出现的 table；dotted keys 与等价的 `[display.scale]` table 语法均由 TOML 解析器处理。
+  标量与 table 不能混用，角色 table 不允许缺项或未知字段。每个倍率都必须在
+  `0.5..=4.0`，语义校验后立即收敛为内部固定的 `greeter`/`locker` 两个值，不把 union 分支传播
+  到 host。该倍率只应用于 WebKit `zoom-level`，不负责 Cage 光标大小，也不尝试从不可靠的 EDID
+  物理尺寸自动推断 DPI。
+- greeter 的独立 Cage 通常不继承桌面输出缩放，因此可使用 `1.5` 等显式页面 zoom；locker
+  已运行在 niri 等现有 compositor 的逻辑坐标和输出缩放内，通常使用 `1.0`，避免把 compositor
+  scale 与 WebKit zoom 叠加。推荐 systemd user unit 必须清除从 manager 环境继承的
+  `GDK_SCALE`/`GDK_DPI_SCALE`，让角色配置成为唯一的额外页面缩放来源；直接运行二进制时，用户
+  同样不得额外设置这两个变量。
 - 首个切片不加入可配置网络、CSP、开发者工具或任意 header。安全策略仍是编译期拒绝式常量，
   避免把主题配置扩展成降低宿主边界的权限开关。
 - 日志目标和记忆用户/session 继续留作后续字段；在实现前未知字段会被拒绝，不能

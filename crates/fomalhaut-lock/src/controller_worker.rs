@@ -10,8 +10,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use fomalhaut_config::PowerConfig;
 use fomalhaut_core::ReauthBackend;
 use fomalhaut_gtk::{BridgeController, ControllerBatch, ControllerOutput, SubmitError};
+use fomalhaut_logind::LogindPowerControl;
 use fomalhaut_pam::{CurrentUserIdentity, PamReauthBackend};
 use fomalhaut_web::{
     bridge::event_dispatch_script,
@@ -110,12 +112,13 @@ impl WorkerHandle {
     /// Starts the controller thread and prepares its first one-shot PAM worker.
     pub fn spawn(
         identity: CurrentUserIdentity,
+        power: PowerConfig,
     ) -> Result<(Rc<Self>, Receiver<NativeEvent>), WorkerSpawnError> {
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_CAPACITY);
         let (native_sender, native_receiver) = mpsc::sync_channel(NATIVE_OUTPUT_CAPACITY);
         let thread = thread::Builder::new()
             .name("fomalhaut-lock-controller".to_owned())
-            .spawn(move || run_worker(identity, command_receiver, native_sender))
+            .spawn(move || run_worker(identity, power, command_receiver, native_sender))
             .map_err(WorkerSpawnError)?;
         Ok((
             Rc::new(Self {
@@ -250,6 +253,7 @@ fn map_try_send<T>(result: Result<(), TrySendError<T>>) -> Result<(), SubmitErro
 
 fn run_worker(
     identity: CurrentUserIdentity,
+    power_config: PowerConfig,
     commands: Receiver<WorkerCommand>,
     native: SyncSender<NativeEvent>,
 ) {
@@ -284,7 +288,8 @@ fn run_worker(
             return;
         }
     };
-    let mut controller = LockerController::new(backend, identity);
+    let power = LogindPowerControl::discover(&power_config);
+    let mut controller = LockerController::with_power_control(backend, identity, power);
     let mut views = HashMap::new();
     if native.send(NativeEvent::BackendReady).is_err() {
         return;

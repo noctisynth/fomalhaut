@@ -77,6 +77,19 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
 不替代真实 PAM module fixture、niri/第二种 compositor、多输出 hotplug/scale 和 suspend 验证，
 这些事项继续保持未完成。
 
+同日在当前 niri 设备首次安装试运行后发现两个启动阻塞：locker 在 PAM worker 预热和首个
+monitor surface 之间没有窗口，也未持有 GTK application，导致 `activate` 返回后无输出地立即
+退出；systemd user unit 的 `NoNewPrivileges=yes` 又会阻止 Arch `pam_unix` 执行其 setuid
+`unix_chkpwd` helper。设计已明确 application hold 与 PAM 权限边界；在下列修复、重装和真实
+锁定/解锁验证完成前，不把当前设备部署标记为可用。
+
+完成 application hold 与 unit 权限修复后的首轮真实 niri 锁屏已经能创建 session-lock surface，
+但进一步暴露三个集成差异：niri 输出自身为 `1.5` scale，而 locker 又复用 greeter 的 WebKit
+`1.5` zoom，导致重复缩放；locker 尚未接入配置中已有的电源 allowlist/logind backend；PAM
+交互终态进入了可信 GTK fallback，而没有作为普通认证失败留在 Nocturne 页面。设计已补充严格的
+共享/分角色 scale union、安装器参数、共享 `fomalhaut-logind` crate、locker 电源状态边界和 PAM
+拒绝/fatal 分类。下列实现和再次实机验证完成前仍不提交“当前设备可用”的结论。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -106,6 +119,9 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
       greetd transport/type。
 - [x] 让 `fomalhaut-lock` 只组合 reauth/session-lock 权能；两个宿主不得通过运行时布尔开关
       共享越权 API。
+- [x] 用 Cargo CLI 创建可发布的 `fomalhaut-logind` crate，把 greeter 私有的非交互 D-Bus
+      电源 backend 迁入该 crate，并让 greeter/locker 共同依赖同一实现；同步 crates.io metadata、
+      Semifold package/channel、CI、两个 AUR dependency set 和 changeset。
 - [x] 用 Semifold CLI 同步新增 Rust package 列表并把 release channel 全部设置为 `alpha`。
 - [x] 用 `smif commit` 为首个 backend-neutral/greetd 迁移切片建立联合 changeset，覆盖
       `fomalhaut-core`、`fomalhaut-greetd`、`fomalhaut-web` 和 `fomalhaut`。
@@ -292,6 +308,8 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
       hotplug、scale 和输出移除，不复用已绑定或已销毁窗口。
 - [x] 只在收到 `locked` 后发出 readiness；认证成功后由 host 执行 unlock，
       完成 Wayland/GDK roundtrip 后才退出。
+- [x] 在异步 PAM 预热、请求 lock 和首个 monitor window 建立前持有 GTK
+      `ApplicationHoldGuard`，覆盖零窗口启动回归，避免 `activate` 返回后静默成功退出。
 
 ### 当前用户 PAM 重新认证
 
@@ -305,6 +323,9 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
       最多一个待回答 prompt，并覆盖乱序、重复、未知和超限消息。
 - [x] 实现取消、超时、IPC 断开、panic 和异常退出的 fail-closed 语义；终止并回收旧
       worker，保持 session lock，丢弃未消费回答，不向新 transaction 重放。
+- [x] 区分普通 PAM `Rejected` 与 worker/IPC/协议/终态退出故障：密码或账户策略拒绝必须保留
+      WebView、发布 `auth.failed` 并允许新 transaction；基础设施故障才进入可信 GTK fallback。
+      为 PAM context 清理提供足够且有界的终态等待，并覆盖超时、非零退出和正常拒绝回归。
 - [x] 清零 Rust 可控的 secret 缓冲区并审计所有日志/错误/IPC 生命周期；记录
       `pam-client`/PAM module 内部副本无法验证即时清零的限制，以一次性 worker 限制其
       生命周期，但不得声称已消除此风险。
@@ -322,9 +343,18 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
       `PageEpoch`，每个页面通过快照 watermark 与后续 sequence 初始化。
 - [x] 让 minimal theme 和 React/Nocturne 在 locker mode 展示当前 identity、多轮 prompt、
       message、busy 和 lock lifecycle，不展示用户/session 切换；popup 只使用页面内组件。
+- [x] 将 `[display].scale` 扩展为“共享有限浮点数”或“同时包含 greeter/locker 的严格 table”
+      union，验证 dotted-key 语法、互斥/缺项/未知字段和两侧边界；当前 niri 部署使用 greeter
+      `1.5`、locker `1.0`，systemd unit 清除继承的 `GDK_SCALE`/`GDK_DPI_SCALE`。
+- [x] 让 `LockerController` 接收共享 `PowerControl`，按 capability 处理 `power.request`；请求前
+      取消当前 PAM transaction，但不生成 unlock authorization、不释放 session lock，覆盖
+      suspend/resume 保持锁定所需的 controller/主题行为。
 - [x] 实现并由隔离测试验证 `Type=notify` readiness 与 compositor-neutral systemd user unit；
       locker 保持前台、不自行 fork，且只在 compositor `locked` 与 controller
       `lock.acquired` 后通过 `NOTIFY_SOCKET` 发出 readiness。
+- [ ] 将 user unit 改为显式 `NoNewPrivileges=no`，允许受信任系统 PAM stack 执行 Arch
+      `pam_unix` 所需的 setuid `unix_chkpwd`，同时保留 `LockPersonality`、
+      `RestrictSUIDSGID` 和一次性 worker 边界；在真实密码验证后才能标记完成。
 - [x] 提供并用 niri 26.04 配置验证器验证 niri KDL 快捷键和通用 swayidle
       timeout/lock/before-sleep 示例，明确
       swayidle 可在 niri 等 Wayland compositor 上运行，不把 locker 设计为 Sway 专用。
@@ -344,7 +374,7 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
 - [x] 从 `GREETD_SOCK` 建立 core 连接。
 - [x] 把 core event 转换成公开状态和有序前端事件。
 - [x] 把 `state.get`、`auth.begin`、`auth.respond` 和 `auth.cancel` 转换成经过状态检查的 core
-      调用，并继续禁用 power 请求。
+      调用；greeter 电源请求已在后续 capability 切片接入。
 - [x] 使用不受环境变量影响的默认目录发现 session，拒绝空 catalog 和目录级错误。
 - [x] 将 catalog 转换为 controller 内部的公开摘要与可信 `SessionCommand`，默认选择稳定
       顺序中的第一项。
@@ -592,8 +622,8 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
       覆盖损坏入口、非法清单和协议版本不匹配。
 - [ ] 测试 greeter 在 Cage 中的多显示器和高 DPI 基本行为；locker 的每输出
       lock surface、hotplug 和 scale 测试已拆入 P1/P2 locker 专项。
-- [x] 实现严格的 `[display].scale` 配置并应用 WebKit 页面 zoom，覆盖默认值、小数倍率和非法
-      浮点/边界测试；光标缩放继续由 Cage 管理。
+- [x] 实现初始严格标量 `[display].scale` 并应用 WebKit 页面 zoom，覆盖默认值、小数倍率和非法
+      浮点/边界测试；角色 union 扩展及 niri 重复缩放修复随后已在 P1 完成。
 - [ ] 测试非 ASCII 用户名、prompt 和 session 名称。
 - [x] 建立依赖和 Rust stable 滚动更新策略。
 
@@ -619,6 +649,9 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
 - [x] 让源码安装器达到内容级幂等：连续相同安装不新增二进制/配置备份或主题 release。
 - [x] 让源码安装器首次创建 Fomalhaut 配置时默认允许 poweroff、reboot 和 suspend，并验证原地
       更新保留缺失、显式关闭或自定义的既有电源策略。
+- [x] 更新源码安装器缩放参数：保留 `--display-scale` 写共享标量，新增必须成对使用的
+      `--greeter-scale`/`--locker-scale` 写角色 dotted keys，三者互斥并共用 Rust 的数值边界；
+      隔离测试覆盖首次创建、标量/角色互换、无参数保留和重复安装幂等。
 - [x] 为源码安装器添加遵守 TTY 与 `NO_COLOR` 的分级彩色输出。
 - [ ] 确定 greetd、WebKitGTK、Cage、PAM 和 `gtk4-layer-shell` 的最低版本；GTK 编译
       基线已是 4.18，locker 的 layer-shell 能力基线是 1.2+，Rust 继续跟随 stable，
@@ -639,11 +672,13 @@ Semifold CLI 已创建覆盖 `fomalhaut-pam`、`fomalhaut-lock`、`fomalhaut-gtk
       0BSD，并明确其不重新许可上游软件。
 - [x] 将 `semifold ci` step/job 接入 schema v1 `semifold-version`/`semifold-publish` output；
       AUR 自动流程只消费 publish output，不再扫描 tag 或 curl crates.io API。
-- [x] 实现并用 10 个 fixture 与真实 AUR RPC 验证 AUR 版本决策：主 package 发布时同步
+- [x] 实现并用 11 个 fixture 与真实 AUR RPC 验证 AUR 版本决策：主 package 发布时同步
       `pkgver`/重置 `pkgrel=1`，仅对应依赖 package
       本次 `succeeded` 时保持 `pkgver` 并递增 AUR 当前 `pkgrel`；普通
       `registry-version-exists` dependency skip 不得误触发重建，未知 schema/status/版本一律
       fail closed。
+- [x] 将共享 `fomalhaut-logind` 加入两个 AUR 包的显式 Semifold dependency set，并扩展 resolver
+      fixture，验证仅该 dependency 发布时两个包各自增加 `pkgrel`。
 - [x] 让自动与手动 AUR run 共享单一非取消 concurrency group，在每次实际执行时重新读取当前
       AUR 版本，避免两个 run 并发计算并推送相同 `pkgrel`。
 - [ ] 在干净 Arch 环境分别完成不可变 source archive 校验、frozen 构建、目标测试、`.SRCINFO`

@@ -28,7 +28,7 @@ pub struct AppConfig {
     discovery: DiscoveryConfig,
     users: UserDiscoveryConfig,
     power: PowerConfig,
-    display: DisplayConfig,
+    display: RoleDisplayConfig,
     uses_legacy_frontend: bool,
 }
 
@@ -46,7 +46,7 @@ impl AppConfig {
             discovery: self.discovery.clone(),
             users: self.users,
             power: self.power.clone(),
-            display: self.display,
+            display: self.display.greeter,
         }
     }
 
@@ -56,7 +56,7 @@ impl AppConfig {
         LockerConfig {
             theme_directory: self.themes.for_locker(),
             power: self.power.clone(),
-            display: self.display,
+            display: self.display.locker,
         }
     }
 
@@ -160,6 +160,12 @@ impl DisplayConfig {
     pub const fn scale(self) -> f64 {
         self.scale
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct RoleDisplayConfig {
+    greeter: DisplayConfig,
+    locker: DisplayConfig,
 }
 
 /// Power operation accepted by the strict system configuration.
@@ -277,7 +283,21 @@ struct RawPower {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawDisplay {
-    scale: Option<f64>,
+    scale: Option<RawDisplayScale>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawDisplayScale {
+    Shared(f64),
+    Roles(RawRoleDisplayScale),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRoleDisplayScale {
+    greeter: f64,
+    locker: f64,
 }
 
 /// Sanitized system configuration failure.
@@ -416,14 +436,23 @@ fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
         .filter(|action| configured_power.contains(action))
         .collect(),
     };
-    let display_scale = raw.display.unwrap_or_default().scale.unwrap_or(1.0);
-    if !display_scale.is_finite()
-        || !(MIN_DISPLAY_SCALE..=MAX_DISPLAY_SCALE).contains(&display_scale)
-    {
+    let (greeter_scale, locker_scale) = match raw.display.unwrap_or_default().scale {
+        None => (1.0, 1.0),
+        Some(RawDisplayScale::Shared(scale)) => (scale, scale),
+        Some(RawDisplayScale::Roles(roles)) => (roles.greeter, roles.locker),
+    };
+    let valid_scale =
+        |scale: f64| scale.is_finite() && (MIN_DISPLAY_SCALE..=MAX_DISPLAY_SCALE).contains(&scale);
+    if !valid_scale(greeter_scale) || !valid_scale(locker_scale) {
         return Err(ConfigError::InvalidDisplayScale);
     }
-    let display = DisplayConfig {
-        scale: display_scale,
+    let display = RoleDisplayConfig {
+        greeter: DisplayConfig {
+            scale: greeter_scale,
+        },
+        locker: DisplayConfig {
+            scale: locker_scale,
+        },
     };
     Ok(AppConfig {
         themes,
@@ -647,12 +676,52 @@ mod tests {
         .expect("fractional display scale is within bounds");
         let (_, _, _, _, display) = config.for_greeter().into_parts();
         assert_eq!(display.scale(), 1.5);
+        assert_eq!(config.for_locker().display().scale(), 1.5);
+
+        let roles = parse(
+            r#"
+                [display]
+                scale.greeter = 1.5
+                scale.locker = 1.0
+            "#,
+        )
+        .expect("role-specific display scales are valid dotted keys");
+        let (_, _, _, _, greeter_display) = roles.for_greeter().into_parts();
+        assert_eq!(greeter_display.scale(), 1.5);
+        assert_eq!(roles.for_locker().display().scale(), 1.0);
+
+        let role_table = parse(
+            r#"
+                [display.scale]
+                greeter = 2.0
+                locker = 1.25
+            "#,
+        )
+        .expect("an explicit role scale table is equivalent to dotted keys");
+        let (_, _, _, _, greeter_display) = role_table.for_greeter().into_parts();
+        assert_eq!(greeter_display.scale(), 2.0);
+        assert_eq!(role_table.for_locker().display().scale(), 1.25);
 
         for scale in ["0.49", "4.01", "nan", "+inf", "-inf"] {
             assert_eq!(
                 parse(&format!("[display]\nscale = {scale}\n")).err(),
                 Some(ConfigError::InvalidDisplayScale)
             );
+            assert_eq!(
+                parse(&format!(
+                    "[display]\nscale.greeter = 1.0\nscale.locker = {scale}\n"
+                ))
+                .err(),
+                Some(ConfigError::InvalidDisplayScale)
+            );
+        }
+
+        for invalid in [
+            "[display]\nscale.greeter = 1.5\n",
+            "[display]\nscale.greeter = 1.5\nscale.locker = 1.0\nscale.other = 1.0\n",
+            "[display]\nscale = 1.5\nscale.greeter = 1.5\n",
+        ] {
+            assert_eq!(parse(invalid).err(), Some(ConfigError::Parse));
         }
     }
 

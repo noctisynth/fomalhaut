@@ -636,18 +636,30 @@ pub struct LockerController<B> {
     auth: AuthPublicState,
     lock: LockState,
     identity: IdentitySummary,
+    power: Box<dyn PowerControl>,
 }
 
 impl<B: ReauthBackend> LockerController<B> {
     /// Wraps a connected current-user reauthentication backend and trusted identity summary.
     #[must_use]
     pub fn new(client: B, identity: IdentitySummary) -> Self {
+        Self::with_power_control(client, identity, DisabledPowerControl)
+    }
+
+    /// Wraps reauthentication with trusted identity and a host power backend.
+    #[must_use]
+    pub fn with_power_control(
+        client: B,
+        identity: IdentitySummary,
+        power: impl PowerControl + 'static,
+    ) -> Self {
         let auth = AuthPublicState::new(client.state());
         Self {
             client,
             auth,
             lock: LockState::Acquiring,
             identity,
+            power: Box::new(power),
         }
     }
 
@@ -660,7 +672,7 @@ impl<B: ReauthBackend> LockerController<B> {
             self.auth.messages.iter().cloned().collect(),
             self.auth.sequences.watermark(),
             self.identity.clone(),
-            Capabilities::disabled(),
+            self.power.capabilities(),
         )
         .map_err(|_| ControllerError::new("the controller public state is invalid"))
     }
@@ -837,15 +849,42 @@ impl<B: ReauthBackend> LockerController<B> {
                 self.client.cancel().await.map_err(protocol_error)?;
                 Ok(Vec::new())
             }
-            FrontendRequest::SessionSelect(_) | FrontendRequest::PowerRequest(_) => {
-                Err(ProtocolErrorBody::new(
-                    ProtocolErrorCode::MethodDisabled,
-                    "the method is disabled for the locker mode",
-                    false,
-                ))
-            }
+            FrontendRequest::PowerRequest(params) => self.request_power(params.action()).await,
+            FrontendRequest::SessionSelect(_) => Err(ProtocolErrorBody::new(
+                ProtocolErrorCode::MethodDisabled,
+                "the method is disabled for the locker mode",
+                false,
+            )),
             FrontendRequest::StateGet(_) => Ok(Vec::new()),
         }
+    }
+
+    async fn request_power(
+        &mut self,
+        action: PowerAction,
+    ) -> Result<Vec<Event>, ProtocolErrorBody> {
+        if !self.power.capabilities().power().contains(&action) {
+            return Err(ProtocolErrorBody::new(
+                ProtocolErrorCode::MethodDisabled,
+                "the requested power operation is disabled",
+                false,
+            ));
+        }
+        self.cancel_for_lifecycle().await.map_err(|_| {
+            ProtocolErrorBody::new(
+                ProtocolErrorCode::Internal,
+                "authentication could not be cancelled before the power operation",
+                true,
+            )
+        })?;
+        self.power.request(action).map_err(|_| {
+            ProtocolErrorBody::new(
+                ProtocolErrorCode::Internal,
+                "the power service could not complete the operation",
+                true,
+            )
+        })?;
+        Ok(Vec::new())
     }
 }
 
@@ -1648,6 +1687,56 @@ mod tests {
         let (response, events) = session.into_parts();
         assert_eq!(json(response)["error"]["code"], "method_disabled");
         assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn locker_power_cancels_reauth_without_authorizing_unlock() {
+        let client = ScriptedReauthBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Password:".to_owned(),
+            },
+            ScriptStep::Success,
+        ]);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let power = RecordingPower {
+            capabilities: Capabilities::with_power(&[PowerAction::Suspend]),
+            calls: Arc::clone(&calls),
+            succeeds: true,
+        };
+        let mut controller = LockerController::with_power_control(client, locker_identity(), power);
+        controller
+            .mark_lock_acquired()
+            .expect("the compositor confirms the lock");
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":40,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("locker authentication starts");
+
+        let mut suspended = controller
+            .handle(request(
+                r#"{"protocol":1,"id":41,"method":"power.request","params":{"action":"suspend"}}"#,
+            ))
+            .await
+            .expect("advertised locker power is handled");
+        assert!(suspended.take_unlock_authorization().is_none());
+        let (response, events) = suspended.into_parts();
+        assert!(json(response)["ok"].as_bool().is_some_and(|ok| ok));
+        assert_eq!(json(events)[0]["data"]["state"], "idle");
+        assert_eq!(
+            *calls.lock().expect("recording power mutex is not poisoned"),
+            [PowerAction::Suspend]
+        );
+        let snapshot = json(
+            controller
+                .snapshot()
+                .expect("locker snapshot remains valid"),
+        );
+        assert_eq!(snapshot["lock"], "locked");
+        assert_eq!(snapshot["authentication"], "idle");
+        assert_eq!(snapshot["capabilities"]["power"][0], "suspend");
     }
 
     #[tokio::test]

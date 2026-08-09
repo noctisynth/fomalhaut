@@ -10,6 +10,8 @@ NotifyAccess=main
 ExecStart=@FOMALHAUT_LOCK@
 TimeoutStartSec=0
 Restart=no
-NoNewPrivileges=yes
+UnsetEnvironment=GDK_SCALE GDK_DPI_SCALE
+# The configured PAM stack may execute a privileged unix_chkpwd-style helper.
+NoNewPrivileges=no
 LockPersonality=yes
 RestrictSUIDSGID=yes

@@ -1,8 +1,10 @@
 use std::{
+    cell::RefCell,
     error::Error,
     ffi::{CStr, CString},
     fmt,
     io::{BufReader, BufWriter, Read, Write},
+    rc::Rc,
 };
 
 use pam_client::{Context, ConversationHandler, ErrorCode, Flag};
@@ -56,48 +58,49 @@ fn run_pam_worker_with<R: Read, W: Write>(mut reader: R, writer: W) -> Result<()
     else {
         return Err(PamWorkerError::StartupProtocol);
     };
-    let conversation = WorkerConversation::new(reader, writer);
+    let writer = Rc::new(RefCell::new(writer));
+    let conversation = WorkerConversation::new(reader, Rc::clone(&writer));
     let mut context = Context::new(PAM_SERVICE, Some(&username), conversation)
         .map_err(|_| PamWorkerError::Pam)?;
     context
         .conversation_mut()
         .send(&WorkerMessage::Ready)
         .map_err(|_| PamWorkerError::Ipc)?;
-    context
-        .conversation_mut()
-        .wait_for_begin()
-        .map_err(|_| PamWorkerError::StartupProtocol)?;
+    let outcome = match context.conversation_mut().wait_for_begin() {
+        Ok(()) => authenticate(&mut context),
+        Err(_) => PamOutcome::Fatal(PamWorkerError::StartupProtocol),
+    };
+    drop(context);
 
-    if let Err(error) = context.authenticate(Flag::NONE) {
-        return finish_pam_error(&mut context, error.code());
-    }
-    if context.conversation().failed() {
-        context
-            .conversation_mut()
-            .send(&WorkerMessage::Fatal)
-            .map_err(|_| PamWorkerError::Ipc)?;
-        return Err(PamWorkerError::Ipc);
-    }
-    if let Err(error) = context.acct_mgmt(Flag::NONE) {
-        return finish_pam_error(&mut context, error.code());
-    }
-    if context.conversation().failed() {
-        context
-            .conversation_mut()
-            .send(&WorkerMessage::Fatal)
-            .map_err(|_| PamWorkerError::Ipc)?;
-        return Err(PamWorkerError::Ipc);
-    }
-    context
-        .conversation_mut()
-        .send(&WorkerMessage::Authenticated)
-        .map_err(|_| PamWorkerError::Ipc)
+    let message = outcome.message();
+    let mut writer = writer.try_borrow_mut().map_err(|_| PamWorkerError::Ipc)?;
+    write_worker_message(&mut *writer, &message).map_err(|_| PamWorkerError::Ipc)?;
+    outcome.result()
 }
 
-fn finish_pam_error<R: Read, W: Write>(
-    context: &mut Context<WorkerConversation<R, W>>,
+fn authenticate<R: Read, W: Write>(context: &mut Context<WorkerConversation<R, W>>) -> PamOutcome {
+    if let Err(error) = context.authenticate(Flag::NONE) {
+        return pam_error_outcome(context, error.code());
+    }
+    if context.conversation().failed() {
+        return PamOutcome::Fatal(PamWorkerError::Ipc);
+    }
+    if let Err(error) = context.acct_mgmt(Flag::NONE) {
+        return pam_error_outcome(context, error.code());
+    }
+    if context.conversation().failed() {
+        return PamOutcome::Fatal(PamWorkerError::Ipc);
+    }
+    PamOutcome::Authenticated
+}
+
+fn pam_error_outcome<R: Read, W: Write>(
+    context: &Context<WorkerConversation<R, W>>,
     code: ErrorCode,
-) -> Result<(), PamWorkerError> {
+) -> PamOutcome {
+    if context.conversation().failed() {
+        return PamOutcome::Fatal(PamWorkerError::Ipc);
+    }
     let rejected = matches!(
         code,
         ErrorCode::PERM_DENIED
@@ -109,32 +112,47 @@ fn finish_pam_error<R: Read, W: Write>(
             | ErrorCode::ACCT_EXPIRED
             | ErrorCode::AUTHTOK_EXPIRED
     );
-    let message = if rejected {
-        WorkerMessage::Rejected
-    } else {
-        WorkerMessage::Fatal
-    };
-    context
-        .conversation_mut()
-        .send(&message)
-        .map_err(|_| PamWorkerError::Ipc)?;
     if rejected {
-        Ok(())
+        PamOutcome::Rejected
     } else {
-        Err(PamWorkerError::Pam)
+        PamOutcome::Fatal(PamWorkerError::Pam)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PamOutcome {
+    Authenticated,
+    Rejected,
+    Fatal(PamWorkerError),
+}
+
+impl PamOutcome {
+    const fn message(self) -> WorkerMessage {
+        match self {
+            Self::Authenticated => WorkerMessage::Authenticated,
+            Self::Rejected => WorkerMessage::Rejected,
+            Self::Fatal(_) => WorkerMessage::Fatal,
+        }
+    }
+
+    const fn result(self) -> Result<(), PamWorkerError> {
+        match self {
+            Self::Authenticated | Self::Rejected => Ok(()),
+            Self::Fatal(error) => Err(error),
+        }
     }
 }
 
 struct WorkerConversation<R, W> {
     reader: R,
-    writer: W,
+    writer: Rc<RefCell<W>>,
     next_prompt: u64,
     frames: usize,
     failed: bool,
 }
 
 impl<R: Read, W: Write> WorkerConversation<R, W> {
-    const fn new(reader: R, writer: W) -> Self {
+    const fn new(reader: R, writer: Rc<RefCell<W>>) -> Self {
         Self {
             reader,
             writer,
@@ -158,7 +176,8 @@ impl<R: Read, W: Write> WorkerConversation<R, W> {
 
     fn send(&mut self, message: &WorkerMessage) -> Result<(), IpcError> {
         self.count_frame()?;
-        write_worker_message(&mut self.writer, message)
+        let mut writer = self.writer.try_borrow_mut().map_err(|_| IpcError::Io)?;
+        write_worker_message(&mut *writer, message)
     }
 
     fn prompt(&mut self, prompt: &CStr, kind: WorkerPromptKind) -> Result<CString, ErrorCode> {
@@ -253,7 +272,7 @@ impl<R: Read, W: Write> ConversationHandler for WorkerConversation<R, W> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::{cell::RefCell, io::Cursor, rc::Rc};
 
     use pam_client::ConversationHandler;
 
@@ -274,13 +293,14 @@ mod tests {
             },
         )
         .expect("test answer can be encoded");
-        let mut conversation = WorkerConversation::new(Cursor::new(input), Vec::new());
+        let writer = Rc::new(RefCell::new(Vec::new()));
+        let mut conversation = WorkerConversation::new(Cursor::new(input), Rc::clone(&writer));
         let response = conversation
             .prompt_echo_off(c"Password:")
             .expect("matching answer is accepted");
         assert_eq!(response.as_bytes(), b"secret");
         assert_eq!(
-            read_worker_message(&mut Cursor::new(conversation.writer)),
+            read_worker_message(&mut Cursor::new(writer.borrow().as_slice())),
             Ok(WorkerMessage::Prompt {
                 prompt: 1,
                 kind: WorkerPromptKind::Secret,
@@ -300,7 +320,8 @@ mod tests {
             },
         )
         .expect("test answer can be encoded");
-        let mut conversation = WorkerConversation::new(Cursor::new(input), Vec::new());
+        let writer = Rc::new(RefCell::new(Vec::new()));
+        let mut conversation = WorkerConversation::new(Cursor::new(input), writer);
         assert!(conversation.prompt_echo_off(c"Password:").is_err());
         assert!(conversation.failed());
     }
