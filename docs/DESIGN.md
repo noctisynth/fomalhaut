@@ -2,27 +2,39 @@
 
 ## 1. 项目概述
 
-Fomalhaut（北落师门）是一个基于
-[greetd](https://git.sr.ht/~kennylevinsen/greetd) 的 Web 渲染登录界面
-（greeter）。
+Fomalhaut（北落师门）是一套使用 Web 技术呈现本机认证界面的 Rust 项目。登录界面
+（greeter）和会话锁屏（locker）是两个同等重要、独立交付的产品角色；两者共享认证领域
+模型、前端协议、主题资源策略、TypeScript SDK 以及 GTK4 + WebKitGTK 6.0 宿主能力，但拥有
+不同的可信后端和系统生命周期。
 
-Fomalhaut 不负责直接调用 PAM，也不重新实现用户会话管理。认证和会话启动仍由
-greetd 完成。Fomalhaut 通过 greetd IPC 驱动认证流程，在本地 WebView 中呈现界面，
-并允许管理员或主题作者自行提供 HTML、CSS 和 JavaScript 前端。
+当前 greeter 继续以 [greetd](https://git.sr.ht/~kennylevinsen/greetd) 作为登录认证与用户
+session 管理后端，通过 greetd IPC 驱动认证和 `StartSession`。locker 运行在已经登录的用户
+Wayland session 中，通过 `ext-session-lock-v1` 持有 compositor 锁，并使用只允许当前 session
+用户重新认证的 PAM backend；locker 不通过 greetd 启动或切换 session。
 
-本项目是独立实现。`tuigreet` 仅作为 greetd IPC 行为、会话发现和测试方法的参考，
-不作为 Fomalhaut 的源码基础。
+长期可以设计系统服务 `fomalhautd`，逐步承接登录认证、重新认证、session 监督、seat/VT、
+logind 和电源策略，并最终具备替代 greetd 的能力。`fomalhautd` 目前只是明确的演进方向，
+不是实现 locker 的前置条件；在其特权边界、IPC 和 session 恢复语义完成独立设计与审计前，
+greeter 不移除 greetd backend。
+
+本项目是独立实现。`tuigreet` 仍只作为 greetd IPC 行为、session 发现和测试方法的参考；
+`swaylock` 用作 session-lock 生命周期、PAM 隔离和失败关闭语义的参考，二者都不作为 Fomalhaut
+的源码基础。
 
 ## 2. 设计目标
 
 ### 2.1 核心目标
 
-- 将 greetd IPC 和认证状态机封装为不依赖具体 UI 的 Rust core。
-- 使用本地 WebView 渲染登录界面。
+- 将共享认证状态机、Secret 和 backend 能力封装为不依赖 greetd、PAM 和具体 UI 的 Rust
+  core。
+- 将 greetd 登录和当前用户 PAM 重新认证实现为权能不同、可替换的 backend。
+- 使用统一的 GTK4 + WebKitGTK 6.0 宿主渲染 greeter 和 locker。
+- 使用 `ext-session-lock-v1` 实现失败关闭的 Wayland session lock，不以普通全屏窗口或
+  layer-shell 模拟安全锁屏。
 - 不固化前端框架、构建工具或视觉设计。
-- 允许用户直接配置主题目录，或自行编写完整前端。
+- 允许管理员为 greeter 和 locker 配置同一个通用主题，也允许分别配置两个单页面主题。
 - 为前端提供稳定、版本化且最小化的消息协议。
-- 在不信任前端内容的前提下限制其系统权限。
+- 在主题能够读取页面认证输入的既定边界下，继续限制其系统、文件、网络和进程权限。
 - 正确支持 PAM 的多轮、任意类型认证提示，而非仅支持“用户名 + 密码”。
 - 让 core、会话发现和协议转换能够在无图形环境中完成自动化测试。
 
@@ -32,47 +44,57 @@ greetd 完成。Fomalhaut 通过 greetd IPC 驱动认证流程，在本地 WebVi
 - 支持保存上次用户和上次会话等非敏感偏好。
 - 提供关机、重启等经过配置和授权的系统操作。
 - 提供便于主题开发的独立预览或演示模式。
-- 提供一个极简示例主题，用于协议演示和集成测试。
+- 提供一个同时覆盖 greeter/locker 的极简示例主题，用于协议演示和集成测试。
+- 为将来接入 `fomalhautd` 保留 backend seam，但不提前扩大当前 daemon 权限面。
 
 ### 2.3 非目标
 
-- 不实现 PAM 或替代 greetd。
+- 当前阶段不实现 `fomalhautd`，也不替代 greetd 的登录 session 管理。
+- greeter 不直接调用 PAM；locker 的 PAM 使用范围只限当前 session 用户的重新认证。
 - 不提供远程登录网页或监听局域网的登录服务。
-- 不允许前端直接连接 greetd socket。
+- 不允许前端直接连接 greetd socket、PAM worker 或未来的 daemon IPC。
 - 不允许前端提交任意可执行文件、命令行、环境变量或文件路径。
 - 不承诺 JavaScript/WebView 内存中的密码能够像 Rust 缓冲区一样可靠清零。
-- 初期不实现完整的窗口管理器或 Wayland compositor。
+- locker 首阶段只支持广告 `ext-session-lock-v1` 的 Wayland compositor；X11 锁屏和未实现该
+  协议的桌面环境不在首阶段兼容范围。
+- 不实现完整的窗口管理器或 Wayland compositor。
 - 初期不提供通用浏览器能力，例如任意导航、下载、扩展或开发者工具。
 
 ## 3. 系统边界
 
 ```text
-greetd
-  │
-  │ Unix socket（GREETD_SOCK）
-  ▼
-fomalhaut-core
-  │
-  │ 类型化 Rust API / 认证事件
-  ▼
-Fomalhaut host
-  ├── session discovery
-  ├── configuration
-  ├── policy enforcement
-  ├── WebView lifecycle
-  └── versioned frontend bridge
-          │
-          │ 受限的双向消息
-          ▼
-用户提供的 Web 前端
-  HTML / CSS / JavaScript / 静态资源
+                              fomalhaut-core
+                  认证领域类型 / Secret / backend traits
+                         /                         \
+                        ▼                           ▼
+              fomalhaut-greetd                fomalhaut-pam
+                 LoginBackend                 ReauthBackend
+                        │                           │
+                     greetd                    PAM worker
+                        │                           │
+                        ▼                           ▼
+                fomalhaut greeter            fomalhaut-lock
+                Cage/普通 GTK 窗口       ext-session-lock-v1 窗口
+                         \                        /
+                          ▼                      ▼
+                    fomalhaut-web + fomalhaut-gtk
+                   协议 / 主题 / GTK4 / WebKitGTK
+                                  │
+                                  ▼
+                         单页面可信 Web 主题
 ```
 
-只有 Rust core 可以访问 greetd socket。Web 前端不能获得 socket、原始文件系统访问能力
-或任意进程执行能力。
+greeter 只有 `LoginBackend` 可以访问 greetd socket 和启动可信 session；locker 只有
+`ReauthBackend` 可以访问受限 PAM worker，而且身份由当前 UID/session 推导，前端不能提交或
+切换目标用户。locker 主进程独占 `ext-session-lock-v1` handle；PAM backend 和 Web 前端只能
+产生内部的“允许解锁”结果，不能直接调用 Wayland unlock。
 
-Fomalhaut 是本机登录界面，不是 Web 服务器。正式运行时应通过 WebView 自定义资源协议
-或等价的进程内资源加载机制提供前端文件，而不是开放 TCP 端口。
+主题是管理员选择的可信代码，可以读取用户在页面中输入的认证回答；但它不能获得 greetd、
+PAM worker、未来 daemon IPC、原始文件系统或任意进程执行能力。Fomalhaut 是本机认证界面，
+不是 Web 服务器；正式运行时继续使用 WebView 自定义资源协议提供静态文件，不开放 TCP 端口。
+
+未来 `fomalhautd` 应位于 backend 之后，向 greeter 和 locker 分别提供权能隔离的 login 与
+reauthentication 接口；它不渲染界面，也不持有用户 compositor 的 session lock。
 
 ## 4. 建议的 workspace 结构
 
@@ -112,29 +134,15 @@ target；Bun canary 可执行文件由 `oven-sh/setup-bun@v2` 自身缓存，npm
 fomalhaut/
 ├── Cargo.toml
 ├── crates/
-│   ├── fomalhaut-core/
-│   │   └── src/
-│   │       ├── client.rs
-│   │       ├── error.rs
-│   │       ├── event.rs
-│   │       ├── secret.rs
-│   │       ├── state.rs
-│   │       └── transport.rs
-│   ├── fomalhaut-session/
-│   │   └── src/
-│   │       ├── desktop_entry.rs
-│   │       └── discovery.rs
-│   ├── fomalhaut-web/
-│   │   └── src/
-│   │       ├── assets.rs
-│   │       ├── bridge.rs
-│   │       └── protocol/
-│   └── fomalhaut/
-│       └── src/
-│           ├── config.rs
-│           ├── gtk_host.rs
-│           ├── main.rs
-│           └── policy.rs
+│   ├── fomalhaut-core/       # backend-neutral 认证领域核心
+│   ├── fomalhaut-greetd/     # greetd login backend
+│   ├── fomalhaut-pam/        # 当前用户 reauth backend
+│   ├── fomalhaut-session/    # 可信 session discovery
+│   ├── fomalhaut-config/     # 共享严格配置
+│   ├── fomalhaut-web/        # 协议、主题与 controller
+│   ├── fomalhaut-gtk/        # 共享 GTK4/WebKitGTK host 能力
+│   ├── fomalhaut/            # greeter 可执行程序
+│   └── fomalhaut-lock/       # locker 可执行程序
 ├── protocol/
 │   └── v1.schema.json
 ├── packages/
@@ -162,23 +170,62 @@ fomalhaut/
 
 ### 4.1 `fomalhaut-core`
 
-- 连接 greetd Unix socket。
-- 序列化和反序列化 greetd IPC。
-- 实现严格的认证状态机。
-- 把 greetd 的响应转换为 UI 无关的事件。
-- 管理 PAM 回答等敏感数据的生命周期。
+- 定义不依赖 greetd、PAM 或图形工具包的认证事件、prompt、状态和错误。
+- 定义权能分离的 `LoginBackend` 与 `ReauthBackend` trait。
+- 管理认证回答等敏感数据的生命周期。
 - 拒绝非法、重复或过期操作。
-- 提供可替换 transport，便于使用 stub 测试。
+- 保留可信 `SessionCommand` 值类型，但不负责发现 session 或启动命令。
 
 core 不负责：
 
+- greetd IPC、PAM handle 或 PAM conversation。
 - 用户和 session 列表的视觉呈现。
 - WebView 或 JavaScript bridge。
 - 从不可信前端解析命令行。
 - 保存主题偏好。
 - 执行任意电源命令。
 
-### 4.2 `fomalhaut-session`
+### 4.2 `fomalhaut-greetd`
+
+- 承接当前 `fomalhaut-core` 中的 greetd client、wire transport 和 greetd-specific
+  状态转换。
+- 实现 `LoginBackend`，允许从前端选定用户名，并在认证后启动可信
+  `SessionCommand`。
+- 隔离 `GREETD_SOCK`、greetd IPC 重试/取消语义与通用认证核心。
+
+### 4.3 `fomalhaut-pam`
+
+- 实现只能重新认证当前 session 用户的 `ReauthBackend`。
+- 用户身份由 locker 宿主使用真实 UID/session 推导；API 不接受 username，
+  不能启动 session。
+- 每次认证在新建的一次性 PAM 子进程 worker 中完成，而不是只放入普通线程；worker
+  向 controller 仅传递有界、类型化的 prompt、message 和最终结果，transaction 结束后
+  立即退出。
+
+首阶段选用并精确固定 `pam-client 0.5.0` 作为 PAM application/client wrapper。该版本
+已经用于 COSMIC/Pop!_OS 的生产锁屏，并有其他真实项目消费者；这说明它具有实际部署基础，
+但不等同于上游活跃维护、广泛安全审计或 wrapper 本身能够构成完整安全边界。专项审计发现
+其 nullable `set_item` 路径、conversation handler panic、消息数量和 secret 副本清理等方面
+不能满足主进程内直接使用的要求，因此首阶段只封装以下已审计 API 子集：
+
+- `Context::new`，且 username 只能来自 locker 已按真实 UID/session 确定的账户；
+- `authenticate` 和 `acct_mgmt`；
+- 仅在 PAM 策略确有需要时调用 `reinitialize_credentials`。
+
+不得调用 `pam-client 0.5.0` 接受 `None` 的 `set_item`/`set_*` 路径，也不得把该依赖的
+unsafe 实现引入 workspace 自有生产代码；自有 crate 继续保持 `unsafe_code = "forbid"`。
+Rust 侧持有的回答仍须在可控生命周期内清零，但 wrapper/PAM module 内部的 `strdup` 等副本
+无法提供可验证的即时清零保证；一次性 worker 用于限制这些副本、第三方 PAM module 和
+transaction 状态的生命周期，不能把这一限制描述成已被消除。
+
+worker panic、异常退出、超时、取消、IPC 断开或协议违规一律 fail closed：locker 主进程
+继续持有 session lock，丢弃当前 transaction 及尚未消费的回答，且不得向新 transaction
+重放回答；只有显式开始新的认证尝试时才创建新 worker。实现进入可发布状态前，必须用可控
+PAM service/module fixture 覆盖 echo-on/echo-off、info/error、密码、OTP/MFA、批量消息、
+账户过期、`PAM_MAXTRIES`、取消、超时、worker abort 和回答不重放。该选择不引入 setuid、
+直接读取 shadow 或伪认证 fallback。
+
+### 4.4 `fomalhaut-session`
 
 - 从受信任的配置目录发现 desktop entry。
 - 区分 X11 和 Wayland session。
@@ -188,7 +235,7 @@ core 不负责：
 
 前端只能选择 `SessionId`。实际命令始终由 Rust host 根据已发现的 session 生成。
 
-#### 4.2.1 Discovery 与可信命令映射
+#### 4.4.1 Discovery 与可信命令映射
 
 session discovery 使用 `freedesktop-desktop-entry` 解析 Desktop Entry 基本格式和文件内
 本地化字段，并在 Fomalhaut 内实现面向登录 session 的严格校验与 `Exec` 参数解析。依赖
@@ -224,36 +271,52 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 - discovery 返回可用 catalog 和逐项拒绝诊断；单个损坏文件不阻止其他 session 被发现，
   但目录级 I/O 失败不会被静默吞掉。
 
-### 4.3 `fomalhaut-web`
+### 4.5 `fomalhaut-config`
 
-- 创建并管理本地 WebView。
+- 严格解析共享的 TOML 配置，拒绝未知字段并完成路径规范化。
+- 将全局配置收窄为 `for_greeter()` 与 `for_locker()` 的角色化、已验证配置，
+  不让 locker 读取 session 启动等无关权能。
+- 实现通用主题与 greeter/locker 角色覆盖的确定性选择。
+
+### 4.6 `fomalhaut-web`
+
 - 从主题目录加载静态资源。
 - 实现自定义资源 scheme，例如 `fomalhaut://theme/`。
 - 在 Rust 类型和版本化 JSON 消息之间转换。
-- 限制导航、新窗口、下载、网络、剪贴板和开发者工具。
-- 在页面刷新、崩溃或连接丢失时通知 host。
+- 实现公共 auth controller 以及权能分离的 greeter/locker controller。
+- 定义不依赖 GTK、greetd 或 PAM 的角色化状态快照和事件。
 
 该 crate 不包含正式产品主题。仓库中的 minimal theme 仅用于示例、开发和测试。
+它不依赖 GTK/WebKitGTK、`gtk4-session-lock`、greetd 或 PAM。
 
-### 4.4 `fomalhaut`
+### 4.7 `fomalhaut-gtk`
 
-- 读取和验证系统配置。
-- 组合 core、session discovery 和 Web host。
-- 维护面向前端的公开状态快照。
-- 执行 session ID 到可信 `SessionCommand` 的映射。
-- 应用电源操作、主题路径和持久化策略。
-- 管理进程退出码、日志和恢复页面。
+- 共享 GTK4 application、WebKitGTK 6.0 `WebView`、资源 scheme、bridge 连接、
+  安全 policy、页面 epoch 和 renderer 状态观测。
+- 仅接收已经由 `fomalhaut-web` 类型化的请求/输出，不持有 greetd 或 PAM 具体
+  backend。
+- 不依赖 `gtk4-session-lock`；该依赖只进入 `fomalhaut-lock`，避免迫使 greeter
+  引入额外的 session-lock 系统库。
 
-### 4.5 Host controller 与线程边界
+### 4.8 `fomalhaut` 与 `fomalhaut-lock`
+
+`fomalhaut` 暂时保留现有 greeter 二进制名，组合 `LoginBackend`、session discovery、
+greeter controller 和普通 GTK 窗口，继续由 greetd/Cage 启动。
+
+`fomalhaut-lock` 组合 `ReauthBackend`、locker controller 和 `ext-session-lock-v1`。它运行在
+已登录的普通用户 Wayland session 中，不执行 session discovery、`StartSession` 或任意
+用户切换。只有该宿主持有 session-lock handle 并能最终解锁。
+
+### 4.9 Host controller 与线程边界
 
 真实认证接入采用两层实现，保持 controller 可在无图形环境测试：
 
-- `fomalhaut-web::controller` 持有 `GreeterClient<T>`、公开状态快照、当前 core `PromptId` 和
-  事件 sequence。它接收已经严格解码的 `RequestEnvelope`，输出一个关联
+- `fomalhaut-web::controller` 通过 backend trait 持有公开状态快照、当前 core
+  `PromptId` 和事件 sequence。它接收已经严格解码的 `RequestEnvelope`，输出一个关联
   `ResponseEnvelope` 和按 sequence 排序的 `EventEnvelope` 列表，不依赖 GTK/WebKit。
-- `fomalhaut` 在专用 OS 线程中运行单线程 Tokio runtime，并在该线程内创建
-  `GreeterClient<UnixTransport>`。GTK/WebKit 对象及 `ScriptMessageReply` 始终留在 GTK 主
-  线程；两侧只通过容量固定的同步通道交换可发送的类型。
+- 两个可执行程序都在专用 OS 线程中运行 backend/runtime。GTK/WebKit 对象及
+  `ScriptMessageReply` 始终留在 GTK 主线程；两侧只通过容量固定的同步通道
+  交换可发送的类型。
 
 通道与页面生命周期遵循以下规则：
 
@@ -265,11 +328,13 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 - controller 对一个请求的处理是串行事务：调用一次 core 操作，排空该操作产生的 core
   event，先生成必要的 `state.changed`，再生成 prompt/message/succeeded/failed/cancelled
   事件，最后把响应和事件作为一个输出批次交回 GTK。
-- 正常窗口退出、renderer 终止和 host 关闭都会发送 shutdown。worker 在退出前检查
+- 每个 WebView 都拥有 host 内部 `ViewId` 和 `PageEpoch`，页面初始化从带 sequence
+  watermark 的快照开始；这两个标识不向 JavaScript 作为权能暴露。
+- greeter 的正常窗口退出、renderer 终止和 host 关闭都会发送 shutdown。worker 在退出前检查
   `needs_cancel()`，需要时显式等待 `cancel()`；线程 join 完成后宿主才结束。异常 abort 仍只
   能依靠连接关闭兜底。
-- 启动必须读取非空 `GREETD_SOCK`。变量缺失、路径无效、runtime 创建失败、连接失败或 worker
-  提前退出都是致命错误，宿主以非零状态明确退出，不继续显示无法认证的页面。
+- locker 一旦取得 lock 就不因 renderer、主题、PAM worker 或 controller 失败而退出；
+  它切换到内嵌的可信 GTK 故障/重试界面并继续持有 lock。
 
 bridge 在 GTK 主线程完成消息总长度检查和严格协议解码，再把 typed request 移入有界队列；
 不得把包含认证回答的原始 JSON 复制到跨线程队列。`auth.respond` 使用页面提供的数值只与
@@ -281,12 +346,13 @@ controller 保存的当前 core `PromptId` 比较，实际调用 core 时传回�
 - `fomalhaut` 在启动 worker 前运行 `fomalhaut-session` discovery，并把 catalog 中每个条目
   转换为一组前端安全的 `SessionSummary` 和 Rust 内部 `SessionCommand`。主题只能看到摘要；
   命令、参数、环境变量和 desktop entry 路径不进入 JSON 或 GTK/WebKit 对象。
-- 在配置层完成前，host 使用固定且不受进程环境影响的默认目录：按优先级读取
+- host 使用经过严格配置语义验证的 session 目录；`sessions` 缺失时使用固定且
+  不受进程环境影响的默认目录：按优先级读取
   `/usr/local/share/wayland-sessions`、`/usr/share/wayland-sessions`、
   `/usr/local/share/xsessions` 和 `/usr/share/xsessions`；相对 `TryExec` 只在
   `/usr/local/bin` 与 `/usr/bin` 中解析。不存在的目录继续忽略，目录级 I/O 错误、协议上限
-  无法容纳 catalog 或没有任何可用 session 都是启动失败。后续配置层替换这组显式输入，
-  不通过 `XDG_DATA_DIRS` 隐式改变可信搜索范围。
+  无法容纳 catalog 或没有任何可用 session 都是启动失败。无论默认值还是显式配置，
+  都不通过 `XDG_DATA_DIRS` 隐式改变可信搜索范围。
 - controller 持有已经由 host 解析的可信 session 集合，并默认选择 catalog 稳定顺序中的
   第一项。`session.select` 只在该集合内按不透明 ID 切换选择，成功后发出
   `session.selected`；未知 ID 返回 `session_not_found`。选择可以在认证开始前或认证进行中
@@ -310,7 +376,7 @@ controller 保存的当前 core `PromptId` 比较，实际调用 core 时传回�
 greetd `Success` 后输出 session-started 终态。真实 Cage 退出与 greetd 接管不由 stub 结果
 替代，继续作为系统端到端验证项。
 
-### 4.6 Monorepo 版本与发布
+### 4.10 Monorepo 版本与发布
 
 Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包版本和发布：
 
@@ -364,7 +430,7 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 `version = "0.1.0-alpha"`。初始化完成后，正常版本变更必须交给 Semifold，不再手工修改
 版本号。
 
-### 4.7 Arch Linux 与 AUR 发布
+### 4.11 Arch Linux 与 AUR 发布
 
 Arch Linux 的首个发行版包名为 `greetd-fomalhaut`，由 AUR 从 Fomalhaut 的正式源码标签构建。
 它是版本化源码包，不使用 `-git` 或 `-bin` 后缀。AUR 发布只跟踪最终应用 package 的
@@ -424,7 +490,7 @@ AUR 发布由独立的 GitHub Actions workflow 承担，并遵守以下边界：
   不需要额外维护 known-hosts secret。workflow 不在日志中输出私钥，不代表用户在本地创建
   AUR package，也不绕过 AUR 的 maintainer 审核责任。
 
-### 4.8 源码工作区安装器
+### 4.12 源码工作区安装器
 
 仓库根目录提供可执行的 `install.sh`，用于开发机从当前 checkout 构建并安装 Fomalhaut 与
 React 参考主题。它不是 AUR/package manager 的替代品，也不参与发布版本计算；重复运行必须
@@ -441,11 +507,14 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   GTK4、WebKitGTK 6.0、GLib、glibc、libgcc 和 libsoup3；AccountsService 仍是用户信息增强的
   可选依赖，不由源码安装器强制安装。依赖安装结束后必须重新验证系统包、构建命令、运行时
   绝对路径和 greeter 账户，验证失败时不得开始构建或写系统文件。
+  locker 纳入安装后，还必须通过目标发行版包补充 PAM 和
+  `gtk4-layer-shell` 1.2+ 运行/开发依赖，不在安装脚本中编译隐式私有副本。
 - Cargo、Bun 安装与前端构建始终以调用者的普通用户身份执行；脚本拒绝直接由 root 启动，
   只在写系统目录、原子切换文件和可选重启 greetd 时调用 `sudo`。
 - 写真实系统前必须确认固定 greetd 命令引用的 `/usr/bin/dbus-run-session`、`/usr/bin/cage`
   可执行，且配置的 greeter 账户可由系统账户数据库解析；验证失败不得生成不可启动的配置。
-- Rust 使用 `cargo build --release --locked -p fomalhaut`，前端先执行
+- 当前 Rust 使用 `cargo build --release --locked -p fomalhaut`；`fomalhaut-lock` 落地后
+  安装交易必须同时构建并安装两个二进制。前端先执行
   `bun install --frozen-lockfile` 再调用 workspace 的 `build:theme`，不得隐式更新 lockfile。
 - 安装必须内容级幂等：构建后的二进制、主题树或 updater 生成的 TOML 与当前安装内容完全相同
   时，分别跳过备份、替换、release 创建和 symlink 切换。确有变化的二进制先写入同目录临时
@@ -459,13 +528,18 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   symlink 或其他非普通文件时必须拒绝修改。两个配置目标的类型和现有 TOML 必须在切换二进制、
   主题或任一配置前完成 preflight；无法解析、重复目标 key 或验证失败必须 fail closed，不能留下
   已知可提前避免的部分安装。只有新旧 TOML 文本确实不同时才创建备份并原子替换。
-- Fomalhaut 配置始终维护 `[frontend].path`，并在明确传入缩放参数或首次创建文件时维护
+- 当前安装器维护旧 `[frontend].path`；角色化配置落地时必须通过同一个
+  可验证 updater 将它迁移为 `[themes].default`，并允许管理员独立保留
+  `[themes].greeter`/`locker`。新结构下仍在明确传入缩放参数或首次创建文件时维护
   `[display].scale`。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
   `[power].actions = ["poweroff", "reboot", "suspend"]`，使标准源码安装立即提供经过 logind
   能力过滤的电源菜单；已有配置无论是缺少 `[power]`、显式空数组还是自定义 allowlist，都视为
   管理员策略并原样保留，重复安装和升级不得借机扩大权限。其他 section 和注释同样尽量原样
   保留。greetd 配置只维护 `[default_session].command` 与 `user`，命令使用绝对二进制路径、
   Cage 和独立 `XCURSOR_SIZE`，不再注入 `GDK_SCALE`。
+- locker 安装交易还必须安装受管理员控制的 `/etc/pam.d/fomalhaut-lock`
+  策略文件和集成示例。升级不得静默覆盖已有 PAM 策略；打包和源码安装应将
+  它视为需要审阅与备份的安全配置，而不是主题资源。
 - 默认不重启 display manager，避免意外终止当前图形会话；只有显式 `--restart` 才调用
   `systemctl restart greetd`。`--system-root` 允许在临时根目录验证完整安装和配置更新而不写
   主机 `/etc` 或 `/usr`。
@@ -473,7 +547,7 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   连接 TTY 时启用，并遵守 `NO_COLOR`。重定向、管道和无颜色环境必须输出不含转义序列的纯文本，
   不得为了样式引入新的运行时工具依赖。
 
-### 4.9 用户发现与头像资源
+### 4.13 用户发现与头像资源
 
 用户发现是 Linux 宿主集成，不属于 greetd IPC core。首阶段在最终 `fomalhaut` crate 中以
 内部 provider trait 隔离系统来源，并把已经过滤、验证的公开摘要交给 `fomalhaut-web`
@@ -545,7 +619,7 @@ pub enum MessageLevel {
 
 pub struct PromptId(u64);
 
-pub enum GreeterEvent {
+pub enum AuthEvent {
     Prompt {
         id: PromptId,
         kind: PromptKind,
@@ -555,10 +629,14 @@ pub enum GreeterEvent {
         level: MessageLevel,
         text: String,
     },
-    Authenticated,
-    SessionStarted,
+    Authenticated(AuthenticatedIdentity),
     AuthenticationFailed,
     Cancelled,
+}
+
+pub struct AuthenticatedIdentity {
+    // 由可信 backend 构造，不由前端构造。
+    // 实际字段不属于前端 wire API。
 }
 
 pub struct SessionCommand {
@@ -567,20 +645,27 @@ pub struct SessionCommand {
     environment: Vec<String>,
 }
 
-impl GreeterClient {
-    pub async fn connect(socket: impl AsRef<Path>) -> Result<Self>;
-    pub async fn create_session(&mut self, username: String) -> Result<()>;
-    pub async fn respond(
+pub trait ConversationBackend {
+    async fn respond(
         &mut self,
         prompt: PromptId,
         response: Secret,
     ) -> Result<()>;
-    pub async fn cancel(&mut self) -> Result<()>;
-    pub async fn start_session(
+    async fn cancel(&mut self) -> Result<()>;
+    async fn next_event(&mut self) -> Result<AuthEvent>;
+}
+
+pub trait LoginBackend: ConversationBackend {
+    async fn begin_login(&mut self, username: String) -> Result<()>;
+    async fn start_session(
         &mut self,
         command: SessionCommand,
     ) -> Result<()>;
-    pub async fn next_event(&mut self) -> Result<GreeterEvent>;
+}
+
+pub trait ReauthBackend: ConversationBackend {
+    // 认证目标由当前 UID/session 推导，因此没有 username 参数。
+    async fn begin_reauth(&mut self) -> Result<()>;
 }
 ```
 
@@ -592,9 +677,18 @@ impl GreeterClient {
 
 `Secret` 应隐藏 `Debug`/`Display` 内容，并在 drop 时尽力清零其 Rust 侧内存。
 
+`LoginBackend` 与 `ReauthBackend` 的分离是权限边界，不只是两个便利 trait。前者能
+指定用户名并启动可信 session；后者只能重新认证当前用户，不接受用户名、
+不返回 `SessionCommand`、不启动 session。现有 `GreeterClient` 与 greetd transport 在
+重构后属于 `fomalhaut-greetd`，不再是 `fomalhaut-core` 的公共边界。
+
 ## 6. 认证状态机
 
-建议的内部状态如下：
+目标状态机分为公共 auth state 与角色 lifecycle。公共部分只包含 `Idle`、
+`Authenticating`、`WaitingForSecret`、`WaitingForVisible`、`Authenticated`、
+`Cancelling` 和 `Failed`，不知道 greetd `StartSession` 或 Wayland lock handle。下图是
+当前 greetd login backend 的 lifecycle；重构时其认证部分将映射到公共状态，
+`Authenticated → StartingSession → Started` 保留为 greeter 专属阶段。
 
 ```text
 Disconnected
@@ -640,6 +734,43 @@ Cancelling ─────────────────────► Id
   清理敏感内存并关闭 transport。连接关闭是异常退出时的最后兜底。
 - greetd 连接断开后不盲目重放 PAM 回答。
 
+locker 将认证 lifecycle 与 session-lock lifecycle 分开：
+
+```text
+PAM worker ready ─► request lock ─► create one window per output
+                                   │
+                                   └─ ext-session-lock.locked ─► Locked/ready
+
+Authenticated ─► UnlockAuthorized ─► lock host unlocks
+              ─► Wayland/GDK roundtrip ─► Released ─► exit 0
+```
+
+只有当 PAM worker 已可用时才能请求 session lock，避免进入锁定后没有认证路径。
+宿主只在收到 `ext-session-lock-v1` 的 `locked` 事件后对外报告 ready。每个当前
+和新增输出都必须有 lock surface；不得用普通全屏或 layer-shell 窗口代替协议锁。
+
+locker 主进程是唯一能把 `UnlockAuthorized` 转换为 Wayland unlock 请求的组件。
+controller、PAM worker 和 JavaScript 都不持有该权能。已锁定后任何 renderer、主题、
+controller 或 PAM worker 崩溃都必须 fail closed：宿主保持 lock，显示可信 GTK 故障/
+重试界面，必要时重建 worker，但不解锁或自行退出。协议 `finished` 事件必须按
+`ext-session-lock-v1` 语义作为 lock 已失效的终态处理；若它在未授权解锁前出现，
+必须记录脱敏安全故障并以非零状态结束，不能继续显示伪锁屏。
+
+共具实现必须遵守以下额外约束：
+
+- 同一 backend transaction 同一时刻至多有一个等待回答的 prompt。
+- greetd backend 按协议自动确认 `Info`/`Error`；PAM backend 将对应 conversation
+  消息转换为不需要回答的公共 `Message`。
+- 认证成功、session 启动成功和解锁完成是三个不同概念。
+- 对 locker 而言，取消认证从不等于解锁。backend 连接断开或 worker 重建后
+  不得盲目重放认证回答。
+
+PAM wrapper 的生态与源码审计已经完成，首阶段采用精确固定的 `pam-client 0.5.0`，并只使用
+4.3 节列出的 API 子集。依赖只能在实现 `fomalhaut-pam` 时通过 Cargo CLI 引入；引入依赖
+不代表实现门槛完成。一次性子进程隔离、有界 IPC、secret 生命周期限制和完整 PAM fixture
+仍是合并 locker 认证实现前必须通过的安全门槛。如果后续版本、API 子集或隔离模型需要改变，
+必须先再次更新本文和 `TODO.md`。
+
 ## 7. 前端协议
 
 ### 7.1 基本原则
@@ -649,7 +780,7 @@ Cancelling ─────────────────────► Id
   `9_007_199_254_740_991` 的非负整数，以便 JavaScript 精确表示。
 - 状态事件具有单调递增 sequence，便于丢弃旧事件；sequence 耗尽是 host 的不可恢复错误，
   不允许回绕。
-- 只暴露完成登录 UI 所必需的操作。
+- 只暴露当前 greeter 或 locker UI 所必需的操作，宿主按角色拒绝越权方法。
 - JSON Schema Draft 2020-12 从 Rust wire 类型确定性生成并提交到
   `protocol/v1.schema.json`；测试比较生成结果与提交文件，防止两者漂移。
 - Draft 2020-12 的规范 metaschema URI 固定为
@@ -671,6 +802,12 @@ Cancelling ─────────────────────► Id
   并直接转换为 `fomalhaut_core::Secret`，不得经过可记录的通用字符串接口。
 - 解析入口先检查消息总长度，再解析严格的公共 envelope，最后按 method 解析具体 params；
   不直接向调用方暴露宽松的 `serde_json::Value`。
+
+`StateSnapshot` 是以 `mode: "greeter" | "locker"` 为鉴别字段的联合。两种模式
+共享 auth state、当前 prompt、有限 message 和事件 sequence watermark；greeter
+分支另外包含 users、sessions、已选 session、login lifecycle 与可用能力，locker
+分支只包含当前可信 identity、lock lifecycle 与可用能力。locker 快照不得
+暴露用户切换、session 列表或 session 启动操作。
 
 示例请求：
 
@@ -715,10 +852,11 @@ Cancelling ─────────────────────► Id
 ### 7.2 建议开放的方法
 
 - `state.get`：无参数，返回完整公开状态快照。
-- `auth.begin`：接收用户名。
+- `auth.begin`：greeter 仅接受 `{ username }`，locker 仅接受空参数 `{}`。两种宿主
+  必须严格拒绝另一角色的参数形式。
 - `auth.respond`：接收当前 `promptId` 和 zeroizing 回答。
 - `auth.cancel`：无参数。
-- `session.select`：只接收不透明 session ID。
+- `session.select`：只接收不透明 session ID，且只在 greeter 模式可用。
 - `power.request`：只接收 `poweroff`、`reboot` 或 `suspend` 枚举。宿主只接受管理员配置
   allowlist 与 systemd-logind 当前无交互授权能力的交集；不在 capability 中的动作返回
   `method_disabled`，执行失败返回脱敏的 `internal` 错误。
@@ -728,10 +866,10 @@ Cancelling ─────────────────────► Id
 success/error 不变量。无法解析出请求 ID 的畸形 JSON 不生成一个伪造 ID 的响应，由 bridge
 记录脱敏诊断并丢弃；已经解析出 ID 的错误必须关联原请求。
 
-公开状态快照包含：认证状态、当前 prompt（如有）、有限数量的近期 info/error 消息、经过
-过滤的用户摘要、session 摘要、当前选择的 session ID 和 capability。用户摘要只有用户名、
-显示名和可选的不透明头像 URL；session 摘要只有 ID、显示名和 X11 / Wayland 类型。
-capability 中的 power action 列表由可信宿主生成。电源功能默认关闭；启用后，宿主通过系统
+公开状态快照的 greeter 分支保留经过过滤的用户摘要、session 摘要和当前选择的
+session ID。用户摘要只有用户名、显示名和可选的不透明头像 URL；session 摘要只有
+ID、显示名和 X11 / Wayland 类型。capability 由可信宿主按角色生成，主题不得
+仅根据 mode 自行假定能力存在。电源功能默认关闭；启用后，greeter 宿主通过系统
 D-Bus 查询 systemd-logind 的 `CanPowerOff`、`CanReboot` 和 `CanSuspend`。只有返回 `yes` 的
 动作才加入公开列表；`no`、`na`、`challenge`、D-Bus 不可用和查询失败都按不可用处理。
 Fomalhaut 不运行 Polkit agent，也不为 greeter 发起交互授权。
@@ -752,6 +890,13 @@ v1 事件至少包含：
 - `auth.cancelled`
 - `session.selected`
 - `session.started`
+- `lock.acquired`
+- `lock.failed`
+- `lock.released`
+
+`session.*` 只能由 greeter 发出，`lock.*` 只能由 locker 发出。多输出 locker 中的
+`ViewId` 与 `PageEpoch` 是 host 内部路由信息，不进入 JavaScript 协议；各页面通过
+带 sequence watermark 的 `state.get` 快照与后续事件完成一致初始化。
 
 结构化错误 code 至少覆盖：JSON/长度错误、不支持的版本、无效请求、未知方法、无效参数、
 非法状态、过期 prompt、未知 session、禁用方法和内部错误。错误 message 必须是脱敏且适合
@@ -776,6 +921,13 @@ Fomalhaut 把可由主题项目直接安装的 TypeScript SDK 作为正式下游
 scope 的 `fomalhaut-sdk`；不使用无法注册的 `@fomalhaut` scope。SDK 位于
 `packages/fomalhaut-sdk`，属于 Bun workspace，不加入 Cargo workspace，并由 Semifold
 的 Node.js resolver 独立维护版本和 `alpha` release channel。
+
+greeter 和 locker 只维护这一个 SDK，不新建 `fomalhaut-lock-sdk`。SDK 导出
+`RuntimeMode = "greeter" | "locker"` 和与 Rust wire 一致的
+`GreeterStateSnapshot | LockerStateSnapshot` 判别联合。Client 首先从 `state.get`
+建立当前 mode，在 TypeScript 收窄后返回角色 facade：greeter 中为
+`auth.begin(username)`，locker 中为 `auth.begin()`。运行时仍由 host 严格检查角色，
+类型收窄不是安全边界。
 
 Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfile。根 `package.json`
 以 `workspaces = ["packages/*"]` 发现 package，根 package 必须为 private；`bun install` 产生
@@ -829,9 +981,9 @@ Rust wire 类型仍是协议的唯一事实来源。`fomalhaut-web` 使用 `ts-r
 - 生成结果必须提交，并由 CI 重新生成后检查 Git diff，防止 Rust、JSON Schema 和 SDK 类型
   漂移。
 
-`fomalhaut-sdk` 在生成 wire types 上提供手写、框架无关的 Client。公开 API 至少覆盖
-`state.get`、`session.select`、`auth.begin`、`auth.respond`、`auth.cancel`、
-`power.request` 和带判别联合收窄的事件订阅。Client 的 `power.request` 只接受生成类型中的
+`fomalhaut-sdk` 在生成 wire types 上提供手写、框架无关的 Client。公共 API 至少覆盖
+`state.get`、角色化 `auth.begin`、`auth.respond`、`auth.cancel` 和带判别联合收窄的
+事件订阅；`session.select` 只存在于 greeter facade。Client 的 `power.request` 只接受生成类型中的
 `PowerAction`；主题必须先读取 `state.get` 的 capability，只展示其中存在的动作。Client 内部管理 request ID、验证
 响应关联、协议版本和单调 event sequence，并把协议拒绝、bridge 失败和本地 busy 分成稳定
 错误类型。
@@ -843,6 +995,12 @@ demo transport 或其他宿主复用 Client。Client 同一时刻只允许一个
 清空输入元素。首阶段 SDK 保持零运行时依赖、纯 ESM，并由 TypeScript compiler 生成 JavaScript
 和 declaration 文件，不引入 bundler。
 
+多输出 locker 会在多个 WebView 中同时初始化同一份 SDK。每个 Client 先获取带
+sequence watermark 的快照，再只接受更新的事件；全局 controller 是认证状态的
+唯一事实来源，任一页面都不能拥有独立 PAM transaction。`ViewId`/`PageEpoch`
+由 host 管理。任何主题都必须在调用 SDK 前同步清空密码 input；密码继续
+进入 JavaScript 的已知限制保持不变。
+
 所有手写和生成的 TypeScript 都由仓库锁定版本的 Biome 统一处理。生成命令先运行 `ts-rs`，
 再对 generated 目录执行 Biome format，随后执行只读 check；CI 使用 Biome `ci`、TypeScript
 typecheck、SDK 单元测试和 build，并在重新生成后以 Git diff 检查产物已提交。生成目录不得整体
@@ -853,15 +1011,26 @@ typecheck、SDK 单元测试和 build，并在重新生成后以 Git diff 检查
 
 ## 8. 前端和主题
 
-正式前端由用户通过配置提供。Fomalhaut 不要求 React、Vue、Svelte 或任何包管理器；
+正式前端由系统管理员通过全局配置提供。Fomalhaut 不要求 React、Vue、Svelte
+或任何包管理器；
 只要求配置目录最终包含浏览器可加载的静态资源。
 
 示例配置：
 
 ```toml
-[frontend]
-path = "/etc/fomalhaut/themes/my-theme"
+[themes]
+default = "/etc/fomalhaut/themes/nocturne"
+greeter = "/etc/fomalhaut/themes/nocturne-greeter"
+locker = "/etc/fomalhaut/themes/nocturne-locker"
 ```
+
+`greeter` 和 `locker` 都是可选覆盖。主题选择优先级固定为“角色专用 →
+`default` →内嵌 minimal theme”：因此正常部署只需要一个通用主题，同时也
+允许管理员为两个角色分别选择目录。同一目录的 `theme.toml` 仍只有一个
+`entrypoint`，页面通过 SDK 的 `mode` 分支呈现，不在主题清单中增加两个入口。
+
+现有 `[frontend].path` 迁移为 `[themes].default`。兼容期可以只接受旧字段并产生
+弃用警告，但新旧字段同时出现必须拒绝，不得隐式选择其一。
 
 外部主题目录必须包含主题清单：
 
@@ -878,7 +1047,8 @@ entrypoint = "index.html"
   用户在页面中输入的用户名、PAM 回答和其他认证信息，因此当前版本只适合安装来源可信、内容
   已审查的主题。资源 capability、CSP 和导航限制用于缩小误配置与文件暴露面，不构成对恶意
   主题代码的完整隔离；主题来源验证、签名或打包机制留待后续安全加固。
-- `/etc/fomalhaut/config.toml` 不存在时使用内嵌 minimal theme；文件存在但无法读取、解析或
+- `/etc/fomalhaut/config.toml` 不存在或当前角色没有配置任何可用主题时使用内嵌
+  minimal theme；文件存在但无法读取、解析或
   通过语义验证时明确失败，不静默回退。配置指定外部主题时，缺失/损坏的 `theme.toml`、
   不支持的 protocol 或无效入口同样是启动失败。运行中某个资源消失只返回脱敏的资源错误。
 - 外部主题根必须是绝对目录。host 使用 `cap-std` 打开一次目录 capability；主题清单和所有
@@ -915,8 +1085,9 @@ entrypoint = "index.html"
 - 支持集成和截图测试。
 - 帮助主题作者验证运行环境。
 
-在外部主题目录、配置解析和故障回退完成前，可执行宿主把该 minimal theme 作为只读资源嵌入
-二进制，使真实 greetd 纵向链路具备最小可操作界面。它仍是示例而不是固定产品 UI，并遵守：
+现有内嵌 minimal theme 已为真实 greetd 纵向链路提供最小可操作界面；目标是在
+保持单页的前提下增加 locker 模式，而不另建一套主题规范。它仍是示例而不是
+固定产品 UI，并遵守：
 
 - 不使用前端框架、包管理器、构建步骤、内联脚本或网络资源，只包含 allowlist 中的 HTML、
   CSS 和 JavaScript。
@@ -945,8 +1116,13 @@ JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源�
 仓库在 `packages/fomalhaut-theme` 维护一个独立、私有且不参与 Semifold/npm 发布的官方参考
 主题。它用于证明 `fomalhaut-sdk` 能支持完整的框架前端，并向主题作者提供可构建示例；它不
 嵌入 Rust 二进制、不替代无构建依赖的内置 minimal theme，也不改变用户通过
-`[frontend].path` 选择任意可信静态主题的能力。生产产物是 `dist/` 下的纯静态目录，根目录
+`[themes]` 选择通用或角色专用可信静态主题的能力。生产产物是 `dist/` 下的纯静态目录，根目录
 包含 `theme.toml` 与 `index.html`，管理员可以直接让配置指向该绝对路径。
+
+参考主题当前已完成的是 greeter 交互；locker 仍是待实现目标。完成后同一
+`index.html` 必须使用 SDK `mode` 支持两种角色：greeter 保留用户/session 选择，
+locker 只展示当前 identity、公共多轮认证和 lock lifecycle，不显示或调用用户/
+session 切换。管理员仍可用 `[themes].greeter`/`locker` 选择两个不同目录。
 
 参考主题固定采用 React、TypeScript、Vite、Tailwind CSS v4、shadcn/ui Luma style 与
 Zustand。依赖和脚本继续只由 Bun canary 管理；Vite 使用官方 React 与 Tailwind Vite plugin，
@@ -1023,8 +1199,9 @@ fallback、文件命名和生产构建契约。CI 通过 Bun 运行 Biome、Type
 
 ## 9. WebView 运行环境
 
-应用宿主固定使用 GTK4 + WebKitGTK 6.0，并通过 Rust `gtk4` 与 `webkit6` 原生绑定直接调用。
-当前阶段只实现和维护该宿主，不并行实现 WPE WebKit。
+greeter 和 locker 宿主固定使用 GTK4 + WebKitGTK 6.0，并通过 Rust `gtk4` 与
+`webkit6` 原生绑定直接调用。当前阶段只实现和维护该统一技术栈，不并行
+实现 WPE WebKit。
 
 原型启用 `webkit6` 的 `gtk_v4_18` Cargo feature，使 WebKit 绑定与 GTK 的可访问性接口保持
 一致；因此当前编译基线为 GTK 4.18 或更新版本。开发环境使用滚动最新版 GTK 4.22 和
@@ -1039,15 +1216,27 @@ crate 边界保持如下：
 
 - `fomalhaut-web` 保存与具体 WebView 工具包无关的协议、bridge/controller 和主题资源策略，
   不依赖 GTK 或 WebKitGTK，使协议和业务逻辑仍可在无图形环境测试和被其他应用宿主复用。
-- `fomalhaut` 是当前唯一可执行宿主，直接依赖 `gtk4`、`webkit6` 和 `fomalhaut-web`，负责
-  GTK application/window、WebView 生命周期、原生信号与系统集成。
+- `fomalhaut-gtk` 共享 GTK application、WebView 生命周期、原生信号与安全 policy；
+  `fomalhaut` 和 `fomalhaut-lock` 分别组合普通 greeter 窗口与 session-lock 窗口。
 - GTK 和 WebKit 对象只在创建它们的 GTK 主线程访问。WebView 回调不得阻塞等待 greetd；
-  后续 Core 集成通过有界消息通道把请求交给异步 controller，再把序列化后的结果投递回
+  backend 集成通过有界消息通道把请求交给 controller，再把序列化后的结果投递回
   GLib 主上下文。
 
-应用侧最初使用内置探针页面验证宿主能力；完成真实 core 和可信 session 接入后，该资源已
-演进为上一节定义的嵌入式 minimal theme。当前仍不读取管理员主题目录，但已经连接真实
-greetd，并继续维持以下已经验证的宿主边界：
+greeter 继续使用 Cage 中的普通 GTK 全屏窗口。locker 使用 `gtk4-session-lock 0.4.0`
+封装 `ext-session-lock-v1`；该 binding 的 GTK4 0.11/GLib 0.22 依赖与当前 workspace
+`gtk4 0.11.4` 基线一致。其底层 C 库 `gtk4-layer-shell` 从 1.1 起支持 session
+lock，1.2 起提供所需 monitor API；因此 locker 应以 1.2+ 为最低能力基线，
+当前上游调研版本为 1.3.0。这个库在此处用于获得 session-lock 实现与
+monitor API，不意味着允许用 layer-shell surface 模拟锁屏。
+
+locker 为每个 monitor 创建尚未 realize 的新 `GtkWindow` 和 WebView，然后将其交给
+session-lock API；输出移除后销毁对应窗口，不重用已绑定或已销毁窗口。主题
+弹层必须使用页面内元素；WebKit/GTK popup 不能作为跨 lock surface 的可靠组件。
+
+应用侧最初使用内置探针页面验证宿主能力；完成真实 core、可信 session、
+严格配置和外部主题接入后，该资源已演进为上一节定义的嵌入式 minimal
+theme。当前 greeter 已连接真实 greetd 并能读取管理员配置的主题目录，
+继续维持以下已经验证的宿主边界：
 
 - 创建 GTK4 全屏窗口并嵌入 WebKitGTK 6.0 `WebView`。
 - 通过 `fomalhaut://theme/` 自定义 scheme 加载内置 HTML、CSS 和 JavaScript，不使用
@@ -1071,9 +1260,12 @@ greetd，并继续维持以下已经验证的宿主边界：
   `base-uri` 和 `form-action` 继续设为 `'none'`。该 scheme 的全部请求仍必须先通过 Rust
   侧精确 URI 白名单，CSP 允许 scheme 不代表允许任意 host 或 path。
 - renderer 终止、页面刷新和窗口退出具有可观察且拒绝式的处理路径。
+  greeter 可在取消认证后非零退出交给 greetd 恢复；locker 在 `locked` 之后必须改用
+  可信 GTK fallback 并保持 session lock。
 
-嵌入式 minimal theme 只为首个可操作登录和协议示例提供基线；外部主题目录、配置、清单检查
-和内置故障页面仍属于后续主题资源任务，不能通过继续扩展嵌入常量来替代。
+嵌入式 minimal theme 只为可操作认证和协议示例提供基线。外部主题目录、配置与
+清单检查已在 greeter 实现；角色化主题选择、locker 模式和内置可信故障页面仍是
+待实现任务，不能通过继续扩展嵌入常量来替代。
 
 在 Arch Linux、WebKitGTK 2.52.5、GTK 4.22.4 与 Cage 0.3.1 上的原型验证得到以下运行边界：
 
@@ -1097,10 +1289,10 @@ greetd，并继续维持以下已经验证的宿主边界：
   因而这里只作为原型成本上界信号。发布构建的 PSS/峰值以及非 Arch 发行版的包名和可用
   版本仍需单独测量，不能据此声明最低运行需求。
 
-## 10. greetd 与 Wayland 启动
+## 10. greeter 与 locker 的 Wayland 启动
 
-WebView 需要图形环境。推荐让 greetd 启动一个极简 Wayland compositor，再由 compositor
-启动 Fomalhaut。例如：
+greeter 的 WebView 需要图形环境。推荐让 greetd 启动一个极简 Wayland compositor，
+再由 compositor 启动 Fomalhaut。例如：
 
 ```toml
 [terminal]
@@ -1121,6 +1313,20 @@ Fomalhaut，内嵌 minimal theme 完成 PAM 交互并选择已发现的 Wayland 
 `StartSession` 成功后 Fomalhaut 与 Cage 正常退出，greetd 接管用户 session。该结果确认当前
 纵向链路可用，但不替代后续自动化 Cage 回归、X11、失败恢复和更多发行版验证。
 
+`fomalhaut-lock` 不由 greetd 或 Cage 启动，而在已登录用户的现有 Wayland session
+内运行，使用该 session 的 `WAYLAND_DISPLAY` 与用户 D-Bus/logind 上下文。启动时如果
+compositor 未广告 `ext-session-lock-v1`，必须在请求锁之前明确失败，不回退到
+普通全屏、layer-shell 或桌面环境私有伪锁屏。
+
+swayidle、systemd user service 和 suspend hook 集成必须能等待 locker 发出可验证的
+readiness，且该信号只在 compositor 发出 `locked` 后产生。如果提供 fork/background
+模式，父进程不得在 `locked` 前返回成功。挂起前的集成必须等待该 readiness，
+避免设备已挂起但 session 尚未锁定的竞态。具体 CLI/readiness IPC 形式在实现原型时
+确定，但不得改变这一时序。
+
+首阶段 locker 只承诺兼容选定的 `ext-session-lock-v1` compositor。X11 和由桌面环境
+内建、不允许第三方 session-lock client 的平台属于显式兼容性边界，不宣称支持。
+
 ## 11. 安全模型
 
 ### 11.1 信任关系
@@ -1128,12 +1334,14 @@ Fomalhaut，内嵌 minimal theme 完成 PAM 交互并选择已发现的 Wayland 
 受信任：
 
 - greetd 及其 Unix socket。
+- 系统 PAM stack、为 locker 安装的受控 PAM service 与经审计的 PAM wrapper。
+- Wayland compositor 及其 `ext-session-lock-v1` 实现。
 - Fomalhaut 安装的 Rust 二进制和系统配置。
 - 管理员明确配置的 session 目录及 desktop entry。
+- 管理员明确选择并审查的主题 HTML、CSS 和 JavaScript。
 
 默认不信任：
 
-- 主题中的 HTML、CSS 和 JavaScript。
 - WebView 导航目标。
 - 前端传来的所有字符串、ID 和操作顺序。
 - desktop entry 中未经策略验证的字段。
@@ -1143,9 +1351,14 @@ Fomalhaut，内嵌 minimal theme 完成 PAM 交互并选择已发现的 Wayland 
 
 ### 11.2 必须实施的防护
 
-- 只以低权限 greeter 用户运行。
+- greeter 只以专用低权限 `greeter` 用户运行；locker 只以当前普通 session
+  用户运行。两者都不安装 setuid bit，不自行读取 `/etc/shadow`。
 - 正式模式不监听 TCP。
-- 不把 greetd socket 暴露给前端。
+- 不把 greetd socket、PAM worker 通道或未来 daemon IPC 暴露给前端。
+- locker 用系统 UID/账户数据 API 获取当前真实 UID 和对应账户，不从主题、
+  环境中的任意 username 或 `auth.begin` 参数推导目标身份。
+- `ext-session-lock-v1` handle 只由 locker 主进程持有；任何下游结果都只能生成
+  内部 `UnlockAuthorized`，不能直接解锁。
 - 禁止外部导航、新窗口、下载和开发者工具。
 - 默认禁止网络访问及远程资源。
 - 使用严格 CSP。
@@ -1154,7 +1367,9 @@ Fomalhaut，内嵌 minimal theme 完成 PAM 交互并选择已发现的 Wayland 
 - 防止重复提交和并发认证请求。
 - 日志中不记录 PAM 回答、密码、token 或完整 IPC payload。
 - `Debug`/`Display` 不泄露 secret。
-- 页面刷新、崩溃和 host 退出时取消活动 session。
+- greeter 页面刷新、崩溃和 host 退出时取消活动 greetd session。
+- locker 在取得 lock 后遇到 renderer、主题、controller 或 PAM worker 崩溃时必须
+  fail closed，切换到可信 GTK fallback 并保持锁定。
 - 主题路径必须防止目录穿越和 symlink escape。
 - 电源操作采用明确枚举和管理员配置，不接受前端命令行。
 
@@ -1174,7 +1389,7 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 
 配置大类预计包括：
 
-- 主题路径和入口。
+- 通用主题路径和 greeter/locker 可选覆盖；入口仍属于 `theme.toml`。
 - session 搜索目录及过滤策略。
 - 是否列出本地用户。
 - 是否保存上次用户或 session。
@@ -1194,8 +1409,10 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 初始公开结构为：
 
 ```toml
-[frontend]
-path = "/etc/fomalhaut/themes/my-theme"
+[themes]
+default = "/etc/fomalhaut/themes/nocturne"
+greeter = "/etc/fomalhaut/themes/nocturne-greeter"
+locker = "/etc/fomalhaut/themes/nocturne-locker"
 
 [sessions]
 wayland_dirs = ["/usr/local/share/wayland-sessions", "/usr/share/wayland-sessions"]
@@ -1209,8 +1426,10 @@ actions = ["poweroff", "reboot", "suspend"]
 scale = 1.5
 ```
 
-- `frontend` 缺失时选择内嵌 minimal theme；存在时只包含绝对主题目录，入口和协议版本由目录
-  内必需的 `theme.toml` 决定，避免配置与清单出现两个互相冲突的入口来源。
+- `themes` 中的每个字段都是可选绝对主题目录；选择顺序是角色专用、
+  `default`、内嵌 minimal theme。入口和协议版本由目录内必需的 `theme.toml`
+  决定，避免配置与清单出现两个互相冲突的入口来源。旧 `[frontend].path`
+  只可作为 `[themes].default` 的迁移别名单独出现；新旧配置同时出现必须拒绝。
 - `sessions` 缺失时沿用固定默认目录。section 存在时，每个缺失字段仍继承对应默认值；显式
   空数组用于禁用该类目录。所有目录必须是无 NUL 的绝对路径，保持数组顺序作为优先级；
   至少要发现一个最终可用 session，否则启动失败。
@@ -1228,22 +1447,33 @@ scale = 1.5
 - 日志目标和记忆用户/session 继续留作后续字段；在实现前未知字段会被拒绝，不能
   提前依赖未承诺的配置键。
 
-配置与外部主题纵向切片已用自动化测试验证：配置缺失时安全回退、未知字段和相对路径拒绝、
+`fomalhaut-config` 语义校验后分别产生 `for_greeter()` 和 `for_locker()` 视图。locker
+视图不包含 session discovery 命令或登录用户选择权能。PAM service 名称固定为
+`fomalhaut-lock`，由安装包提供和系统管理员审核，不作为主题或普通前端可切换的
+安全策略字段。
+
+现有 greeter 的 `[frontend].path` 配置与外部主题纵向切片已用自动化测试验证：
+配置缺失时安全回退、未知字段和相对路径拒绝、
 显示缩放边界、显式 session 优先级、64 KiB 上限、清单 protocol/入口校验、URI 语法、MIME 白名单、顶层导航
 限制、配置根 symlink、根内相对 symlink、根外 symlink 拒绝以及资源读取边界。完整 workspace
 测试同时继续覆盖真实 Unix socket greetd 流程；内嵌主题仍通过 Wayland/WebKitGTK 运行探针
-验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。
+验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。迁移到
+`[themes]` 与角色化视图尚未实现，不得将上述旧字段测试视为新设计已完成。
 
 无效安全配置应导致启动失败或回退到安全默认值，不能静默放宽限制。
 
 ## 13. 错误、日志和恢复
 
-- 使用结构化错误类型区分配置、transport、协议、认证、session 和 WebView 错误。
+- 使用结构化错误类型区分配置、transport、协议、认证、session、PAM worker、
+  session-lock 和 WebView 错误。
 - 面向用户的错误信息不直接等于内部错误或 PAM description。
 - 日志默认不包含用户名以外的认证内容；是否隐藏用户名可进一步配置。
 - secret 类型必须提供安全的 `Debug` 实现。
-- WebView 无法启动或主题加载失败时显示最小故障页面并保留可诊断日志。
-- 无法连接 `GREETD_SOCK` 时明确退出，避免呈现一个永远无法登录的假界面。
+- WebView 无法启动或主题加载失败时显示最小可信故障页面并保留可诊断日志；
+  locker 已锁定后的故障页必须是 GTK 侧 fallback，不得因 renderer 已崩溃而不可用。
+- greeter 无法连接 `GREETD_SOCK` 时明确退出，避免呈现一个永远无法登录的假界面。
+- locker 在请求 lock 前无法建立 PAM worker 时明确退出；在 `locked` 后失去 worker
+  时保持 lock 并提供可控重试，不解锁。
 - 正常退出路径应显式等待活动认证 session 取消；panic/abort 等无法等待异步 IPC 的路径
   通过关闭 transport 触发连接级清理，不在 panic hook 中启动后台异步任务。
 
@@ -1251,6 +1481,8 @@ scale = 1.5
 
 ### 14.1 Core 单元测试
 
+- 使用 fake `LoginBackend` 和 `ReauthBackend` 验证通用 auth state，并证明两个 trait
+  不会互相泄漏启动 session 或替换身份的权能。
 - 每个合法状态转换。
 - 每个非法状态转换。
 - 重复和过期 `PromptId`。
@@ -1272,7 +1504,15 @@ scale = 1.5
 - 认证成功后启动可信 session。
 - 页面/host 中途取消。
 
-### 14.3 Session 测试
+### 14.3 PAM 与 locker backend 测试
+
+- 在不要求 CI 使用真实用户密码的前提下，用可控 PAM service/module 验证
+  echo-on、echo-off、info、error、MFA、重试和 `PAM_MAXTRIES`。
+- 验证 PAM worker IPC 长度边界、取消、secret 脱敏/清理、worker 崩溃和可控重建。
+- 验证 `ReauthBackend::begin_reauth()` 始终使用当前 UID/session 身份，拒绝任何
+  username 替换路径，且从不产生 `SessionCommand`。
+
+### 14.4 Session 测试
 
 - X11 和 Wayland desktop entry。
 - `Hidden`、`NoDisplay` 和重复项。
@@ -1280,7 +1520,7 @@ scale = 1.5
 - session ID 稳定性。
 - 路径穿越、符号链接和目录优先级。
 
-### 14.4 Frontend protocol 测试
+### 14.5 Frontend protocol 测试
 
 - JSON schema 和 Rust 类型一致。
 - 协议版本不兼容。
@@ -1288,8 +1528,11 @@ scale = 1.5
 - 消息长度限制。
 - 并发、重复和乱序请求。
 - 前端永远无法提供实际 session command。
+- `mode` 判别快照、角色 capability、两种 `auth.begin` 参数和越权方法拒绝。
+- 多视图 bootstrap、sequence watermark、刷新 epoch 与乱序/重复事件丢弃。
+- 单一通用主题、greeter/locker 分开主题与新旧配置冲突。
 
-### 14.5 WebView 集成测试
+### 14.6 WebView 与 session-lock 集成测试
 
 - 自定义 scheme 和 MIME 类型。
 - 外部导航、弹窗和下载被阻止。
@@ -1298,6 +1541,11 @@ scale = 1.5
 - 主题目录逃逸被拒绝。
 - 页面刷新触发认证取消和状态重同步。
 - Cage 下启动、登录和退出。
+- `ext-session-lock-v1` 的 `configure`、`locked`、`finished` 与只有授权后解锁的顺序。
+- 多输出、热插拔、缩放变化、每输出 WebView 初始化和页面内弹层。
+- renderer 崩溃、主题损坏和 PAM worker 崩溃时切换到可信 GTK fallback，不释放 lock。
+- suspend 前 readiness 时序、立即终止 locker 的 fail-closed 行为，以及 Sway 和至少
+  另一个目标 compositor 的实机验证。
 
 ## 15. 开发和演示模式
 
@@ -1329,22 +1577,37 @@ scale = 1.5
   该 alpha 例外。
 - 只修改手写 SDK Client 时只提升 `fomalhaut-sdk`；Rust wire 类型变化并改变生成产物时，
   changeset 必须同时包含 `fomalhaut-web` 和 `fomalhaut-sdk`。
+- backend-neutral core 重构与新增 `fomalhaut-greetd`、`fomalhaut-pam`、`fomalhaut-config`、
+  `fomalhaut-gtk` 时，必须为所有对外 API/依赖边发生变化的已发布 crate 建立联合
+  changeset，并同步 Semifold package 列表与 CI。
+- 在 alpha 阶段将 v1 更新为 greeter/locker 判别协议时，同一发布事务必须覆盖
+  `fomalhaut-web`、`fomalhaut-sdk`、内嵌 minimal theme、React 参考主题与两个宿主。
 - 同一 host 至少支持其当前协议版本。
 - 破坏性前端协议变更必须增加主版本。
 - 新增可选字段不应破坏旧主题。
 - 主题清单声明所需协议版本；不兼容时显示清晰的故障页面。
 - greetd IPC 兼容范围由 `greetd_ipc` 依赖版本和集成测试共同定义。
+- 未来 `fomalhautd` 使用独立、鉴权的 daemon IPC，不复用 WebView JSON bridge
+  作为特权协议；其版本和 greetd 迁移承诺需要单独设计。
 
 ## 17. 待原型验证的决策
 
 以下内容在完成小型原型后再固化：
 
-- 自定义 scheme 是否能在目标发行版上稳定提供所需 CSP 和 MIME 行为。
+- GTK4 + WebKitGTK WebView 在 `gtk4-session-lock` 多输出窗口中的实机可行性，
+  包括 hotplug、scale、renderer 崩溃 fallback 和 unlock/GDK roundtrip。
+- `pam-client 0.5.0` 一次性 worker 原型的进程管理、有界 IPC、取消/超时终止与 PAM
+  fixture 可移植性；wrapper 选型已经确定，但这些实现细节仍须验证且不得削弱 4.3 节的
+  fail-closed 边界。
+- 自定义 scheme 的基本 CSP 与 MIME 行为已验证；仍需验证目标发行版与
+  WebKitGTK 版本矩阵，但不再把基本可行性列为未知。
 - renderer sandbox 在不同发行版中的默认状态和配置方法。
-- 多显示器策略由 compositor 还是 Fomalhaut host 管理。
-- session desktop entry 基本格式使用 `freedesktop-desktop-entry`，登录 session 的严格
-  `Exec` 校验和安全策略由 `fomalhaut-session` 实现。
-- WebKitGTK、Cage 和 greetd 的最低兼容版本；Rust 工具链继续跟随 stable。当前开发依赖
+- 首个正式 locker 目标 compositor 矩阵；Sway 必须包含在内，并至少选另一个
+  `ext-session-lock-v1` compositor 完成回归。
+- WebKitGTK、Cage、greetd 和 `gtk4-layer-shell` 的最低兼容版本；Rust 工具链继续跟随
+  stable。当前开发依赖
   跟随滚动最新稳定版本，最低兼容版本只能在发行版验证后声明。
+- `fomalhautd` 的特权模型、daemon IPC、peer credential/logind 映射、seat/VT 与
+  session 监督/恢复语义。这些未完成前不开始替换 greetd。
 
 这些决策不得削弱本文定义的 core/UI 分离和前端权限边界。

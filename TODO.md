@@ -1,12 +1,82 @@
 # Fomalhaut TODO
 
-本清单按依赖关系和风险排序。`P0` 是构建可测试最小系统的阻塞项；`P1` 完成首个可用
-greeter；`P2` 用于加固和发行；`P3` 是后续增强。
+本清单按依赖关系和风险排序。`P0` 是 greeter/locker 共享架构与协议的阻塞项；
+`P1` 完成首个可用 locker 并继续验证现有 greeter；`P2` 用于安全、可靠性和发行加固；
+`P3` 是 `fomalhautd` 等后续演进。
 
 2026 年 8 月 9 日按当前 `docs/DESIGN.md`、生产代码、自动化测试和用户文档完成一次状态
 审计。审计验证了 Rust workspace 的 116 个测试、SDK 的静态检查与 6 个测试、React 主题的
 静态检查与 23 个测试。没有新增实机验证证据；需要真实 greeter、Cage、WebKitGTK、logind、
 VT、X11 或多发行版环境的事项继续保持未完成。
+
+2026 年 8 月 10 日进一步确认 greeter 与 locker 均为一等产品，并将统一
+GTK4/WebKitGTK 宿主、`ext-session-lock-v1`、单 SDK 判别协议、通用/角色主题和
+backend-neutral Rust crate 边界写入设计。下方已完成项仍只证明现有 greeter
+实现；新 crate 架构、角色化协议和 locker 全部保持未完成。本次只审计和更新
+文档，没有实施或重新验证代码。
+
+同日完成 Rust PAM application/client wrapper 的生态与源码审计，并确认首阶段采用精确
+固定的 `pam-client 0.5.0`。选型完成不代表 locker 认证已经实现或通过安全验收；一次性
+子进程 worker、限定 API、有界 IPC、secret 生命周期和 PAM fixture 仍是未完成门槛，
+当前 manifest 尚未增加 PAM 依赖。
+
+## P0：greeter/locker 产品与 crate 边界
+
+### Backend-neutral Rust 架构
+
+- [x] 在 `docs/DESIGN.md` 记录 greeter/locker 一等产品、backend 分权、统一宿主、
+      session-lock 失败关闭和未来 `fomalhautd` seam。
+- [ ] 将 `fomalhaut-core` 重构为不依赖 greetd/PAM 的认证领域层，定义
+      `ConversationBackend`、`LoginBackend`、`ReauthBackend`、`AuthEvent`、
+      `AuthenticatedIdentity`、`Secret` 和 `SessionCommand`。
+- [ ] 用 Cargo CLI 创建 `fomalhaut-greetd`、`fomalhaut-pam`、`fomalhaut-config`、
+      `fomalhaut-gtk` 和 `fomalhaut-lock` crate；在创建前确认每个发布包的元数据和依赖方向。
+- [ ] 将现有 greetd client、Unix transport 和 greetd-specific lifecycle 迁入
+      `fomalhaut-greetd`，由其实现 `LoginBackend`，保持当前 greeter 行为和测试全绿。
+- [ ] 将严格 TOML 解析/角色化视图迁入 `fomalhaut-config`，将 GTK4/WebKitGTK
+      application、WebView、scheme、bridge 和安全 policy 迁入 `fomalhaut-gtk`。
+- [ ] 将 `fomalhaut-web` controller 拆成公共 auth、greeter lifecycle 和 locker lifecycle，
+      并用 fake `LoginBackend`/`ReauthBackend` 覆盖权能分离与全部状态转换。
+- [ ] 让现有 `fomalhaut` 仅组合 greeter 权能，让 `fomalhaut-lock` 仅组合
+      reauth/session-lock 权能；两个宿主不得通过运行时布尔开关共享越权 API。
+- [ ] 用 `smif commit` 为受影响的发布 crate 建立联合 changeset，并用 Semifold CLI
+      同步 package 列表、CI、package payload 与已发布 crate 的兼容说明。
+
+### PAM wrapper 选择与实现门槛
+
+- [x] 审计 Rust PAM application/client wrapper 的采用面，并核对 `pam-client 0.5.0` 的
+      `ConversationHandler`、CString/secret、PAM handle、nullable item、多轮 conversation、
+      重试/`PAM_MAXTRIES`、credential、取消、panic 与 worker 崩溃语义。
+- [x] 确认首阶段精确固定 `pam-client 0.5.0`，只使用 `Context::new`、`authenticate`、
+      `acct_mgmt` 和按需 `reinitialize_credentials`；禁止 nullable `set_item`/`set_*`
+      路径，并继续对 workspace 自有生产代码执行 `unsafe_code = "forbid"`。
+- [x] 将 wrapper 的 COSMIC/Pop!_OS 生产采用依据、维护风险、已知限制、一次性子进程
+      隔离和 fail-closed 结论先同步到 `docs/DESIGN.md` 与本清单；审计期间未修改 manifest。
+- [ ] 创建 `fomalhaut-pam` 后，通过限定该 package 的 Cargo CLI 精确添加
+      `pam-client 0.5.0`，检查 manifest/lockfile 实际变更；不得顺带添加其他 wrapper、
+      自行实现未经审计 FFI，或使用 setuid/shadow fallback。
+- [ ] 持续跟踪 `pam-client` 的上游维护、安全问题和新版本；升级、扩大 API 子集或改变
+      worker 隔离模型前必须重新审计并先更新设计与 TODO。
+
+## P0：统一前端协议、SDK 与主题
+
+- [ ] 将 `StateSnapshot` 改为以 `mode: "greeter" | "locker"` 区分的
+      `GreeterStateSnapshot | LockerStateSnapshot`，分离公共 auth、login lifecycle 和
+      lock lifecycle。
+- [ ] 将 `auth.begin` 改为 greeter `{ username }`/locker `{}` 两种严格参数，
+      让 host 拒绝错误角色参数、locker 中的 `session.select` 和其他越权方法。
+- [ ] 增加 `lock.acquired`、`lock.failed`、`lock.released` 事件与快照 sequence
+      watermark，覆盖多视图 bootstrap、重复/乱序事件和页面 epoch。
+- [ ] 只扩展现有 `fomalhaut-sdk`：生成 mode/state 判别联合，提供模式收窄的
+      greeter `auth.begin(username)` 与 locker `auth.begin()` facade，不新建 locker SDK。
+- [ ] 把全局配置从 `[frontend].path` 迁移为 `[themes].default`、`greeter`、
+      `locker`，按“角色专用 → default → 内嵌”选择；新旧字段同时出现时拒绝。
+- [ ] 保持每个 `theme.toml` 只有一个 entrypoint；让内嵌 minimal theme 和
+      React/Nocturne 参考主题在同一页面内同时支持 greeter/locker mode，同时保留
+      分别配置两个主题的能力。
+- [ ] 同步 Rust wire、Draft 2020-12 Schema、ts-rs 产物、SDK、两个主题、
+      `docs/CONFIGURATION.md` 和 changeset；密码继续进入 JavaScript，主题必须在 SDK
+      调用前同步清空 input。
 
 ## P0：项目基础与无 UI 核心
 
@@ -28,9 +98,12 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 
 ### 设计与实现同步
 
-- [ ] 修正 `docs/DESIGN.md` 中已经落后于实现的状态描述和 workspace 示例，包括配置驱动的
-      session 目录、真实 core/controller 接入、外部主题加载、用户发现、电源能力、真实
-      Cage/greetd 交接，以及已经由原型确认的决策；只同步既有事实，不借机改变技术边界。
+- [x] 将 greeter/locker 产品定位、目标 crate 边界、统一协议/SDK/主题、
+      `ext-session-lock-v1` lifecycle、PAM 审计门槛与 `fomalhautd` 演进方向同步到
+      `docs/DESIGN.md` 和本清单。
+- [ ] 继续逐节校对 `docs/DESIGN.md` 中的旧 greeter 实现事实与当前代码，
+      特别是配置驱动的 session 目录、controller 超时/清理、故障页、安装器和
+      已验证/待验证边界；只有完成代码与文档逐项核验后才能标记完成。
 
 ### Core 状态机
 
@@ -120,7 +193,57 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 - [x] 记录 Arch Linux 上 GTK4/WebKitGTK/Cage 的运行时依赖、包体积和调试构建 RSS 快照。
 - [ ] 测量发布构建的 PSS/峰值，并记录非 Arch 发行版的包名、可用版本与打包成本。
 
-## P1：首个可用 greeter
+## P1：首个可用 `fomalhaut-lock`
+
+### Session-lock 原型与宿主
+
+- [ ] 使用 `gtk4-session-lock 0.4.0` 完成最小 GTK4 原型，确认与 workspace
+      GTK4 0.11/GLib 0.22 基线的编译和运行兼容性；依赖必须由针对
+      `fomalhaut-lock` package 的 Cargo CLI 添加。
+- [ ] 在目标 Arch 环境验证底层 `gtk4-layer-shell` 1.2+ monitor API 和当前
+      1.3.x 版本，并将系统依赖写入 CI、安装器与打包元数据。
+- [ ] 在请求 lock 前检查 compositor 广告 `ext-session-lock-v1` 且 PAM worker 已可用；
+      不支持协议或前置初始化失败时明确退出，不回退到全屏/layer-shell 伪锁屏。
+- [ ] 由 locker 主进程独占 session-lock handle，实现 `configure`、`locked`、
+      `finished` 与授权后 unlock 的完整顺序；下游只能产生 `UnlockAuthorized`。
+- [ ] 为每个当前和新增 monitor 创建未 realize `GtkWindow` + WebView，处理
+      hotplug、scale 和输出移除，不复用已绑定或已销毁窗口。
+- [ ] 只在收到 `locked` 后发出 readiness；认证成功后由 host 执行 unlock，
+      完成 Wayland/GDK roundtrip 后才退出。
+
+### 当前用户 PAM 重新认证
+
+- [ ] 通过真实 UID/session 和系统账户 API 推导锁屏 identity；`auth.begin` 不接收
+      username，不允许前端选择、替换或伪造认证目标。
+- [ ] 实现 `fomalhaut-pam::ReauthBackend`；每次 transaction 新建一次性子进程 worker，
+      严格封装已选 API 子集，transaction 完成后退出，不把可阻塞 PAM 调用或 module
+      panic 留在 locker 主进程。
+- [ ] 定义有界、类型化 PAM worker IPC 与状态机；限制消息数和消息/回答长度，同一时刻
+      最多一个待回答 prompt，并覆盖乱序、重复、未知和超限消息。
+- [ ] 实现取消、超时、IPC 断开、panic 和异常退出的 fail-closed 语义；终止并回收旧
+      worker，保持 session lock，丢弃未消费回答，不向新 transaction 重放。
+- [ ] 清零 Rust 可控的 secret 缓冲区并审计所有日志/错误/IPC 生命周期；记录
+      `pam-client`/PAM module 内部副本无法验证即时清零的限制，以一次性 worker 限制其
+      生命周期，但不得声称已消除此风险。
+- [ ] 安装受控 `/etc/pam.d/fomalhaut-lock` service，定义发行版默认策略、升级
+      不覆盖规则与可测试 PAM module/service fixture；fixture 覆盖 echo-on/off、info/error、
+      密码、OTP/MFA、批量消息、账户过期、`PAM_MAXTRIES`、取消、超时、worker abort 和
+      回答不重放；不使用 setuid 或 shadow fallback。
+
+### 失败关闭、主题与集成
+
+- [ ] 实现不依赖 Web renderer 的可信 GTK fallback；在已锁定后遇到 renderer、
+      主题、controller 或 PAM worker 崩溃时保持 lock，显示脱敏故障/重试 UI。
+- [ ] 多个 WebView 共享同一 controller/auth transaction，host 管理 `ViewId`/
+      `PageEpoch`，每个页面通过快照 watermark 与后续 sequence 初始化。
+- [ ] 让 minimal theme 和 React/Nocturne 在 locker mode 展示当前 identity、多轮 prompt、
+      message、busy 和 lock lifecycle，不展示用户/session 切换；popup 只使用页面内组件。
+- [ ] 实现 swayidle/systemd user service/suspend hook 集成与可验证 readiness；如果支持
+      fork/background，父进程只能在 `locked` 后返回成功。
+- [ ] 在 Sway 和至少另一个 `ext-session-lock-v1` compositor 完成实机验证，
+      并明确记录 X11、不支持该协议以及限制第三方 locker 的桌面环境为非兼容范围。
+
+## P1：现有 greeter 纵向切片
 
 ### Host 集成
 
@@ -302,6 +425,21 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 - [ ] 在真实 greeter 环境验证 AccountsService 可用/不可用、NSS fallback、禁用枚举和无头像
       场景。
 
+## P2：locker 安全与可靠性
+
+- [ ] 把 locker 威胁模型纳入正式 threat model：当前 UID 绑定、PAM worker、
+      Web 主题可读 secret、session-lock handle 独占、多输出与失败关闭。
+- [ ] 用独立进程测试验证 `SIGKILL`/崩溃/断开 Wayland client 时 compositor 不会
+      意外解锁，并记录每个目标 compositor 的实际行为。
+- [ ] 覆盖启动锁与 suspend 竞态、锁定中 suspend/resume、输出热插拔/缩放、
+      unlock 后 roundtrip 与连续快速锁定。
+- [ ] 覆盖 PAM MFA、`PAM_MAXTRIES`、conversation 顺序、worker 超时/崩溃/重建和
+      回答不重放，并审计日志、panic 路径与 IPC 中的 secret 泄漏。
+- [ ] 精确终止 WebKitWebProcess 验证 GTK fallback 可用、lock 仍被持有且能启动
+      新的 PAM transaction；主题或 renderer 不得直接调用 unlock。
+- [ ] 建立 Sway + 至少一个其他 compositor 的回归矩阵，记录
+      `ext-session-lock-v1`/`gtk4-layer-shell` 最低版本和已知差异。
+
 ## P2：安全加固
 
 - [ ] 编写正式 threat model。
@@ -362,7 +500,8 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 - [ ] 测试 host 被终止时 greetd session 的清理行为。
 - [ ] 补齐主题缺失、损坏和协议版本不匹配的 host/WebView 故障页集成测试；资源层单元测试已
       覆盖损坏入口、非法清单和协议版本不匹配。
-- [ ] 测试多显示器和高 DPI 的基本行为。
+- [ ] 测试 greeter 在 Cage 中的多显示器和高 DPI 基本行为；locker 的每输出
+      lock surface、hotplug 和 scale 测试已拆入 P1/P2 locker 专项。
 - [x] 实现严格的 `[display].scale` 配置并应用 WebKit 页面 zoom，覆盖默认值、小数倍率和非法
       浮点/边界测试；光标缩放继续由 Cage 管理。
 - [ ] 测试非 ASCII 用户名、prompt 和 session 名称。
@@ -370,6 +509,15 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 
 ## P2：打包与首个发行版
 
+- [ ] 确定 greeter/locker 的发行包拆分方案，并让源码安装器原子安装
+      `/usr/bin/fomalhaut`、`/usr/bin/fomalhaut-lock`、共享/角色主题、PAM service 与
+      swayidle/systemd 集成示例。
+- [ ] 在 Arch/CI/AUR 元数据中加入经实际验证的 PAM 和 `gtk4-layer-shell` 1.2+
+      构建/运行依赖，同时保持 Cage/greetd 仅为 greeter 路径依赖。
+- [ ] 让安装器通过结构化 TOML updater 安全迁移 `[frontend].path` 到
+      `[themes].default`，保留管理员的 `greeter`/`locker` 覆盖、PAM 策略和其他配置。
+- [ ] 为新 Rust crate 补齐 crates.io metadata、Semifold package/channel、changeset、CI 构建与
+      `cargo package` payload 验证，不在本地执行 version/publish。
 - [x] 添加根目录安全安装器：支持首次/更新构建、原子二进制与主题部署、TOML 备份验证更新、
       显式 greetd restart 和临时 system-root 集成测试。
 - [x] 让源码安装器在 Arch 上检查构建与运行包，按 `paru`、`yay`、`sudo pacman` 优先级安装
@@ -378,8 +526,9 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 - [x] 让源码安装器首次创建 Fomalhaut 配置时默认允许 poweroff、reboot 和 suspend，并验证原地
       更新保留缺失、显式关闭或自定义的既有电源策略。
 - [x] 为源码安装器添加遵守 TTY 与 `NO_COLOR` 的分级彩色输出。
-- [ ] 确定 greetd、WebKitGTK 和 Cage 的最低版本；GTK 编译基线已是 4.18，Rust 继续跟随
-      stable，其余最低运行版本仍需发行版验证。
+- [ ] 确定 greetd、WebKitGTK、Cage、PAM 和 `gtk4-layer-shell` 的最低版本；GTK 编译
+      基线已是 4.18，locker 的 layer-shell 能力基线是 1.2+，Rust 继续跟随 stable，
+      其余最低运行版本仍需发行版验证。
 - [ ] 完成日志目标和非敏感偏好存储设计后，判断是否需要状态/日志目录及 systemd-tmpfiles；
       当前无持久状态目录。
 - [x] 在 README 和 `docs/CONFIGURATION.md` 提供源码安装、更新、显示管理器迁移及
@@ -419,20 +568,36 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 - [ ] 完成许可证、第三方依赖和资源归属检查。
 - [ ] 发布前执行完整安全检查和端到端测试。
 
-## P3：后续增强
+## P3：`fomalhautd` 调研
+
+- [ ] 单独定义 daemon 的特权模型，列出 login、reauthentication、session 启动/
+      监督、seat/VT、logind 和电源策略所需的最小权限，不默认把整个宿主提权。
+- [ ] 设计不复用 WebView JSON bridge 的独立 daemon IPC，包括版本、消息边界、
+      取消/超时、连接断开、重启恢复和敏感数据生命周期。
+- [ ] 调研 Unix peer credentials/`SO_PEERCRED` 与 logind session 映射，证明 greeter 与 locker
+      client 只能获得各自的 `LoginBackend`/`ReauthBackend` 权能。
+- [ ] 定义 session process 监督、environment、VT/seat 切换、登录失败、daemon 重启和
+      已运行 session 恢复语义，并与 greetd 行为建立可验证对照。
+- [ ] 在代替 greetd 前定义 parity gate：安全审计、多 seat/VT、PAM conversation、
+      session 监督/恢复、发行版集成和可回退迁移全部达标；在此之前 greeter 保留 greetd。
+
+## P3：其他后续增强
 
 - [ ] 可配置的用户头像 provider。
 - [ ] 记住上次用户和每用户上次 session。
 - [ ] 本地化 core 消息和示例主题。
-- [ ] 多显示器显示策略。
+- [ ] 完善 greeter 的多显示器显示策略；locker 每输出 session-lock surface 已升为 P1。
 - [ ] 键盘布局选择。
 - [ ] 无障碍增强和屏幕键盘集成。
-- [ ] 可选的原生 UI host，复用 `fomalhaut-core`。
+- [ ] 可选的原生 UI host，复用 backend-neutral `fomalhaut-core`；它不是 locker 主方案。
 - [ ] 主题兼容性测试工具。
 - [ ] 主题打包、签名或来源验证机制评估。
 - [ ] 稳定的第三方 host API。
 
-## 首个里程碑定义
+## 里程碑定义
+
+以下 M0–M3 保留为 greeter 产品线的历史/发布里程碑；新增的 L0–L3 用于
+locker 产品线。
 
 ### M0：Headless core
 
@@ -453,8 +618,33 @@ VT、X11 或多发行版环境的事项继续保持未完成。
 - 用户可以替换整个主题目录。
 - 页面刷新、失败和退出不会遗留活动认证 session。
 
-### M3：首个可发布版本
+### M3：greeter 首个可发布版本
 
 - 完成安全审计清单和端到端测试。
 - 有明确的依赖、安装、配置、主题开发及故障排查文档。
 - 前端协议 v1 和配置格式进入兼容性维护阶段。
+
+### L0：共享架构可测试
+
+- core 已 backend-neutral，fake login/reauth backend 在无图形环境覆盖分权状态机。
+- 判别协议、单 SDK facade 与角色化主题配置完成并通过生成产物漂移检查。
+- 现有 greeter 行为和测试保持全绿。
+
+### L1：失败关闭 session-lock 原型
+
+- `gtk4-session-lock` 在 Sway 上为所有输出建立 lock surface，且只在 `locked`
+  后报告 ready。
+- 主进程独占 lock handle，renderer/主题崩溃会进入 GTK fallback 而不解锁。
+- 不支持 `ext-session-lock-v1` 时在锁前失败，不使用伪锁屏回退。
+
+### L2：可用 locker
+
+- 已审计 PAM backend 只重新认证当前 UID/session，覆盖密码、MFA、失败、取消和重试。
+- minimal theme 和 Nocturne 的同一单页都能按 mode 完成 greeter/locker 交互。
+- swayidle/systemd/suspend readiness、hotplug、scale 与 unlock roundtrip 已经实机验证。
+
+### L3：locker 首个可发布版本
+
+- Sway 与至少另一 compositor 的安全/可靠性回归矩阵通过。
+- 二进制、PAM service、共享/分角色主题、systemd/swayidle 示例和系统依赖已进入安装/打包流程。
+- threat model、JavaScript secret 限制、非支持平台与故障排查文档完整。
