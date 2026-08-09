@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.0-alpha.2
+
+### New Features
+
+- [`a0dc068`](https://github.com/noctisynth/fomalhaut/commit/a0dc068969a9f16459122cca953b924812364daa): Add the role-discriminated greeter and locker protocol, capability-separated controllers, and generated schema bindings.
+
+    Bootstrap the shared TypeScript SDK into mode-generic clients and update both bundled themes for single-page greeter and locker support.
+
+- [`115bcf1`](https://github.com/noctisynth/fomalhaut/commit/115bcf1cf5e4b8cfbcbe3f7faf626c4fd22f6946): Add shared or per-role display scaling and use the shared non-interactive logind backend for both greeter and locker power actions.
+
+    Keep the session lock held while locker power requests cancel any active reauthentication transaction.
+
+- [`a66e689`](https://github.com/noctisynth/fomalhaut/commit/a66e689814a577da88a449f4b3166daf7cb3beeb): Implement the compositor-neutral Wayland session locker with isolated PAM reauthentication, per-monitor session-lock surfaces, trusted native fallback, and systemd readiness.
+
+    Expose shared host and controller signals required to route cross-view events and fail closed when the authentication worker becomes unavailable.
+
+
+### Refactors
+
+- [`e3dac89`](https://github.com/noctisynth/fomalhaut/commit/e3dac89f49692b4742e6b5e10b1884e71c684e8f): Split backend-neutral authentication types from the greetd login backend.
+
 ## v0.1.0-alpha.1
 
 ### Bug Fixes
