@@ -25,7 +25,12 @@ describe("SPA authentication UI", () => {
     await renderTheme(transport);
 
     expect(screen.getByRole("heading", { name: "Alice" })).toBeVisible();
-    expect(screen.getByText("Authenticate to unlock")).toBeVisible();
+    const lockerLabel = screen.getByText("Fomalhaut Lock");
+    expect(lockerLabel).toBeVisible();
+    expect(lockerLabel.parentElement?.firstElementChild).toBe(lockerLabel);
+    expect(
+      screen.queryByText("Authenticate to unlock"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Who’s signing in?" }),
     ).not.toBeInTheDocument();

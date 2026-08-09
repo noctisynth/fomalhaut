@@ -370,7 +370,7 @@ function LockerView() {
       case "acquiring":
         return "Securing this session…";
       case "locked":
-        return "Authenticate to unlock";
+        return null;
       case "unlocking":
         return "Unlocking…";
       case "released":
@@ -382,6 +382,9 @@ function LockerView() {
 
   return (
     <AuthenticationLayout>
+      <p className="text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
+        Fomalhaut Lock
+      </p>
       <UserAvatar
         user={snapshot.identity}
         className={cn(
@@ -390,18 +393,17 @@ function LockerView() {
         )}
       />
       <div className="text-center">
-        <p className="mb-3 text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
-          Fomalhaut Lock
-        </p>
         <h1 className="text-3xl font-medium tracking-tight">
           {snapshot.identity.displayName}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {snapshot.identity.username}
         </p>
-        <p className="mt-3 text-sm text-muted-foreground" role="status">
-          {status}
-        </p>
+        {status && (
+          <p className="mt-3 text-sm text-muted-foreground" role="status">
+            {status}
+          </p>
+        )}
       </div>
       <AuthenticationFeedback />
       {snapshot.lock === "locked" && snapshot.prompt ? (
