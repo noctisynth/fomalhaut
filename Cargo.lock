@@ -366,6 +366,7 @@ dependencies = [
 name = "fomalhaut"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "fomalhaut-config",
  "fomalhaut-core",
  "fomalhaut-greetd",
  "fomalhaut-session",
@@ -373,9 +374,7 @@ dependencies = [
  "greetd_ipc",
  "gtk4",
  "libc",
- "serde",
  "tokio",
- "toml",
  "webkit6",
  "zbus",
 ]
@@ -383,6 +382,11 @@ dependencies = [
 [[package]]
 name = "fomalhaut-config"
 version = "0.1.0-alpha"
+dependencies = [
+ "fomalhaut-session",
+ "serde",
+ "toml",
+]
 
 [[package]]
 name = "fomalhaut-core"

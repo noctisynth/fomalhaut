@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+fomalhaut-session = { version = "0.1.0-alpha.1", path = "../fomalhaut-session" }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.4"
 
 [lints]
 workspace = true

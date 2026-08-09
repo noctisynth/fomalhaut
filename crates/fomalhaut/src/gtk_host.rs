@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use fomalhaut_config::AppConfig;
 use fomalhaut_session::{DiscoveryConfig, SessionKind as CatalogSessionKind, discover};
 use fomalhaut_web::{
     assets::{THEME_CSP, THEME_HEADERS},
@@ -32,7 +33,6 @@ use webkit6::{
 use webkit6::{gio, glib, prelude::*};
 
 use crate::{
-    config::AppConfig,
     controller_worker::{SubmitError, WorkerHandle, WorkerOutput},
     users::AvatarAsset,
 };
@@ -93,9 +93,14 @@ fn build_window(
     application: &gtk::Application,
     failed: Rc<Cell<bool>>,
 ) -> Result<gtk::ApplicationWindow, HostError> {
-    let (theme_directory, discovery, user_discovery, power, display) = AppConfig::load()
-        .map_err(|_| HostError::Configuration)?
-        .into_parts();
+    let config = AppConfig::load().map_err(|_| HostError::Configuration)?;
+    if config.uses_legacy_frontend() {
+        eprintln!(
+            "Fomalhaut configuration uses deprecated [frontend].path; migrate to [themes].default"
+        );
+    }
+    let (theme_directory, discovery, user_discovery, power, display) =
+        config.for_greeter().into_parts();
     let theme = Rc::new(match theme_directory {
         Some(directory) => {
             ThemeSource::external(directory).map_err(|_| HostError::ExternalTheme)?

@@ -93,12 +93,31 @@ AccountsService 是可选的用户资料增强，不会被强制安装。`--syst
 使用非默认安装前缀时传入绝对 `--prefix`。`--system-root /tmp/fomalhaut-root` 只用于在隔离目录
 验证安装结果，不调用 `sudo`，也不允许 `--restart`。完整参数见 `./install.sh --help`。
 
-## 最小外部主题配置
+## 外部主题配置
 
 ```toml
-[frontend]
-path = "/etc/fomalhaut/themes/my-theme"
+[themes]
+default = "/etc/fomalhaut/themes/my-theme"
 ```
+
+`default` 主题同时供 greeter 和 locker 使用。管理员也可以只覆盖其中一个角色；选择优先级固定为
+“角色专用 → `default` → 内嵌 minimal theme”：
+
+```toml
+[themes]
+default = "/etc/fomalhaut/themes/nocturne"
+greeter = "/etc/fomalhaut/themes/custom-greeter"
+locker = "/etc/fomalhaut/themes/custom-locker"
+```
+
+每个字段都必须是绝对路径。每个主题仍只有一个 `theme.toml` entrypoint；角色化 SDK/主题
+完成后，同一页面将通过 SDK 提供的运行模式呈现对应角色。当前 greeter 已使用新的主题选择，
+locker host 和主题 mode 仍在实现中；配置两个角色路径是为了允许管理员选择两套独立主题。
+
+迁移期仍接受单独出现的旧 `[frontend].path`，greeter 会输出弃用提示。`[frontend]` 与
+`[themes]` 同时出现时配置无效，避免隐式选择。源码安装器更新旧配置时会把
+`[frontend].path` 迁移为 `[themes].default`，保留已有的 `greeter`/`locker` 覆盖和其他
+管理员配置；若旧 `[frontend]` 包含未知键，安装器会拒绝删除该 table。
 
 主题目录必须是绝对路径，并包含 `theme.toml`：
 
@@ -149,8 +168,8 @@ bun run build:theme
 构建产物位于 `packages/fomalhaut-theme/dist`。在本地仓库测试时，可将其绝对路径直接写入：
 
 ```toml
-[frontend]
-path = "/home/example/Projects/fomalhaut/packages/fomalhaut-theme/dist"
+[themes]
+default = "/home/example/Projects/fomalhaut/packages/fomalhaut-theme/dist"
 ```
 
 该目录必须允许 `greeter` 用户遍历和读取。普通浏览器开发服务器会使用仅开发环境存在的模拟

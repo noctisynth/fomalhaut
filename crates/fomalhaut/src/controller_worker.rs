@@ -9,6 +9,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use fomalhaut_config::{PowerConfig, UserDiscoveryConfig};
 use fomalhaut_greetd::GreeterClient;
 use fomalhaut_web::{
     controller::{HostController, TrustedSession},
@@ -16,7 +17,6 @@ use fomalhaut_web::{
 };
 
 use crate::{
-    config::{PowerConfig, UserDiscoveryConfig},
     power::LogindPowerControl,
     users::{AvatarAsset, discover_users},
 };
@@ -253,7 +253,7 @@ mod tests {
     };
 
     use super::{WorkerHandle, WorkerOutput};
-    use crate::config::{PowerConfig, UserDiscoveryConfig};
+    use fomalhaut_config::{PowerConfig, UserDiscoveryConfig};
     use fomalhaut_core::SessionCommand;
     use fomalhaut_web::{
         controller::TrustedSession,

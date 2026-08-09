@@ -27,6 +27,11 @@ client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web gre
 `fomalhaut-gtk`、`fomalhaut-pam` 和 `fomalhaut-lock` 仍只是明确失败或无功能的骨架，不代表
 对应功能完成。该切片通过 workspace 编译、Clippy 和 118 个测试。
 
+随后完成共享配置切片：严格 TOML 解析已迁入 `fomalhaut-config`，并实现
+`for_greeter()`/`for_locker()`、通用/角色主题优先级、旧字段独占迁移别名和新旧冲突拒绝。
+greeter 已改用角色视图；安装器会迁移 `[frontend].path`，保留角色覆盖、显示和电源策略，
+并通过全新安装、旧配置迁移和重复运行幂等的隔离测试。该切片将 workspace 测试增至 120 个。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -40,8 +45,12 @@ client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web gre
       `fomalhaut-gtk` 和 `fomalhaut-lock` crate；在创建前确认每个发布包的元数据和依赖方向。
 - [x] 将现有 greetd client、Unix transport 和 greetd-specific lifecycle 迁入
       `fomalhaut-greetd`，由其实现 `LoginBackend`，保持当前 greeter 行为和测试全绿。
-- [ ] 将严格 TOML 解析/角色化视图迁入 `fomalhaut-config`，将 GTK4/WebKitGTK
-      application、WebView、scheme、bridge 和安全 policy 迁入 `fomalhaut-gtk`。
+- [x] 将严格 TOML 解析和 `for_greeter()`/`for_locker()` 角色化视图迁入
+      `fomalhaut-config`，且 locker 视图不暴露 session discovery 或用户枚举配置。
+- [x] 用 `smif commit` 为共享角色配置切片建立 changeset，覆盖新增的
+      `fomalhaut-config` 和接入该配置的 `fomalhaut`。
+- [ ] 将 GTK4/WebKitGTK application、WebView、scheme、bridge 和安全 policy 迁入
+      `fomalhaut-gtk`。
 - [x] 让现有 Web greeter controller 只依赖 `LoginBackend`，并用不依赖 greetd 类型的 fake
       backend 覆盖当前 greeter 状态转换。
 - [ ] 将 `fomalhaut-web` controller 继续拆成公共 auth、greeter lifecycle 和 locker lifecycle，
@@ -86,7 +95,7 @@ client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web gre
       watermark，覆盖多视图 bootstrap、重复/乱序事件和页面 epoch。
 - [ ] 只扩展现有 `fomalhaut-sdk`：生成 mode/state 判别联合，提供模式收窄的
       greeter `auth.begin(username)` 与 locker `auth.begin()` facade，不新建 locker SDK。
-- [ ] 把全局配置从 `[frontend].path` 迁移为 `[themes].default`、`greeter`、
+- [x] 把全局配置从 `[frontend].path` 迁移为 `[themes].default`、`greeter`、
       `locker`，按“角色专用 → default → 内嵌”选择；新旧字段同时出现时拒绝。
 - [ ] 保持每个 `theme.toml` 只有一个 entrypoint；让内嵌 minimal theme 和
       React/Nocturne 参考主题在同一页面内同时支持 greeter/locker mode，同时保留
@@ -531,7 +540,7 @@ client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web gre
       swayidle/systemd 集成示例。
 - [ ] 在 Arch/CI/AUR 元数据中加入经实际验证的 PAM 和 `gtk4-layer-shell` 1.2+
       构建/运行依赖，同时保持 Cage/greetd 仅为 greeter 路径依赖。
-- [ ] 让安装器通过结构化 TOML updater 安全迁移 `[frontend].path` 到
+- [x] 让安装器通过结构化 TOML updater 安全迁移 `[frontend].path` 到
       `[themes].default`，保留管理员的 `greeter`/`locker` 覆盖、PAM 策略和其他配置。
 - [ ] 为新 Rust crate 补齐 crates.io metadata、Semifold package/channel、changeset、CI 构建与
       `cargo package` payload 验证，不在本地执行 version/publish。

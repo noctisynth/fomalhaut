@@ -2,13 +2,12 @@
 
 use std::time::Duration;
 
+use fomalhaut_config::{PowerAction as ConfigPowerAction, PowerConfig};
 use fomalhaut_web::{
     controller::{PowerControl, PowerControlError},
     protocol::{Capabilities, PowerAction},
 };
 use zbus::blocking::{Connection, Proxy};
-
-use crate::config::PowerConfig;
 
 const LOGIN1_DESTINATION: &str = "org.freedesktop.login1";
 const LOGIN1_PATH: &str = "/org/freedesktop/login1";
@@ -67,7 +66,10 @@ impl PowerControl for LogindPowerControl {
     }
 }
 
-fn discover_available(connection: &Connection, configured: &[PowerAction]) -> Vec<PowerAction> {
+fn discover_available(
+    connection: &Connection,
+    configured: &[ConfigPowerAction],
+) -> Vec<PowerAction> {
     let Ok(proxy) = login1_proxy(connection) else {
         return Vec::new();
     };
@@ -76,13 +78,18 @@ fn discover_available(connection: &Connection, configured: &[PowerAction]) -> Ve
         .copied()
         .filter(|action| {
             let method = match action {
-                PowerAction::Poweroff => "CanPowerOff",
-                PowerAction::Reboot => "CanReboot",
-                PowerAction::Suspend => "CanSuspend",
+                ConfigPowerAction::Poweroff => "CanPowerOff",
+                ConfigPowerAction::Reboot => "CanReboot",
+                ConfigPowerAction::Suspend => "CanSuspend",
             };
             proxy
                 .call::<_, _, String>(method, &())
                 .is_ok_and(|status| capability_status_allows(&status))
+        })
+        .map(|action| match action {
+            ConfigPowerAction::Poweroff => PowerAction::Poweroff,
+            ConfigPowerAction::Reboot => PowerAction::Reboot,
+            ConfigPowerAction::Suspend => PowerAction::Suspend,
         })
         .collect()
 }

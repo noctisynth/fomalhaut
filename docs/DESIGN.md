@@ -528,9 +528,10 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   symlink 或其他非普通文件时必须拒绝修改。两个配置目标的类型和现有 TOML 必须在切换二进制、
   主题或任一配置前完成 preflight；无法解析、重复目标 key 或验证失败必须 fail closed，不能留下
   已知可提前避免的部分安装。只有新旧 TOML 文本确实不同时才创建备份并原子替换。
-- 当前安装器维护旧 `[frontend].path`；角色化配置落地时必须通过同一个
-  可验证 updater 将它迁移为 `[themes].default`，并允许管理员独立保留
-  `[themes].greeter`/`locker`。新结构下仍在明确传入缩放参数或首次创建文件时维护
+- 安装器已通过同一个可验证 updater 将旧 `[frontend].path` 迁移为
+  `[themes].default`，并独立保留管理员已有的 `[themes].greeter`/`locker`。迁移只删除
+  仅含 `path` 的旧 `[frontend]` table；出现其他键时拒绝修改，避免丢失未知管理员配置。
+  新结构下仍在明确传入缩放参数或首次创建文件时维护
   `[display].scale`。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
   `[power].actions = ["poweroff", "reboot", "suspend"]`，使标准源码安装立即提供经过 logind
   能力过滤的电源菜单；已有配置无论是缺少 `[power]`、显式空数组还是自定义 allowlist，都视为
@@ -1452,13 +1453,16 @@ scale = 1.5
 `fomalhaut-lock`，由安装包提供和系统管理员审核，不作为主题或普通前端可切换的
 安全策略字段。
 
-现有 greeter 的 `[frontend].path` 配置与外部主题纵向切片已用自动化测试验证：
-配置缺失时安全回退、未知字段和相对路径拒绝、
+共享 `fomalhaut-config` 已实现 `[themes]` 与 `for_greeter()`/`for_locker()` 角色视图；
+角色专用主题优先于 default，locker 视图不暴露 session discovery 或用户枚举配置。
+旧 `[frontend].path` 在迁移期单独出现时作为 deprecated default theme alias 接受并由 greeter
+记录警告，新旧字段同时出现则拒绝。配置和外部主题纵向切片已用自动化测试验证：配置缺失时
+安全回退、角色主题优先级、新旧字段冲突、未知字段和相对路径拒绝、
 显示缩放边界、显式 session 优先级、64 KiB 上限、清单 protocol/入口校验、URI 语法、MIME 白名单、顶层导航
 限制、配置根 symlink、根内相对 symlink、根外 symlink 拒绝以及资源读取边界。完整 workspace
 测试同时继续覆盖真实 Unix socket greetd 流程；内嵌主题仍通过 Wayland/WebKitGTK 运行探针
-验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。迁移到
-`[themes]` 与角色化视图尚未实现，不得将上述旧字段测试视为新设计已完成。
+验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。安装器隔离测试还覆盖
+全新 `[themes].default`、旧字段迁移、角色覆盖/显示/电源策略保留和重复运行幂等。
 
 无效安全配置应导致启动失败或回退到安全默认值，不能静默放宽限制。
 

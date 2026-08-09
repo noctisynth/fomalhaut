@@ -15,10 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use fomalhaut_config::{UserDiscoveryConfig, UserProvider};
 use fomalhaut_web::protocol::{MAX_USERS, UserSummary};
 use zbus::{blocking::Proxy, zvariant::OwnedObjectPath};
-
-use crate::config::{UserDiscoveryConfig, UserProvider};
 
 const ACCOUNTS_DESTINATION: &str = "org.freedesktop.Accounts";
 const ACCOUNTS_PATH: &str = "/org/freedesktop/Accounts";
@@ -471,7 +470,7 @@ mod tests {
         UserDiscoveryError, avatar_content_type, build_public_users, discover_users_with,
         is_login_shell, parse_passwd, read_avatar, run_bounded_command,
     };
-    use crate::config::{UserDiscoveryConfig, UserProvider};
+    use fomalhaut_config::{UserDiscoveryConfig, UserProvider};
     use std::{
         cell::Cell,
         fs::{self, File},
@@ -550,11 +549,9 @@ mod tests {
     #[test]
     fn auto_falls_back_only_when_accounts_service_is_unavailable() {
         let unavailable = MockSource::new(AccountsOutcome::Unavailable);
-        let discovered = discover_users_with(
-            UserDiscoveryConfig::for_test(UserProvider::Auto),
-            &unavailable,
-        )
-        .expect("the mock NSS fallback succeeds");
+        let discovered =
+            discover_users_with(UserDiscoveryConfig::new(UserProvider::Auto), &unavailable)
+                .expect("the mock NSS fallback succeeds");
         assert_eq!(unavailable.accounts_calls.get(), 1);
         assert_eq!(unavailable.nss_calls.get(), 1);
         assert_eq!(discovered.summaries[0].username(), "fallback");
@@ -562,7 +559,7 @@ mod tests {
         for outcome in [AccountsOutcome::Empty, AccountsOutcome::AccessDenied] {
             let source = MockSource::new(outcome);
             let discovered =
-                discover_users_with(UserDiscoveryConfig::for_test(UserProvider::Auto), &source)
+                discover_users_with(UserDiscoveryConfig::new(UserProvider::Auto), &source)
                     .expect("empty and denied results remain nonfatal");
             assert!(discovered.summaries.is_empty());
             assert_eq!(source.accounts_calls.get(), 1);
