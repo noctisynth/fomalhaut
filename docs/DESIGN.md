@@ -822,7 +822,10 @@ Authenticating
     ├── AuthMessage::Secret  ──► WaitingForSecret
     ├── AuthMessage::Visible ──► WaitingForVisible
     ├── AuthMessage::Info/Error ─► 自动确认并继续
-    ├── Error::AuthError ───────► Failed（greetd 已自动释放失败 session）
+    ├── Error::AuthError ───────► CleanupCancelling
+    │                              │ CancelSession::Success/Error（已消费响应）
+    │                              ▼
+    │                            Failed
     └── Success ────────────────► Authenticated
 
 WaitingForSecret / WaitingForVisible
@@ -850,9 +853,15 @@ Cancelling ─────────────────────► Id
 - 不假设第一个 secret prompt 一定是密码。
 - 认证成功和 session 启动成功是两个不同阶段。
 - 在正常退出、页面失联或 host 主动中止仍然活动的认证路径中，必须显式等待 `cancel()` 完成并
-  发送 `CancelSession`。greetd 协议规定 setup/login flow 返回任意 `Response::Error` 时 session
-  已自动取消；尤其 `AuthError` 必须直接收敛为可恢复的 `AuthenticationFailed`，清除当前 prompt
-  并允许新的 `CreateSession`，不得再发送多余的 `CancelSession` 或把其拒绝升级为服务故障。
+  发送 `CancelSession`。
+- greetd 0.10.3 的认证 worker 在 login flow 返回 `AuthError` 时已经终止，但 daemon 的
+  `Context.configuring` 槽位仍由后续 `CancelSession` 清除；其参考 greeter `agreety` 也会在
+  error 后发送该请求。因此 `AuthError` 必须进入内部 cleanup cancellation，发送且消费一次
+  `CancelSession` 响应，再清除当前 prompt、发布可恢复的 `AuthenticationFailed` 并允许新的
+  `CreateSession`。由于 daemon 在尝试通知已退出的 worker 前已经从 `Context.configuring` 取走
+  旧 session，该清理请求可能返回 `Success`，也可能返回普通 `Error`；两者都表示请求已被 daemon
+  处理并应收敛为认证失败，不能把后者升级为认证服务故障。只有 cleanup 请求的 transport/codec
+  失败才进入断连状态，且不得自动重放用户名、PAM 回答或后续 `CreateSession`。
 - Rust `Drop` 不执行异步 IPC、不阻塞 runtime，也不派生无法等待的后台取消任务；析构只
   清理敏感内存并关闭 transport。连接关闭是异常退出时的最后兜底。
 - greetd 连接断开后不盲目重放 PAM 回答。
@@ -1271,9 +1280,10 @@ entrypoint = "index.html"
   其他 secret、visible、OTP、PIN、自定义 prompt 和 info/error message 继续原样展示，不能仅因
   `secret` 类型就假定输入一定是密码。
 - 使用原生 label、form、input、select、button、`aria-live` 和键盘提交提供最小无障碍能力。
-  greetd 返回认证错误后，Core 必须依赖协议保证的自动 session 释放，立即清除旧 prompt 并向
-  前端发布失败状态，不得再发送 `CancelSession`；登录失败或主动取消后恢复用户名输入，session
-  启动成功由 host 退出，不由页面导航处理。
+  greetd 返回认证错误后，Core 必须先发送并消费一次 `CancelSession` 响应以清除 daemon 的旧
+  configuration 槽位；该 cleanup 返回 `Success` 或普通 `Error` 都收敛为认证失败，随后清除旧
+  prompt 并向前端发布失败状态。登录失败或主动取消后恢复用户名输入，session 启动成功由 host
+  退出，不由页面导航处理。
 
 该嵌入式主题已在真实 WebKitGTK/Wayland 实例中验证：allowlist 依次加载 HTML、CSS 和外部
 JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源不需要网络、内联脚本或

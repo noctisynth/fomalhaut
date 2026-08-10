@@ -322,6 +322,10 @@ async fn authentication_failure_can_be_retried() {
             ExpectedRequest::Create("alice"),
             server_error(ErrorType::AuthError, "entered password was secret"),
         ),
+        step(
+            ExpectedRequest::Cancel,
+            server_error(ErrorType::Error, "the failed PAM worker had already exited"),
+        ),
         step(ExpectedRequest::Create("alice"), Response::Success),
     ]);
     let mut client = GreeterClient::with_transport(transport);
@@ -339,7 +343,7 @@ async fn authentication_failure_can_be_retried() {
     client
         .create_session("alice".to_owned())
         .await
-        .expect("greetd automatically released the failed attempt");
+        .expect("cleanup server error still releases the failed attempt");
     assert_authenticated(
         client
             .next_event()
@@ -348,6 +352,60 @@ async fn authentication_failure_can_be_retried() {
     );
     assert_eq!(client.state(), GreeterState::Authenticated);
     assert_eq!(client.transport.remaining(), 0);
+}
+
+#[tokio::test]
+async fn authentication_failure_cleanup_accepts_success() {
+    let transport = ScriptedTransport::new([
+        step(
+            ExpectedRequest::Create("alice"),
+            server_error(ErrorType::AuthError, "authentication rejected"),
+        ),
+        step(ExpectedRequest::Cancel, Response::Success),
+    ]);
+    let mut client = GreeterClient::with_transport(transport);
+
+    client
+        .create_session("alice".to_owned())
+        .await
+        .expect("successful cleanup emits a recoverable failure");
+
+    assert_eq!(
+        client.next_event().await.expect("failure emits an event"),
+        GreeterEvent::AuthenticationFailed
+    );
+    assert_eq!(client.state(), GreeterState::Failed);
+    assert_eq!(client.transport.remaining(), 0);
+}
+
+#[tokio::test]
+async fn authentication_failure_cleanup_transport_error_disconnects() {
+    let transport = ScriptedTransport::new([
+        step(
+            ExpectedRequest::Create("alice"),
+            server_error(ErrorType::AuthError, "authentication rejected"),
+        ),
+        Step {
+            expected: ExpectedRequest::Cancel,
+            response: Err(TransportError::Unavailable(
+                "greetd closed during failure cleanup",
+            )),
+        },
+    ]);
+    let mut client = GreeterClient::with_transport(transport);
+
+    let error = client
+        .create_session("alice".to_owned())
+        .await
+        .expect_err("cleanup transport failure must be returned");
+
+    assert!(matches!(error, GreetdError::Transport(_)));
+    assert_eq!(client.state(), GreeterState::Disconnected);
+    assert!(!client.needs_cancel());
+    assert!(matches!(
+        client.next_event().await,
+        Err(GreetdError::Core(CoreError::NoPendingEvent))
+    ));
 }
 
 #[tokio::test]

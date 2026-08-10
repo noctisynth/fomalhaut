@@ -139,12 +139,14 @@ minimal theme 都会把 `Password`/`Password for <目标>` secret prompt 收敛�
 workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致性与 8 个测试、参考主题
 32 个测试和生产构建；仍需按下列项目完成真实 greeter/locker 复测。
 
-随后根据当前设备 greetd 0.10.3 的真实 PAM 拒绝日志修正 greeter 重试回归：协议在 login flow
-返回 error 时已经自动释放 session，`fomalhaut-greetd` 现在直接发布 `AuthenticationFailed`，不再
-发送会被拒绝的多余 `CancelSession`。scripted transport 与真实 Unix socket stub 都要求下一条
-请求直接是新的 `CreateSession`，同时继续断言页面/host 主动取消必须发送 `CancelSession`。验证
-通过 workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc；安装后的 WebKit/真实 PAM 复测
-仍保留在 Host 集成任务中。
+随后根据当前设备的第二次真实重试结果和 greetd 0.10.3 daemon/`agreety` 源码重新审计该恢复
+链路：`AuthError` 会终止 PAM worker，却不会自行清除 daemon 的 `Context.configuring` 槽位；
+参考 greeter 也会在 error 后发送 `CancelSession`。因此需要恢复 cleanup cancellation，并在消费
+其 `Success` 或普通 `Error` 响应后统一发布 `AuthenticationFailed`；只有 transport/codec 失败才
+断连。`fomalhaut-greetd` 状态机、scripted transport 和真实 Unix socket worker stub 已按该设计
+修复，覆盖 cleanup success、普通 server error、transport failure 及清理后的成功重试。验证通过
+workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致性与 8 个测试、参考主题
+32 个测试和生产构建及 packaging 检查；安装后的 WebKit/真实 PAM 复测仍保留在 Host 集成任务中。
 
 ## P0：greeter/locker 产品与 crate 边界
 
@@ -290,10 +292,11 @@ workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 - [x] 测试多轮 MFA 流程。
 - [x] 测试 visible、secret、info 和 error 的混合流程。
 - [x] 测试认证失败后重新认证。
-- [x] 按 greetd 0.10.3 协议修复错误密码的
-      `AuthError → 自动释放 session → Failed → auth.begin` 恢复链路：失败后不得再发送
-      `CancelSession`，必须清除旧 prompt、发布 `auth.failed` 并允许重试；主动取消仍须等待
-      `CancelSession`。scripted transport 与真实 Unix socket stub 都要拒绝失败后的多余取消。
+- [x] 按 greetd 0.10.3 daemon 实现修复错误密码的
+      `AuthError → CancelSession → Success/Error → Failed → auth.begin` 恢复链路：cleanup 响应
+      为普通 `Error` 时仍须清除旧 prompt、发布 `auth.failed` 并允许重试；transport/codec 失败必须
+      断连。scripted transport 与真实 Unix socket stub 都要覆盖该顺序，主动取消仍须等待
+      `CancelSession::Success`。
 - [x] 测试无密码账户。
 - [x] 测试 session 启动成功和失败。
 - [x] 测试 socket 断开及主动取消。
@@ -441,9 +444,9 @@ workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 
 - [ ] 定位当前安装后二进制相对 2026-08-10 05:16 成功记录的 greeter 认证回归；补充超出
       scripted greetd transport 的安装/真实 PAM 边界验证。主题异步提交已断言完整回答，真实 Unix
-      greetd IPC 必须覆盖普通拒绝自动释放且不发送 `CancelSession`、主动取消、重试、成功与
-      session start；仍需在安装后的 WebKit/真实 PAM 上确认修复，区分系统输入/PAM 状态与未覆盖的
-      宿主边界。
+      greetd IPC 必须覆盖普通拒绝后的 cleanup `CancelSession` 允许 `Success`/`Error`、主动取消、
+      重试、成功与 session start；仍需在安装后的 WebKit/真实 PAM 上确认修复，区分系统输入/PAM
+      状态与未覆盖的宿主边界。
 
 - [x] 在 `fomalhaut-web` 实现不依赖 GTK 的认证 controller，维护公开状态、core prompt 映射
       和单调事件 sequence。
@@ -697,8 +700,9 @@ workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 
 ## P2：可靠性与可维护性
 
-- [x] 修复 greetd `AuthError` 后错误发送 `CancelSession` 的回归：依赖协议的自动释放直接发布失败
-      状态，并分别覆盖“认证失败不取消”和“主动中止必须取消”的顺序及重试测试。
+- [x] 修复 greetd `AuthError` 后 cleanup 响应被错误升级为服务故障的回归：发送
+      `CancelSession` 清除 daemon configuration 槽位，消费并容忍其普通 `Error` 响应，然后发布
+      失败状态；分别覆盖认证失败 cleanup、主动中止严格成功及后续重试顺序。
 - [x] 修复参考主题认证页返回按钮的 transform containing-block 首帧跳动。
 - [x] 将参考主题 session 控件替换为 shadcn/ui Luma `Select`，覆盖选择交互和构建产物测试。
 - [ ] 添加结构化 tracing，定义敏感字段过滤策略。

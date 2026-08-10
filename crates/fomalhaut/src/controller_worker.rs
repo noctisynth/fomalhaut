@@ -323,9 +323,21 @@ mod tests {
                     .await
                     .expect("stub rejects authentication");
 
+                let failure_cleanup = Request::read_from(&mut stream)
+                    .await
+                    .expect("stub reads rejected-session cleanup");
+                assert!(matches!(failure_cleanup, Request::CancelSession));
+                Response::Error {
+                    error_type: ErrorType::Error,
+                    description: "the failed worker already exited".to_owned(),
+                }
+                .write_to(&mut stream)
+                .await
+                .expect("stub reports the already-exited worker during cleanup");
+
                 let retry = Request::read_from(&mut stream)
                     .await
-                    .expect("stub reads retry without a redundant failure cancellation");
+                    .expect("stub reads retry after consuming the cleanup response");
                 assert!(matches!(
                     retry,
                     Request::CreateSession { username } if username == "alice"

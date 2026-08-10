@@ -17,6 +17,7 @@ enum Operation {
     Authenticate,
     StartSession,
     Cancel,
+    CleanupAfterAuthenticationFailure,
 }
 
 struct ScrubbedRequest(Request);
@@ -165,7 +166,11 @@ impl<T: Transport> GreeterClient<T> {
         self.drive(Request::CancelSession, Operation::Cancel).await
     }
 
-    async fn drive(&mut self, request: Request, operation: Operation) -> Result<(), GreetdError> {
+    async fn drive(
+        &mut self,
+        request: Request,
+        mut operation: Operation,
+    ) -> Result<(), GreetdError> {
         let mut request = ScrubbedRequest::new(request);
 
         loop {
@@ -187,13 +192,18 @@ impl<T: Transport> GreeterClient<T> {
                     mut description,
                 } => {
                     description.zeroize();
+                    if matches!(operation, Operation::CleanupAfterAuthenticationFailure) {
+                        return self.finish_authentication_failure_cleanup();
+                    }
                     if matches!(operation, Operation::Authenticate)
                         && matches!(&error_type, ErrorType::AuthError)
                     {
+                        self.conversation.begin_cancel()?;
                         self.pending_identity = None;
                         self.starting_session = false;
-                        self.conversation.authentication_failed()?;
-                        return Ok(());
+                        request.replace(Request::CancelSession);
+                        operation = Operation::CleanupAfterAuthenticationFailure;
+                        continue;
                     }
                     return self.handle_server_error(error_type);
                 }
@@ -259,7 +269,15 @@ impl<T: Transport> GreeterClient<T> {
                 self.conversation.cancelled()?;
                 Ok(())
             }
+            Operation::CleanupAfterAuthenticationFailure => {
+                self.finish_authentication_failure_cleanup()
+            }
         }
+    }
+
+    fn finish_authentication_failure_cleanup(&mut self) -> Result<(), GreetdError> {
+        self.conversation.authentication_failed()?;
+        Ok(())
     }
 
     fn handle_server_error(&mut self, error_type: ErrorType) -> Result<(), GreetdError> {
@@ -337,6 +355,7 @@ const fn operation_name(operation: Operation) -> &'static str {
         Operation::Authenticate => "authenticate",
         Operation::StartSession => "start session",
         Operation::Cancel => "cancel session",
+        Operation::CleanupAfterAuthenticationFailure => "clean up after authentication failure",
     }
 }
 
