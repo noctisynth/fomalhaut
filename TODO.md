@@ -133,6 +133,12 @@ React/Nocturne 使用 `i18next`/`react-i18next` 与 TypeScript module augmentati
 和缺值在构建前拒绝、首次中文写入、无参数保留、显式切换英文、同值重复安装幂等，以及全新
 无参数安装不创建 `[locale]`。
 
+随后修正同一主题中 greeter/locker 的标准密码标签差异：Nocturne 的共享类型化 helper 与内嵌
+minimal theme 都会把 `Password`/`Password for <目标>` secret prompt 收敛到当前 locale 的
+`Password`/`密码`，其他 OTP、PIN、visible、自定义 prompt 和 PAM message 仍保持原文。验证通过
+workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致性与 8 个测试、参考主题
+32 个测试和生产构建；仍需按下列项目完成真实 greeter/locker 复测。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -222,8 +228,8 @@ React/Nocturne 使用 `i18next`/`react-i18next` 与 TypeScript module augmentati
 - [x] 实现有界 `en`/`zh-CN` UI locale：支持 `[locale].language` 覆盖和 POSIX 环境自动检测，
       将解析结果用于 session 名称并经角色快照、Schema 与泛型 SDK 严格透传；为内嵌 minimal
       theme 提供完整静态双语目录，并以 `i18next`/`react-i18next` 实现 React/Nocturne 的类型化
-      英中资源、文档语言与本地化日期/时间，同时保留 PAM prompt/message 原文，并同步配置文档、
-      自动化测试与 Semifold changeset。
+      英中资源、文档语言与本地化日期/时间；标准密码 prompt 使用主题目录，其他 PAM
+      prompt/message 保持原文，并同步配置文档、自动化测试与 Semifold changeset。
 
 ## P0：项目基础与无 UI 核心
 
@@ -586,13 +592,17 @@ React/Nocturne 使用 `i18next`/`react-i18next` 与 TypeScript module augmentati
       `fetch(` 禁令。
 - [x] 让 `dist/` 包含相对资源引用、`index.html` 和 `theme.toml`，补齐 store、组件、DOM 清空、
       文件命名与构建契约测试，并把 format/typecheck/test/build 接入根脚本和 CI。
+- [x] 让 Nocturne 与内嵌 minimal theme 严格识别 `Password`/`Password for <目标>` 标准 secret
+      prompt，并统一使用当前 locale 的 `Password`/`密码`；greeter/locker 共用同一 React helper，
+      其他 OTP、PIN、visible、自定义 prompt 和 PAM message 继续原样展示并覆盖回归测试。
 - [x] 移除 Nocturne 的 viewport 级 `filter: blur()` 与交互控件 `backdrop-filter`，改用静态
       多层 gradient 和半透明实色，并添加构建产物回归检查。
 - [ ] 在 2560×1600、240 Hz 的真实 niri locker 中复测键盘/指针响应，并在 greeter 中确认
       性能优化没有破坏共用页面的视觉与交互。
 - [ ] 在真实 WebKitGTK/Cage 中验证 React module script、CSS、用户/session、认证与退出流程。
 - [ ] 在真实 greeter 与 niri locker 中验证 locale 环境自动检测和 `[locale]` 覆盖、中文字体
-      fallback、Desktop Entry 本地化 session 名称，以及 PAM prompt/message 保持系统原文。
+      fallback、Desktop Entry 本地化 session 名称、标准密码 prompt 跟随 UI locale，以及其他
+      PAM prompt/message 保持系统原文。
 
 ## P1：用户发现与头像
 

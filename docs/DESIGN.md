@@ -1262,8 +1262,12 @@ entrypoint = "index.html"
   不把消息作为 HTML 插入。
 - 根据 `state.get.locale` 在完整的英语与简体中文消息表之间切换，设置文档 `lang` 并使用同一
   locale 格式化日期；首次快照前只允许用 `navigator.languages` 选择 loading/bridge-failure
-  文案，收到快照后必须以宿主 locale 为准。PAM 提供的 prompt 与 message 是外部认证栈文本，
-  必须原样安全展示，不由主题猜测或翻译。
+  文案，收到快照后必须以宿主 locale 为准。认证 backend 提供的 prompt 与 message 是外部认证
+  栈文本，默认必须原样安全展示，不做机器翻译；唯一的展示归一化是 `secret` prompt 中严格匹配
+  ASCII `Password` 或 `Password for <非空目标>`（忽略大小写、首尾空白和可选末尾冒号）的标准
+  密码提示，两个角色都必须改用主题目录中的 `Password`/`密码`，避免泄露目标名称并保证同页一致。
+  其他 secret、visible、OTP、PIN、自定义 prompt 和 info/error message 继续原样展示，不能仅因
+  `secret` 类型就假定输入一定是密码。
 - 使用原生 label、form、input、select、button、`aria-live` 和键盘提交提供最小无障碍能力。
   greetd 返回认证错误后，Core 必须先发送 `CancelSession` 并确认旧会话释放，再向前端发布失败
   状态；登录失败或取消后恢复用户名输入，session 启动成功由 host 退出，不由页面导航处理。
@@ -1315,8 +1319,10 @@ TypeScript 检查；不得在组件中散落未受目录管理的界面字符串
 首次快照前的 loading/fatal 文案可以按 `navigator.languages` 临时选择；收到快照后必须调用
 i18next 切换到宿主 locale、同步 `<html lang>`，并让日期/时间格式使用同一 locale。资源全部随
 可信主题 bundle 提供，不启用网络 backend、cookie/localStorage cache 或运行期资源下载。
-PAM prompt/message 与宿主返回的诊断文本仍按可信纯文本原样显示，不做机器翻译。无框架、无
-构建步骤的内嵌 minimal theme 继续使用自身完整的静态双语目录，不为此引入运行期依赖。
+React 页面必须用同一个类型化 helper 为 greeter/locker 的标准密码 prompt 选择 `form.password`；
+其他 PAM prompt/message 与宿主返回的诊断文本仍按可信纯文本原样显示，不做机器翻译。无框架、
+无构建步骤的内嵌 minimal theme 必须实现相同的窄匹配规则并继续使用自身完整的静态双语目录，
+不为此引入运行期依赖。
 
 主题是单文档、无 URL router 的内存 SPA。Zustand 使用判别状态在用户选择页、已知用户认证页、
 其他用户认证页和身份未知的认证恢复页之间切换，不调用 history 或产生新的顶层导航。零个摘要

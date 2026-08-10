@@ -43,10 +43,10 @@ describe("SPA authentication UI", () => {
     dateFormat.mockRestore();
   });
 
-  test("localizes locker-owned failures without translating PAM prompts", async () => {
+  test("localizes locker password prompts and owned failures", async () => {
     const transport = new MockTransport(
       lockerSnapshot(
-        { promptId: 9, kind: "secret", message: "Password from PAM" },
+        { promptId: 9, kind: "secret", message: "Password for alice:" },
         [],
         "zh-CN",
       ),
@@ -54,7 +54,8 @@ describe("SPA authentication UI", () => {
     await renderTheme(transport);
 
     expect(screen.getByText("Fomalhaut 锁屏")).toBeVisible();
-    expect(screen.getByLabelText("Password from PAM")).toBeEnabled();
+    expect(screen.getByLabelText("密码")).toBeEnabled();
+    expect(screen.queryByText("Password for alice:")).not.toBeInTheDocument();
     act(() => {
       transport.emit({
         protocol: 1,
@@ -71,6 +72,34 @@ describe("SPA authentication UI", () => {
     });
     expect(screen.getByRole("alert")).toHaveTextContent("认证失败，请重试。");
     expect(screen.getByRole("button", { name: "重试" })).toBeVisible();
+  });
+
+  test("preserves non-password secret prompts from PAM", async () => {
+    const transport = new MockTransport(
+      lockerSnapshot(
+        { promptId: 10, kind: "secret", message: "Verification code:" },
+        [],
+        "zh-CN",
+      ),
+    );
+    await renderTheme(transport);
+
+    expect(screen.getByLabelText("Verification code:")).toBeEnabled();
+    expect(screen.queryByLabelText("密码")).not.toBeInTheDocument();
+  });
+
+  test("uses the same localized password label for greeter prompts", async () => {
+    const transport = new MockTransport(
+      snapshot(
+        [],
+        { promptId: 11, kind: "secret", message: "Password:" },
+        [],
+        "zh-CN",
+      ),
+    );
+    await renderTheme(transport);
+
+    expect(screen.getByLabelText("密码")).toBeEnabled();
   });
 
   test("renders locker mode for the fixed identity without greeter controls", async () => {

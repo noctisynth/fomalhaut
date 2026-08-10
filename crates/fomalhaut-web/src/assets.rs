@@ -274,6 +274,7 @@ const translations = {
     users: 'Users',
     otherUser: 'Other user',
     username: 'Username',
+    password: 'Password',
     session: 'Session',
     continue: 'Continue',
     cancel: 'Cancel',
@@ -308,6 +309,7 @@ const translations = {
     users: '用户',
     otherUser: '其他用户',
     username: '用户名',
+    password: '密码',
     session: '会话',
     continue: '继续',
     cancel: '取消',
@@ -362,6 +364,18 @@ function browserLocale() {
 
 function text(key) {
   return translations[locale][key];
+}
+
+const passwordPromptPattern = /^password\s*:?\s*$/i;
+const passwordForPromptPattern = /^password\s+for\s+[^:\s](?:[^:\r\n]*[^:\s])?\s*:?\s*$/i;
+
+function promptLabel(prompt) {
+  if (prompt.kind === 'secret' &&
+      (passwordPromptPattern.test(prompt.message) ||
+       passwordForPromptPattern.test(prompt.message))) {
+    return text('password');
+  }
+  return prompt.message;
 }
 
 function applyLocale(nextLocale) {
@@ -439,7 +453,7 @@ function showPrompt(prompt) {
   credential.type = prompt.kind === 'secret' ? 'password' : 'text';
   credential.name = 'response';
   credential.autocomplete = 'off';
-  credentialLabel.textContent = prompt.message;
+  credentialLabel.textContent = promptLabel(prompt);
   submit.textContent = text('respond');
   cancel.hidden = false;
   if (!terminal) {
@@ -873,6 +887,9 @@ mod tests {
         assert!(script.contains("document.documentElement.lang = locale"));
         assert!(script.contains("navigator.languages"));
         assert!(script.contains("'zh-CN':"));
+        assert!(script.contains("password: '密码'"));
+        assert!(script.contains("function promptLabel(prompt)"));
+        assert!(script.contains("credentialLabel.textContent = promptLabel(prompt)"));
         assert!(script.contains("认证失败，请重试。"));
         assert!(script.contains("user.avatarUrl"));
         assert!(script.contains("message.sequence <= lastSequence"));

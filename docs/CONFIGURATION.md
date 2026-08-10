@@ -48,8 +48,10 @@ language = "zh-CN"
 首阶段只接受 `en` 和 `zh-CN`；其他值会使严格配置校验失败。修改配置后需要重启 greeter 或
 locker 进程才会生效。宿主会把最终语言写入 `state.get.locale`，同时用它选择 Desktop Entry
 中的本地化 session 名称；主题收到快照后必须以该字段覆盖浏览器的临时语言判断。Fomalhaut
-自身的界面文案支持英语和简体中文，但 PAM module 提供的 prompt/message 属于外部认证文本，
-会按原文显示，不做机器翻译。更新安装会保留已有 `[locale]` 配置。
+自身的界面文案支持英语和简体中文。PAM module 提供的标准 `Password` 或
+`Password for <目标>` secret prompt 会统一显示为当前 UI locale 的 `Password`/`密码`；OTP、
+PIN、visible、自定义 prompt 和 info/error message 仍按原文显示，不做机器翻译。更新安装会
+保留已有 `[locale]` 配置。
 
 ### 全新安装
 

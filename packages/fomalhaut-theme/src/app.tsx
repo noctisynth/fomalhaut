@@ -47,6 +47,23 @@ function useMessages(): (key: TranslationKey) => string {
   return t;
 }
 
+const passwordPromptPattern = /^password\s*:?\s*$/i;
+const passwordForPromptPattern =
+  /^password\s+for\s+[^:\s](?:[^:\r\n]*[^:\s])?\s*:?\s*$/i;
+
+function usePromptLabel(prompt: Prompt | null): string {
+  const t = useMessages();
+  if (
+    !prompt ||
+    (prompt.kind === "secret" &&
+      (passwordPromptPattern.test(prompt.message) ||
+        passwordForPromptPattern.test(prompt.message)))
+  ) {
+    return t("form.password");
+  }
+  return prompt.message;
+}
+
 export function App() {
   const phase = useThemeStore((state) => state.phase);
   const snapshot = useThemeStore((state) => state.snapshot);
@@ -500,6 +517,7 @@ function ManualAuthenticationForm({
   const retryAuthentication = useThemeStore(
     (state) => state.retryAuthentication,
   );
+  const promptLabel = usePromptLabel(prompt);
   const usernameInput = useRef<HTMLInputElement>(null);
   const responseInput = useRef<HTMLInputElement>(null);
 
@@ -569,9 +587,7 @@ function ManualAuthenticationForm({
         </InputGroup>
       </div>
       <div className={cn("space-y-2", !prompt && "opacity-60")}>
-        <Label htmlFor="manual-credential">
-          {prompt?.message ?? t("form.password")}
-        </Label>
+        <Label htmlFor="manual-credential">{promptLabel}</Label>
         <InputGroup
           className="h-12 border-white/15 bg-[#081426]/90"
           data-disabled={busy || !prompt}
@@ -635,6 +651,7 @@ function ManualAuthenticationForm({
 
 function PromptForm({ prompt }: { prompt: Prompt }) {
   const t = useMessages();
+  const promptLabel = usePromptLabel(prompt);
   const busy = useThemeStore((state) => state.busy);
   const respondToPrompt = useThemeStore((state) => state.respondToPrompt);
   const responseInput = useRef<HTMLInputElement>(null);
@@ -652,7 +669,7 @@ function PromptForm({ prompt }: { prompt: Prompt }) {
 
   return (
     <form className="w-full space-y-2" onSubmit={submit}>
-      <Label htmlFor="prompt-response">{prompt.message}</Label>
+      <Label htmlFor="prompt-response">{promptLabel}</Label>
       <InputGroup className="h-12 border-white/15 bg-[#081426]/90">
         <InputGroupAddon>
           <LockKeyhole aria-hidden="true" />
