@@ -17,7 +17,6 @@ enum Operation {
     Authenticate,
     StartSession,
     Cancel,
-    CancelAfterAuthenticationFailure,
 }
 
 struct ScrubbedRequest(Request);
@@ -166,11 +165,7 @@ impl<T: Transport> GreeterClient<T> {
         self.drive(Request::CancelSession, Operation::Cancel).await
     }
 
-    async fn drive(
-        &mut self,
-        request: Request,
-        mut operation: Operation,
-    ) -> Result<(), GreetdError> {
+    async fn drive(&mut self, request: Request, operation: Operation) -> Result<(), GreetdError> {
         let mut request = ScrubbedRequest::new(request);
 
         loop {
@@ -195,11 +190,10 @@ impl<T: Transport> GreeterClient<T> {
                     if matches!(operation, Operation::Authenticate)
                         && matches!(&error_type, ErrorType::AuthError)
                     {
-                        self.conversation.begin_cancel()?;
                         self.pending_identity = None;
-                        request.replace(Request::CancelSession);
-                        operation = Operation::CancelAfterAuthenticationFailure;
-                        continue;
+                        self.starting_session = false;
+                        self.conversation.authentication_failed()?;
+                        return Ok(());
                     }
                     return self.handle_server_error(error_type);
                 }
@@ -263,10 +257,6 @@ impl<T: Transport> GreeterClient<T> {
             }
             Operation::Cancel => {
                 self.conversation.cancelled()?;
-                Ok(())
-            }
-            Operation::CancelAfterAuthenticationFailure => {
-                self.conversation.authentication_failed()?;
                 Ok(())
             }
         }
@@ -347,9 +337,6 @@ const fn operation_name(operation: Operation) -> &'static str {
         Operation::Authenticate => "authenticate",
         Operation::StartSession => "start session",
         Operation::Cancel => "cancel session",
-        Operation::CancelAfterAuthenticationFailure => {
-            "cancel session after authentication failure"
-        }
     }
 }
 

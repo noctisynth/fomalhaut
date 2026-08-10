@@ -322,7 +322,6 @@ async fn authentication_failure_can_be_retried() {
             ExpectedRequest::Create("alice"),
             server_error(ErrorType::AuthError, "entered password was secret"),
         ),
-        step(ExpectedRequest::Cancel, Response::Success),
         step(ExpectedRequest::Create("alice"), Response::Success),
     ]);
     let mut client = GreeterClient::with_transport(transport);
@@ -340,7 +339,7 @@ async fn authentication_failure_can_be_retried() {
     client
         .create_session("alice".to_owned())
         .await
-        .expect("the failed greetd attempt was explicitly cancelled");
+        .expect("greetd automatically released the failed attempt");
     assert_authenticated(
         client
             .next_event()
@@ -348,6 +347,7 @@ async fn authentication_failure_can_be_retried() {
             .expect("retry emits authentication success"),
     );
     assert_eq!(client.state(), GreeterState::Authenticated);
+    assert_eq!(client.transport.remaining(), 0);
 }
 
 #[tokio::test]

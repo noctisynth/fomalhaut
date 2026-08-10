@@ -323,18 +323,9 @@ mod tests {
                     .await
                     .expect("stub rejects authentication");
 
-                let failure_cancel = Request::read_from(&mut stream)
-                    .await
-                    .expect("worker cancels the rejected greetd session");
-                assert!(matches!(failure_cancel, Request::CancelSession));
-                Response::Success
-                    .write_to(&mut stream)
-                    .await
-                    .expect("stub accepts rejected-session cancellation");
-
                 let retry = Request::read_from(&mut stream)
                     .await
-                    .expect("stub reads authentication retry");
+                    .expect("stub reads retry without a redundant failure cancellation");
                 assert!(matches!(
                     retry,
                     Request::CreateSession { username } if username == "alice"
