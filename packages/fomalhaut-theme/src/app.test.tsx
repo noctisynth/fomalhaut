@@ -30,7 +30,9 @@ describe("SPA authentication UI", () => {
 
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(screen.getByRole("heading", { name: "谁要登录？" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /其他用户/ })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /其他用户/ }));
+    expect(screen.getByLabelText("用户名")).toBeEnabled();
+    expect(screen.getByLabelText("密码")).toBeDisabled();
     expect(dateFormat).toHaveBeenCalledWith(
       "zh-CN",
       expect.objectContaining({ weekday: "long" }),
@@ -198,12 +200,12 @@ describe("SPA authentication UI", () => {
         protocol: 1,
         sequence: 1,
         event: "auth.prompt",
-        data: { promptId: 9, kind: "secret", message: "Password for carol" },
+        data: { promptId: 9, kind: "secret", message: "Password" },
       });
     });
 
     expect(screen.getByLabelText("Username")).toHaveValue("carol");
-    expect(screen.getByLabelText("Password for carol")).toBeEnabled();
+    expect(screen.getByLabelText("Password")).toBeEnabled();
   });
 
   test("clears a secret answer before its asynchronous request completes", async () => {

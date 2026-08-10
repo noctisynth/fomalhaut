@@ -8,7 +8,7 @@ import type {
   RequestEnvelope,
   StateSnapshotFor,
 } from "fomalhaut-sdk";
-import { detectBrowserLocale } from "@/i18n";
+import { detectBrowserLocale, translate } from "@/i18n";
 
 const DEVELOPMENT_MARKER = "FOMALHAUT_DEVELOPMENT_TRANSPORT";
 
@@ -52,14 +52,10 @@ export class DevelopmentTransport implements FomalhautTransport {
       case "auth.begin": {
         this.#state.messages = [];
         this.#setAuthentication("authenticating");
-        const username =
-          "username" in request.params
-            ? request.params.username
-            : "the current user";
         this.#state.prompt = {
           promptId: 1,
           kind: "secret",
-          message: `Password for ${username}`,
+          message: translate(this.#state.locale, "form.password"),
         };
         this.#setAuthentication("waiting_for_secret");
         this.#emit({ event: "auth.prompt", data: this.#state.prompt });
