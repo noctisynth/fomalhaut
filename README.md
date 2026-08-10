@@ -128,8 +128,8 @@ uses greetd; it restarts the service but does not enable it:
 ./install.sh --greeter-scale 1.5 --locker-scale 1.0 --restart
 ```
 
-Use `./install.sh --help` to see shared and per-role scale, cursor size,
-greeter account, installation prefix, and staging options. See the
+Use `./install.sh --help` to see shared and per-role scale, UI language, cursor
+size, greeter account, installation prefix, and staging options. See the
 [configuration and installation guide](docs/CONFIGURATION.md) for the complete
 setup and upgrade behavior.
 

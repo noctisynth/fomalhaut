@@ -639,7 +639,10 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   `scale.greeter`/`scale.locker` dotted keys。共享参数不得与任一角色参数混用，所有值都在写入前
   使用与 Rust 配置相同的有限浮点数和 `0.5..=4.0` 边界校验。没有显式缩放参数时，升级必须保留
   管理员现有的标量或角色表，不得在两种表示之间隐式迁移。首次创建配置且未传缩放参数时写入
-  共享 `scale = 1.0`。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
+  共享 `scale = 1.0`。安装器另接受 `--language LANGUAGE`，只允许运行时配置支持的精确值 `en`
+  与 `zh-CN`；显式传入时通过同一结构化 updater 写入或更新 `[locale].language`，省略时无论首次
+  安装还是原地更新都不得创建、删除或改写 `[locale]`，继续由进程环境自动检测或保留管理员已有
+  覆盖。首次创建 `/etc/fomalhaut/config.toml` 时还必须写入
   `[power].actions = ["poweroff", "reboot", "suspend"]`，使标准源码安装立即提供经过 logind
   能力过滤的电源菜单；已有配置无论是缺少 `[power]`、显式空数组还是自定义 allowlist，都视为
   管理员策略并原样保留，重复安装和升级不得借机扩大权限。其他 section 和注释同样尽量原样

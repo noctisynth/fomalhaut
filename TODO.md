@@ -128,6 +128,11 @@ React/Nocturne 使用 `i18next`/`react-i18next` 与 TypeScript module augmentati
 并在隔离 system root 中确认更新安装保留管理员 `[locale]`。尚未在真实 greeter/locker 进程中
 复测语言切换、中文字体 fallback 和本地化 session 名称。
 
+根据真实 systemd user manager 继承英文系统 locale 的部署结果，源码安装器现已增加显式
+`--language en|zh-CN` 覆盖；省略参数仍不创建或改写 `[locale]`。隔离 system root 已验证非法值
+和缺值在构建前拒绝、首次中文写入、无参数保留、显式切换英文、同值重复安装幂等，以及全新
+无参数安装不创建 `[locale]`。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -723,6 +728,9 @@ React/Nocturne 使用 `i18next`/`react-i18next` 与 TypeScript module augmentati
 - [x] 更新源码安装器缩放参数：保留 `--display-scale` 写共享标量，新增必须成对使用的
       `--greeter-scale`/`--locker-scale` 写角色 dotted keys，三者互斥并共用 Rust 的数值边界；
       隔离测试覆盖首次创建、标量/角色互换、无参数保留和重复安装幂等。
+- [x] 为源码安装器增加 `--language en|zh-CN`：显式传入时安全写入 `[locale].language`，省略时
+      首次安装继续不创建该 section，更新安装保留管理员已有值；补齐参数拒绝、首次写入、更新
+      覆盖、无参数保留与重复安装幂等验证。
 - [x] 为源码安装器添加遵守 TTY 与 `NO_COLOR` 的分级彩色输出。
 - [ ] 确定 greetd、WebKitGTK、Cage、PAM 和 `gtk4-layer-shell` 的最低版本；GTK 编译
       基线已是 4.18，locker 的 layer-shell 能力基线是 1.2+，Rust 继续跟随 stable，

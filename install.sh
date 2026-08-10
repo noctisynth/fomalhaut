@@ -10,6 +10,7 @@ prefix="/usr/local"
 display_scale=""
 greeter_scale=""
 locker_scale=""
+language=""
 cursor_size="48"
 greeter_user="greeter"
 restart_greetd=false
@@ -83,6 +84,8 @@ usage() {
     'Set the greeter scale; requires --locker-scale.'
   printf '  %s%-23s%s %s\n' "$color_cyan" '--locker-scale SCALE' "$color_reset" \
     'Set the locker scale; requires --greeter-scale.'
+  printf '  %s%-23s%s %s\n' "$color_cyan" '--language LANGUAGE' "$color_reset" \
+    'Set [locale].language to en or zh-CN.'
   printf '  %s%-23s%s %s\n' "$color_cyan" '--cursor-size SIZE' "$color_reset" \
     'Set Cage XCURSOR_SIZE (default: 48).'
   printf '  %s%-23s%s %s\n' "$color_cyan" '--greeter-user USER' "$color_reset" \
@@ -135,6 +138,11 @@ while (($# > 0)); do
       locker_scale="$2"
       shift 2
       ;;
+    --language)
+      require_value "$1" "${2-}"
+      language="$2"
+      shift 2
+      ;;
     --cursor-size)
       require_value "$1" "${2-}"
       cursor_size="$2"
@@ -171,6 +179,8 @@ done
 [[ "$prefix" == /* && "$prefix" != "/" ]] || die "--prefix must be an absolute path other than /"
 [[ "$system_root" == /* ]] || die "--system-root must be an absolute path"
 [[ "$greeter_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "--greeter-user is not a safe account name"
+[[ -z "$language" || "$language" == "en" || "$language" == "zh-CN" ]] \
+  || die "--language must be en or zh-CN"
 [[ "$cursor_size" =~ ^[0-9]+$ ]] || die "--cursor-size must be an integer"
 ((cursor_size >= 16 && cursor_size <= 256)) || die "--cursor-size must be between 16 and 256"
 [[ -z "$display_scale" || ( -z "$greeter_scale" && -z "$locker_scale" ) ]] \
@@ -794,6 +804,9 @@ elif [[ -n "$greeter_scale" ]]; then
   fomalhaut_updates+=(display scale display-scale-roles "$greeter_scale,$locker_scale")
 elif [[ ! -e "$fomalhaut_config" ]]; then
   fomalhaut_updates+=(display scale display-scale-shared "1.0")
+fi
+if [[ -n "$language" ]]; then
+  fomalhaut_updates+=(locale language string "$language")
 fi
 if [[ ! -e "$fomalhaut_config" ]]; then
   fomalhaut_updates+=(power actions string-array '["poweroff", "reboot", "suspend"]')

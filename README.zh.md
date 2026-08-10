@@ -112,8 +112,9 @@ sudo systemctl enable --now greetd.service
 ./install.sh --display-scale 1.5 --restart
 ```
 
-运行 `./install.sh --help` 可以查看显示缩放、光标大小、greeter 用户、安装前缀和隔离目录等
-选项。完整的安装与升级行为见[配置与安装文档](docs/CONFIGURATION.md)。
+运行 `./install.sh --help` 可以查看显示缩放、界面语言、光标大小、greeter 用户、安装前缀和
+隔离目录等选项。需要显式使用中文时可传入 `--language zh-CN`；完整的安装与升级行为见
+[配置与安装文档](docs/CONFIGURATION.md)。
 
 ## 使用 Fomalhaut
 
