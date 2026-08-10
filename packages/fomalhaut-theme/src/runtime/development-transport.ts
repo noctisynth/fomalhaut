@@ -8,6 +8,7 @@ import type {
   RequestEnvelope,
   StateSnapshotFor,
 } from "fomalhaut-sdk";
+import { detectBrowserLocale } from "@/i18n";
 
 const DEVELOPMENT_MARKER = "FOMALHAUT_DEVELOPMENT_TRANSPORT";
 
@@ -16,6 +17,7 @@ export class DevelopmentTransport implements FomalhautTransport {
   #sequence = 0;
   #state: StateSnapshotFor<"greeter"> = {
     mode: "greeter",
+    locale: detectBrowserLocale(),
     authentication: "idle",
     login: "idle",
     prompt: null,

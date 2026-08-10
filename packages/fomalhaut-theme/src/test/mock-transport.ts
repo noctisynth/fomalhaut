@@ -5,6 +5,7 @@ import type {
   RequestEnvelope,
   StateSnapshot,
   StateSnapshotFor,
+  UiLocale,
 } from "fomalhaut-sdk";
 
 export class MockTransport implements FomalhautTransport {
@@ -51,9 +52,11 @@ export function snapshot(
   users: StateSnapshotFor<"greeter">["users"] = [],
   prompt: StateSnapshot["prompt"] = null,
   power: StateSnapshot["capabilities"]["power"] = [],
+  locale: UiLocale = "en",
 ): StateSnapshotFor<"greeter"> {
   return {
     mode: "greeter",
+    locale,
     authentication: prompt
       ? prompt.kind === "secret"
         ? "waiting_for_secret"
@@ -73,9 +76,11 @@ export function snapshot(
 export function lockerSnapshot(
   prompt: StateSnapshot["prompt"] = null,
   power: StateSnapshot["capabilities"]["power"] = [],
+  locale: UiLocale = "en",
 ): StateSnapshotFor<"locker"> {
   return {
     mode: "locker",
+    locale,
     authentication: prompt
       ? prompt.kind === "secret"
         ? "waiting_for_secret"

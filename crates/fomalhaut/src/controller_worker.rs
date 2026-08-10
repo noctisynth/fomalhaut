@@ -16,7 +16,7 @@ use fomalhaut_logind::LogindPowerControl;
 use fomalhaut_user::discover_users;
 use fomalhaut_web::{
     controller::{GreeterController, TrustedSession},
-    protocol::RequestEnvelope,
+    protocol::{RequestEnvelope, UiLocale},
 };
 
 const CHANNEL_CAPACITY: usize = 8;
@@ -63,6 +63,7 @@ impl WorkerHandle {
         sessions: Vec<TrustedSession>,
         users: UserDiscoveryConfig,
         power: PowerConfig,
+        locale: UiLocale,
     ) -> Result<(Self, Receiver<WorkerOutput>), WorkerSpawnError> {
         let (command_sender, command_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         let (output_sender, output_receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
@@ -74,6 +75,7 @@ impl WorkerHandle {
                     sessions,
                     users,
                     power,
+                    locale,
                     command_receiver,
                     output_sender,
                 );
@@ -141,6 +143,7 @@ fn run_worker(
     sessions: Vec<TrustedSession>,
     user_config: UserDiscoveryConfig,
     power_config: PowerConfig,
+    locale: UiLocale,
     commands: Receiver<WorkerCommand>,
     outputs: SyncSender<WorkerOutput>,
 ) {
@@ -174,7 +177,8 @@ fn run_worker(
         }
     };
     let power = LogindPowerControl::discover(&power_config);
-    let mut controller = GreeterController::with_power_control(client, sessions, users, power);
+    let mut controller =
+        GreeterController::with_locale_and_power_control(client, sessions, users, power, locale);
     if outputs.send(WorkerOutput::Ready(avatars)).is_err() {
         let _ = runtime.block_on(controller.cancel_for_lifecycle());
         return;
@@ -257,7 +261,7 @@ mod tests {
     use fomalhaut_core::SessionCommand;
     use fomalhaut_web::{
         controller::TrustedSession,
-        protocol::{SessionKind, SessionSummary, decode_request},
+        protocol::{SessionKind, SessionSummary, UiLocale, decode_request},
     };
     use greetd_ipc::{AuthMessageType, ErrorType, Request, Response, codec::TokioCodec};
 
@@ -395,6 +399,7 @@ mod tests {
             Vec::new(),
             UserDiscoveryConfig::disabled(),
             PowerConfig::default(),
+            UiLocale::En,
         )
         .expect("worker thread starts");
         assert!(matches!(
@@ -592,6 +597,7 @@ mod tests {
             sessions,
             UserDiscoveryConfig::disabled(),
             PowerConfig::default(),
+            UiLocale::En,
         )
         .expect("session-start worker starts");
         assert!(matches!(

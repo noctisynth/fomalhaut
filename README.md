@@ -141,8 +141,9 @@ by your system's PAM configuration. Fomalhaut hands the authenticated session
 back to greetd and exits once the desktop starts.
 
 System configuration lives at `/etc/fomalhaut/config.toml`. It controls the
-theme, display scale, account provider, session search paths, and optional power
-actions. The format, greetd/Cage example, and external theme setup are documented
+theme, UI locale override, display scale, account provider, session search
+paths, and optional power actions. The format, greetd/Cage example, and external
+theme setup are documented
 in the [configuration guide](docs/CONFIGURATION.md).
 
 Inside a supported Wayland session, reload the installed user unit and start a

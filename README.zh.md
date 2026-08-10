@@ -120,8 +120,8 @@ sudo systemctl enable --now greetd.service
 greetd 启动 Fomalhaut 后，可以选择发现的用户或使用手工登录，选择可用的桌面会话，并依次回答
 系统 PAM 配置给出的认证提示。认证成功后，Fomalhaut 将会话交还给 greetd，并在桌面启动后退出。
 
-系统配置文件位于 `/etc/fomalhaut/config.toml`，可以设置主题、显示缩放、用户 provider、会话
-搜索目录和可选电源操作。配置格式、greetd/Cage 示例和外部主题用法见
+系统配置文件位于 `/etc/fomalhaut/config.toml`，可以设置主题、界面语言覆盖、显示缩放、用户
+provider、会话搜索目录和可选电源操作。配置格式、greetd/Cage 示例和外部主题用法见
 [配置文档](docs/CONFIGURATION.md)。
 
 在受支持的 Wayland session 中，重载已安装的用户服务并启动一次具有可验证 readiness 的锁屏：

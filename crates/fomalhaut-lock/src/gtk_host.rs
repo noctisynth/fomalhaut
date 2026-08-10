@@ -10,12 +10,15 @@ use std::{
     time::Duration,
 };
 
-use fomalhaut_config::AppConfig;
+use fomalhaut_config::{AppConfig, UiLocale as ConfigUiLocale};
 use fomalhaut_gtk::{
     ApplicationHandle, HostedView, ViewCallbacks, build_web_view, run_application,
 };
 use fomalhaut_pam::CurrentUserIdentity;
-use fomalhaut_web::{protocol::RuntimeMode, theme::ThemeSource};
+use fomalhaut_web::{
+    protocol::{RuntimeMode, UiLocale},
+    theme::ThemeSource,
+};
 use gtk4 as gtk;
 use gtk4::{gdk, gio, glib, prelude::*};
 use gtk4_session_lock::{Instance, is_supported};
@@ -41,8 +44,12 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
     let theme_directory = locker.theme_directory().map(PathBuf::from);
     validate_theme(theme_directory.as_ref())?;
     let identity = CurrentUserIdentity::discover().map_err(|_| HostError::Identity)?;
-    let (worker, native) = WorkerHandle::spawn(identity, locker.power().clone())
-        .map_err(|_| HostError::WorkerSpawn)?;
+    let (worker, native) = WorkerHandle::spawn(
+        identity,
+        locker.power().clone(),
+        protocol_locale(locker.locale()),
+    )
+    .map_err(|_| HostError::WorkerSpawn)?;
     let instance = Instance::new();
     let state = Rc::new(LockHost {
         application,
@@ -60,6 +67,13 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
     connect_session_lock(&state);
     poll_native_events(&state, native);
     Ok(())
+}
+
+const fn protocol_locale(locale: ConfigUiLocale) -> UiLocale {
+    match locale {
+        ConfigUiLocale::En => UiLocale::En,
+        ConfigUiLocale::ZhCn => UiLocale::ZhCn,
+    }
 }
 
 fn validate_theme(theme_directory: Option<&PathBuf>) -> Result<(), HostError> {

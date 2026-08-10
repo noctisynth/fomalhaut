@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -36,15 +37,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { ThemeScreen } from "@/state/theme-store";
 import { useThemeStore } from "@/state/theme-store-provider";
+
+function useMessages(): (key: TranslationKey) => string {
+  const { t } = useTranslation();
+  return t;
+}
 
 export function App() {
   const phase = useThemeStore((state) => state.phase);
   const snapshot = useThemeStore((state) => state.snapshot);
   const screen = useThemeStore((state) => state.screen);
   const error = useThemeStore((state) => state.error);
+  const locale = useThemeStore((state) => state.locale);
+  const { i18n } = useTranslation();
+  const t = useMessages();
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    void i18n.changeLanguage(locale);
+  }, [i18n, locale]);
 
   return (
     <main
@@ -62,8 +77,8 @@ export function App() {
           <AuthenticationBackButton
             label={
               screen.name === "authentication-recovery"
-                ? "Cancel authentication"
-                : "Back to users"
+                ? t("back.cancel-authentication")
+                : t("back.users")
             }
           />
         )}
@@ -107,6 +122,7 @@ function Background() {
 
 function Clock() {
   const [now, setNow] = useState(() => new Date());
+  const locale = useThemeStore((state) => state.locale);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
@@ -116,10 +132,13 @@ function Clock() {
   return (
     <div className="absolute top-7 left-8 z-20 text-left sm:top-10 sm:left-12">
       <time className="block text-3xl font-light tracking-tight text-starlight sm:text-4xl">
-        {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        {now.toLocaleTimeString(locale, {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
       </time>
       <time className="mt-1 block text-sm text-muted-foreground sm:text-base">
-        {now.toLocaleDateString([], {
+        {now.toLocaleDateString(locale, {
           weekday: "long",
           month: "long",
           day: "numeric",
@@ -130,18 +149,20 @@ function Clock() {
 }
 
 function LoadingView() {
+  const t = useMessages();
   return (
     <div
       className="flex flex-col items-center gap-4 text-center"
       aria-live="polite"
     >
       <LoaderCircle className="size-8 animate-spin text-primary motion-reduce:animate-none" />
-      <p className="text-sm text-muted-foreground">Connecting to Fomalhaut…</p>
+      <p className="text-sm text-muted-foreground">{t("loading.connecting")}</p>
     </div>
   );
 }
 
 function UnavailableView({ message }: { message: string | null }) {
+  const t = useMessages();
   return (
     <div
       className={cn(
@@ -150,7 +171,7 @@ function UnavailableView({ message }: { message: string | null }) {
       )}
     >
       <Alert variant="destructive">
-        <AlertTitle>Fomalhaut unavailable</AlertTitle>
+        <AlertTitle>{t("unavailable.title")}</AlertTitle>
         <AlertDescription>{message}</AlertDescription>
       </Alert>
     </div>
@@ -173,6 +194,7 @@ function Screen({ screen }: { screen: ThemeScreen }) {
 }
 
 function UserSelectionView() {
+  const t = useMessages();
   const users = useThemeStore((state) =>
     state.snapshot?.mode === "greeter" ? state.snapshot.users : [],
   );
@@ -195,10 +217,10 @@ function UserSelectionView() {
         id="selection-title"
         className="text-3xl font-light tracking-tight sm:text-5xl"
       >
-        Who’s signing in?
+        {t("selection.title")}
       </h1>
       <p className="mt-3 text-sm text-muted-foreground">
-        Choose an account to continue on this device.
+        {t("selection.description")}
       </p>
 
       <div
@@ -238,9 +260,11 @@ function UserSelectionView() {
             <UserRoundPlus className="size-6" aria-hidden="true" />
           </span>
           <span>
-            <span className="block font-medium">Other user</span>
+            <span className="block font-medium">
+              {t("selection.other-user")}
+            </span>
             <span className="mt-1 block text-xs text-muted-foreground">
-              Enter a username manually
+              {t("selection.manual-username")}
             </span>
           </span>
         </button>
@@ -308,6 +332,7 @@ function KnownUserView({ user }: { user: UserSummary }) {
 
 function OtherUserView({ username }: { username: string | null }) {
   const prompt = useThemeStore((state) => state.snapshot?.prompt ?? null);
+  const t = useMessages();
 
   return (
     <AuthenticationLayout>
@@ -315,9 +340,11 @@ function OtherUserView({ username }: { username: string | null }) {
         <p className="mb-3 text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
           Fomalhaut
         </p>
-        <h1 className="text-3xl font-medium tracking-tight">Sign in</h1>
+        <h1 className="text-3xl font-medium tracking-tight">
+          {t("sign-in.title")}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Enter a local or directory account.
+          {t("sign-in.description")}
         </p>
       </div>
       <AuthenticationFeedback />
@@ -328,6 +355,7 @@ function OtherUserView({ username }: { username: string | null }) {
 
 function AuthenticationRecoveryView() {
   const prompt = useThemeStore((state) => state.snapshot?.prompt ?? null);
+  const t = useMessages();
 
   return (
     <AuthenticationLayout>
@@ -341,9 +369,11 @@ function AuthenticationRecoveryView() {
         <UserRound className="size-10" aria-hidden="true" />
       </div>
       <div className="text-center">
-        <h1 className="text-3xl font-medium tracking-tight">Authentication</h1>
+        <h1 className="text-3xl font-medium tracking-tight">
+          {t("authentication.title")}
+        </h1>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          The host has an active sign-in without recoverable identity details.
+          {t("authentication.recovery")}
         </p>
       </div>
       <AuthenticationFeedback />
@@ -360,6 +390,7 @@ function LockerView() {
   const snapshot = useThemeStore((state) =>
     state.snapshot?.mode === "locker" ? state.snapshot : null,
   );
+  const t = useMessages();
 
   if (!snapshot) {
     return null;
@@ -368,22 +399,22 @@ function LockerView() {
   const status = (() => {
     switch (snapshot.lock) {
       case "acquiring":
-        return "Securing this session…";
+        return t("lock.acquiring");
       case "locked":
         return null;
       case "unlocking":
-        return "Unlocking…";
+        return t("lock.unlocking");
       case "released":
-        return "Session unlocked";
+        return t("lock.released");
       case "failed":
-        return "The native session lock is unavailable";
+        return t("lock.failed");
     }
   })();
 
   return (
     <AuthenticationLayout>
       <p className="text-xs font-medium tracking-[0.34em] text-warm-star uppercase">
-        Fomalhaut Lock
+        {t("lock.brand")}
       </p>
       <UserAvatar
         user={snapshot.identity}
@@ -456,6 +487,7 @@ function ManualAuthenticationForm({
   username: string | null;
   prompt: Prompt | null;
 }) {
+  const t = useMessages();
   const busy = useThemeStore((state) => state.busy);
   const authentication = useThemeStore(
     (state) => state.snapshot?.authentication ?? "idle",
@@ -498,7 +530,7 @@ function ManualAuthenticationForm({
   return (
     <form className="w-full space-y-4" onSubmit={submit}>
       <div className="space-y-2">
-        <Label htmlFor="manual-username">Username</Label>
+        <Label htmlFor="manual-username">{t("form.username")}</Label>
         <InputGroup
           className="h-12 border-white/15 bg-[#081426]/90"
           data-disabled={busy || Boolean(username)}
@@ -524,7 +556,7 @@ function ManualAuthenticationForm({
                 variant="default"
                 size="icon-sm"
                 disabled={busy}
-                aria-label="Continue"
+                aria-label={t("form.continue")}
               >
                 {busy ? (
                   <LoaderCircle className="animate-spin motion-reduce:animate-none" />
@@ -538,7 +570,7 @@ function ManualAuthenticationForm({
       </div>
       <div className={cn("space-y-2", !prompt && "opacity-60")}>
         <Label htmlFor="manual-credential">
-          {prompt?.message ?? "Password"}
+          {prompt?.message ?? t("form.password")}
         </Label>
         <InputGroup
           className="h-12 border-white/15 bg-[#081426]/90"
@@ -552,7 +584,7 @@ function ManualAuthenticationForm({
             ref={responseInput}
             type={prompt?.kind === "visible" ? "text" : "password"}
             placeholder={
-              username ? "Waiting for authentication…" : "Enter username first"
+              username ? t("form.waiting") : t("form.username-first")
             }
             autoComplete={
               prompt?.kind === "secret" ? "current-password" : "off"
@@ -569,7 +601,7 @@ function ManualAuthenticationForm({
                   variant="default"
                   size="icon-sm"
                   disabled={busy}
-                  aria-label="Sign in"
+                  aria-label={t("form.sign-in")}
                 >
                   {busy ? (
                     <LoaderCircle className="animate-spin motion-reduce:animate-none" />
@@ -594,7 +626,7 @@ function ManualAuthenticationForm({
           disabled={busy}
           onClick={() => void retryAuthentication()}
         >
-          Try again
+          {t("form.try-again")}
         </Button>
       )}
     </form>
@@ -602,6 +634,7 @@ function ManualAuthenticationForm({
 }
 
 function PromptForm({ prompt }: { prompt: Prompt }) {
+  const t = useMessages();
   const busy = useThemeStore((state) => state.busy);
   const respondToPrompt = useThemeStore((state) => state.respondToPrompt);
   const responseInput = useRef<HTMLInputElement>(null);
@@ -639,7 +672,7 @@ function PromptForm({ prompt }: { prompt: Prompt }) {
             variant="default"
             size="icon-sm"
             disabled={busy}
-            aria-label="Sign in"
+            aria-label={t("form.sign-in")}
           >
             {busy ? (
               <LoaderCircle className="animate-spin motion-reduce:animate-none" />
@@ -658,6 +691,7 @@ function AuthenticationWaiting({
 }: {
   allowRetry?: boolean;
 }) {
+  const t = useMessages();
   const authentication = useThemeStore(
     (state) => state.snapshot?.authentication ?? "idle",
   );
@@ -676,7 +710,7 @@ function AuthenticationWaiting({
         disabled={busy}
         onClick={() => void retryAuthentication()}
       >
-        Try again
+        {t("form.try-again")}
       </Button>
     );
   }
@@ -689,7 +723,7 @@ function AuthenticationWaiting({
       )}
     >
       <LoaderCircle className="size-4 animate-spin text-primary motion-reduce:animate-none" />
-      Waiting for the authentication service…
+      {t("authentication.waiting")}
     </div>
   );
 }
@@ -741,6 +775,7 @@ function UserAvatar({
 }
 
 function SessionControl() {
+  const t = useMessages();
   const snapshot = useThemeStore((state) => state.snapshot);
   const busy = useThemeStore((state) => state.busy);
   const selectSession = useThemeStore((state) => state.selectSession);
@@ -760,7 +795,7 @@ function SessionControl() {
     >
       <MonitorCog className="size-4 text-muted-foreground" aria-hidden="true" />
       <Label className="sr-only" htmlFor="session">
-        Session
+        {t("session.label")}
       </Label>
       <Select
         value={snapshot.selectedSessionId}
@@ -778,7 +813,7 @@ function SessionControl() {
             "focus-visible:border-primary/60 focus-visible:ring-primary/30",
           )}
         >
-          <SelectValue placeholder="Choose session">
+          <SelectValue placeholder={t("session.choose")}>
             {selectedSession
               ? `${selectedSession.name} · ${selectedSession.kind}`
               : null}
@@ -798,10 +833,22 @@ function SessionControl() {
   );
 }
 
-const powerLabels: Record<PowerAction, string> = {
-  poweroff: "Power off",
-  reboot: "Restart",
-  suspend: "Suspend",
+const powerLabelKeys: Record<PowerAction, TranslationKey> = {
+  poweroff: "power.poweroff",
+  reboot: "power.reboot",
+  suspend: "power.suspend",
+};
+
+const powerQuestionKeys: Record<PowerAction, TranslationKey> = {
+  poweroff: "power.question.poweroff",
+  reboot: "power.question.reboot",
+  suspend: "power.question.suspend",
+};
+
+const powerConfirmKeys: Record<PowerAction, TranslationKey> = {
+  poweroff: "power.confirm.poweroff",
+  reboot: "power.confirm.reboot",
+  suspend: "power.confirm.suspend",
 };
 
 const powerIcons: Record<PowerAction, typeof Power> = {
@@ -811,6 +858,7 @@ const powerIcons: Record<PowerAction, typeof Power> = {
 };
 
 function PowerMenu() {
+  const t = useMessages();
   const actions = useThemeStore(
     (state) => state.snapshot?.capabilities.power ?? [],
   );
@@ -846,10 +894,10 @@ function PowerMenu() {
           {confirmation ? (
             <div className="space-y-3 p-2">
               <p className="text-sm font-medium">
-                {powerLabels[confirmation]} this device?
+                {t(powerQuestionKeys[confirmation])}
               </p>
               <p className="text-xs text-muted-foreground">
-                Active work in other sessions may be interrupted.
+                {t("power.warning")}
               </p>
               {error && (
                 <p className="text-xs text-destructive" role="alert">
@@ -864,7 +912,7 @@ function PowerMenu() {
                   disabled={busy}
                   onClick={() => setConfirmation(null)}
                 >
-                  Cancel
+                  {t("power.cancel")}
                 </Button>
                 <Button
                   type="button"
@@ -876,12 +924,12 @@ function PowerMenu() {
                   {busy ? (
                     <LoaderCircle className="animate-spin motion-reduce:animate-none" />
                   ) : null}
-                  Confirm {powerLabels[confirmation].toLocaleLowerCase()}
+                  {t(powerConfirmKeys[confirmation])}
                 </Button>
               </div>
             </div>
           ) : (
-            <fieldset className="grid gap-1" aria-label="Power actions">
+            <fieldset className="grid gap-1" aria-label={t("power.actions")}>
               {actions.map((action) => {
                 const Icon = powerIcons[action];
                 return (
@@ -894,7 +942,7 @@ function PowerMenu() {
                     onClick={() => setConfirmation(action)}
                   >
                     <Icon aria-hidden="true" />
-                    {powerLabels[action]}
+                    {t(powerLabelKeys[action])}
                   </Button>
                 );
               })}
@@ -908,7 +956,7 @@ function PowerMenu() {
         size="icon"
         variant="outline"
         disabled={busy}
-        aria-label="Power menu"
+        aria-label={t("power.menu")}
         aria-expanded={open}
         onClick={() => {
           setOpen((value) => !value);

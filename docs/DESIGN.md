@@ -277,6 +277,8 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 - catalog 对外只公开 `SessionId`、本地化显示名和 `SessionKind`。解析出的 argv、desktop
   文件路径和环境变量保持在可信 Rust 侧；只有 `SessionCatalog::command` 能把当前 catalog
   中的 ID 转换为 `fomalhaut_core::SessionCommand`。
+- host 把已经解析并归一化的 UI locale 作为显式 locale 优先级传给 discovery，使 desktop
+  entry 的 `Name[...]` 与同一页面语言一致；session crate 仍不自行读取环境变量。
 - 生成命令时根据 session 类型设置 `XDG_SESSION_TYPE`，并根据文件名和可选
   `DesktopNames` 设置 `XDG_SESSION_DESKTOP`、`DESKTOP_SESSION` 和
   `XDG_CURRENT_DESKTOP`。X11 wrapper 等发行版策略由后续 host 配置层在可信侧组合。
@@ -289,6 +291,14 @@ locale 处理；登录 session 特有的安全策略仍由本项目掌握，不�
 - 将全局配置收窄为 `for_greeter()` 与 `for_locker()` 的角色化、已验证配置，
   不让 locker 读取 session 启动等无关权能。
 - 实现通用主题与 greeter/locker 角色覆盖的确定性选择。
+- 解析全局可选 `[locale].language`。首阶段只接受 BCP 47 形式的 `en` 与 `zh-CN`；字段省略时
+  按 `LC_ALL`、`LC_MESSAGES`、`LANG` 的 POSIX 优先级读取进程 locale，忽略空值，去除编码与
+  modifier、把 `_` 视为 `-` 后将所有 `zh` 语言变体映射为 `zh-CN`，其余语言以及
+  `C`/`POSIX` 使用 `en`。配置覆盖同时作用于 greeter 与 locker；省略配置时两个独立进程各自
+  按启动环境解析。检测失败不得阻止安全启动，稳定回退到英语。
+
+locale 解析不得引入 gettext、ICU 或外部命令依赖。配置 crate 对外只暴露有界 `UiLocale`
+枚举以及 Desktop Entry 使用的稳定 locale 候选，不把任意环境字符串送入协议或前端。
 
 ### 4.6 `fomalhaut-logind`
 
@@ -1000,6 +1010,13 @@ ID、显示名和 X11 / Wayland 类型。capability 由可信宿主按角色生�
 `CanSuspend`。只有返回 `yes` 的动作才加入公开列表；`no`、`na`、`challenge`、D-Bus 不可用和
 查询失败都按不可用处理。Fomalhaut 不运行 Polkit agent，也不为任一角色发起交互授权。
 
+greeter 与 locker 的 `state.get` 分支都必须携带不可变的 `locale`，其类型为协议生成的
+`UiLocale = "en" | "zh-CN"`。locale 由 host 配置层确定，不接受主题回写，也不需要动态事件；
+配置或进程环境变化在宿主重启后生效。该字段进入 JSON Schema、ts-rs 生成绑定和 SDK 的
+`StateSnapshotFor<M>`，SDK 在 bootstrap 时拒绝缺失或未知 locale，避免 TypeScript 类型与实际
+wire 值分离。第三方主题可以按该字段选择自己的资源或消息目录，但不得把浏览器猜测置于宿主
+配置覆盖之上。
+
 收到已发布能力对应的请求时，controller 先取消仍在进行的角色认证并清理 prompt：greeter
 取消 greetd session，locker 取消当前一次性 PAM transaction。随后通过 systemd-logind 的
 `PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)` 执行动作。这里的 `false` 明确禁止
@@ -1240,6 +1257,10 @@ entrypoint = "index.html"
 - bridge 请求串行发送。等待响应期间禁用表单与 session 选择，并显示 busy 状态；
   `auth.message`、`auth.failed`、`auth.cancelled`、协议错误和 bridge 失败都以文本方式展示，
   不把消息作为 HTML 插入。
+- 根据 `state.get.locale` 在完整的英语与简体中文消息表之间切换，设置文档 `lang` 并使用同一
+  locale 格式化日期；首次快照前只允许用 `navigator.languages` 选择 loading/bridge-failure
+  文案，收到快照后必须以宿主 locale 为准。PAM 提供的 prompt 与 message 是外部认证栈文本，
+  必须原样安全展示，不由主题猜测或翻译。
 - 使用原生 label、form、input、select、button、`aria-live` 和键盘提交提供最小无障碍能力。
   greetd 返回认证错误后，Core 必须先发送 `CancelSession` 并确认旧会话释放，再向前端发布失败
   状态；登录失败或取消后恢复用户名输入，session 启动成功由 host 退出，不由页面导航处理。
@@ -1283,6 +1304,16 @@ provider 注入，便于 mock transport 测试。store 不使用 persist/devtool
 localStorage/sessionStorage，不保存或记录 PAM 回答。认证输入使用不受控 DOM input：提交时先
 读取值、同步清空 DOM 并释放页面侧引用，再调用 SDK；JavaScript 字符串无法可靠清零的限制
 仍然成立。
+
+参考主题与内嵌 minimal theme 一样以 `state.get.locale` 为最终语言来源，并完整提供英语和
+简体中文界面文案。React/TypeScript 侧使用成熟的 `i18next` 与 `react-i18next`，把内置 resources
+纳入 `CustomTypeOptions` module augmentation，使组件中的消息 key、namespace 和返回值受
+TypeScript 检查；不得在组件中散落未受目录管理的界面字符串，也不得因缺少翻译而静默回退。
+首次快照前的 loading/fatal 文案可以按 `navigator.languages` 临时选择；收到快照后必须调用
+i18next 切换到宿主 locale、同步 `<html lang>`，并让日期/时间格式使用同一 locale。资源全部随
+可信主题 bundle 提供，不启用网络 backend、cookie/localStorage cache 或运行期资源下载。
+PAM prompt/message 与宿主返回的诊断文本仍按可信纯文本原样显示，不做机器翻译。无框架、无
+构建步骤的内嵌 minimal theme 继续使用自身完整的静态双语目录，不为此引入运行期依赖。
 
 主题是单文档、无 URL router 的内存 SPA。Zustand 使用判别状态在用户选择页、已知用户认证页、
 其他用户认证页和身份未知的认证恢复页之间切换，不调用 history 或产生新的顶层导航。零个摘要

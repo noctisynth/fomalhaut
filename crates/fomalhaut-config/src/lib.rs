@@ -29,6 +29,7 @@ pub struct AppConfig {
     users: UserDiscoveryConfig,
     power: PowerConfig,
     display: RoleDisplayConfig,
+    locale: UiLocale,
     uses_legacy_frontend: bool,
 }
 
@@ -47,6 +48,7 @@ impl AppConfig {
             users: self.users,
             power: self.power.clone(),
             display: self.display.greeter,
+            locale: self.locale,
         }
     }
 
@@ -57,6 +59,7 @@ impl AppConfig {
             theme_directory: self.themes.for_locker(),
             power: self.power.clone(),
             display: self.display.locker,
+            locale: self.locale,
         }
     }
 
@@ -74,6 +77,7 @@ pub struct GreeterConfig {
     users: UserDiscoveryConfig,
     power: PowerConfig,
     display: DisplayConfig,
+    locale: UiLocale,
 }
 
 impl GreeterConfig {
@@ -87,6 +91,7 @@ impl GreeterConfig {
         UserDiscoveryConfig,
         PowerConfig,
         DisplayConfig,
+        UiLocale,
     ) {
         (
             self.theme_directory,
@@ -94,6 +99,7 @@ impl GreeterConfig {
             self.users,
             self.power,
             self.display,
+            self.locale,
         )
     }
 }
@@ -103,6 +109,7 @@ pub struct LockerConfig {
     theme_directory: Option<PathBuf>,
     power: PowerConfig,
     display: DisplayConfig,
+    locale: UiLocale,
 }
 
 impl LockerConfig {
@@ -122,6 +129,43 @@ impl LockerConfig {
     #[must_use]
     pub const fn display(&self) -> DisplayConfig {
         self.display
+    }
+
+    /// Returns the resolved UI locale shared with the locker frontend.
+    #[must_use]
+    pub const fn locale(&self) -> UiLocale {
+        self.locale
+    }
+}
+
+/// UI language resolved from strict configuration or the process locale.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+pub enum UiLocale {
+    /// English UI strings.
+    #[serde(rename = "en")]
+    En,
+    /// Simplified Chinese UI strings.
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
+impl UiLocale {
+    /// Returns the stable BCP 47 identifier exposed to themes.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::ZhCn => "zh-CN",
+        }
+    }
+
+    /// Returns Desktop Entry locale suffixes in lookup priority order.
+    #[must_use]
+    pub const fn desktop_entry_locales(self) -> &'static [&'static str] {
+        match self {
+            Self::En => &["en"],
+            Self::ZhCn => &["zh_CN", "zh"],
+        }
     }
 }
 
@@ -244,6 +288,13 @@ struct RawConfig {
     users: Option<RawUsers>,
     power: Option<RawPower>,
     display: Option<RawDisplay>,
+    locale: Option<RawLocale>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLocale {
+    language: Option<UiLocale>,
 }
 
 #[derive(Default, Deserialize)]
@@ -370,6 +421,13 @@ fn read_bounded(path: &Path) -> Result<Option<String>, ConfigError> {
 }
 
 fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
+    validate_with_detected_locale(raw, detect_ui_locale_from_environment())
+}
+
+fn validate_with_detected_locale(
+    raw: RawConfig,
+    detected_locale: UiLocale,
+) -> Result<AppConfig, ConfigError> {
     if raw.themes.is_some() && raw.frontend.is_some() {
         return Err(ConfigError::ConflictingThemeConfiguration);
     }
@@ -414,7 +472,20 @@ fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
                 .map(|path| SessionDirectory::new(path, SessionKind::X11)),
         )
         .collect();
-    let discovery = DiscoveryConfig::new(directories).with_executable_search_paths(executable);
+    let locale = raw
+        .locale
+        .unwrap_or_default()
+        .language
+        .unwrap_or(detected_locale);
+    let discovery = DiscoveryConfig::new(directories)
+        .with_executable_search_paths(executable)
+        .with_locales(
+            locale
+                .desktop_entry_locales()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        );
     let users =
         UserDiscoveryConfig::new(raw.users.unwrap_or_default().provider.unwrap_or_default());
     let configured_power = raw.power.unwrap_or_default().actions.unwrap_or_default();
@@ -460,8 +531,48 @@ fn validate(raw: RawConfig) -> Result<AppConfig, ConfigError> {
         users,
         power,
         display,
+        locale,
         uses_legacy_frontend,
     })
+}
+
+fn detect_ui_locale_from_environment() -> UiLocale {
+    for name in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        let Some(value) = std::env::var_os(name) else {
+            continue;
+        };
+        if value.is_empty() {
+            continue;
+        }
+        return value.to_str().map_or(UiLocale::En, ui_locale_from_posix);
+    }
+    UiLocale::En
+}
+
+#[cfg(test)]
+fn ui_locale_from_candidates<T: AsRef<str>>(
+    candidates: impl IntoIterator<Item = Option<T>>,
+) -> UiLocale {
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|value| !value.as_ref().trim().is_empty())
+        .map_or(UiLocale::En, |value| ui_locale_from_posix(value.as_ref()))
+}
+
+fn ui_locale_from_posix(value: &str) -> UiLocale {
+    let normalized = value
+        .trim()
+        .split(['.', '@'])
+        .next()
+        .unwrap_or_default()
+        .replace('_', "-")
+        .to_ascii_lowercase();
+    if normalized == "zh" || normalized.starts_with("zh-") {
+        UiLocale::ZhCn
+    } else {
+        UiLocale::En
+    }
 }
 
 fn paths<const N: usize>(values: &[&str; N]) -> Vec<PathBuf> {
@@ -487,11 +598,14 @@ fn validate_path(path: &Path) -> Result<(), ConfigError> {
 mod tests {
     use std::{fs, path::Path};
 
-    use super::{ConfigError, PowerAction, RawConfig, UserProvider, load_from_path, validate};
+    use super::{
+        ConfigError, PowerAction, RawConfig, UiLocale, UserProvider, load_from_path,
+        ui_locale_from_candidates, ui_locale_from_posix, validate_with_detected_locale,
+    };
 
     fn parse(input: &str) -> Result<super::AppConfig, ConfigError> {
         let raw = toml::from_str::<RawConfig>(input).map_err(|_| ConfigError::Parse)?;
-        validate(raw)
+        validate_with_detected_locale(raw, UiLocale::En)
     }
 
     #[test]
@@ -499,7 +613,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("fomalhaut-missing-config-{}", std::process::id()));
         let config = load_from_path(&path).expect("an absent configuration uses defaults");
-        let (theme, discovery, users, power, display) = config.for_greeter().into_parts();
+        let (theme, discovery, users, power, display, locale) = config.for_greeter().into_parts();
         let locker = config.for_locker();
 
         assert_eq!(theme, None);
@@ -507,6 +621,7 @@ mod tests {
         assert_eq!(users.provider(), UserProvider::Auto);
         assert!(power.actions().is_empty());
         assert_eq!(display.scale(), 1.0);
+        assert!(matches!(locale, UiLocale::En | UiLocale::ZhCn));
         assert_eq!(locker.theme_directory(), None);
         assert!(locker.power().actions().is_empty());
         assert_eq!(locker.display().scale(), 1.0);
@@ -524,7 +639,7 @@ mod tests {
             "#,
         )
         .expect("theme configuration is valid");
-        let (greeter_theme, _, _, _, _) = config.for_greeter().into_parts();
+        let (greeter_theme, _, _, _, _, _) = config.for_greeter().into_parts();
 
         assert_eq!(
             greeter_theme.as_deref(),
@@ -542,7 +657,7 @@ mod tests {
             "#,
         )
         .expect("default theme configuration is valid");
-        let (greeter_theme, _, _, _, _) = default_only.for_greeter().into_parts();
+        let (greeter_theme, _, _, _, _, _) = default_only.for_greeter().into_parts();
         assert_eq!(
             greeter_theme.as_deref(),
             Some(Path::new("/srv/fomalhaut/default"))
@@ -562,7 +677,7 @@ mod tests {
             "#,
         )
         .expect("legacy frontend remains accepted during migration");
-        let (theme, _, _, _, _) = legacy.for_greeter().into_parts();
+        let (theme, _, _, _, _, _) = legacy.for_greeter().into_parts();
         assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/legacy")));
         assert_eq!(
             legacy.for_locker().theme_directory(),
@@ -599,7 +714,7 @@ mod tests {
             "#,
         )
         .expect("configuration fixture is semantically valid");
-        let (theme, discovery, _, _, _) = config.for_greeter().into_parts();
+        let (theme, discovery, _, _, _, _) = config.for_greeter().into_parts();
         assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/theme")));
         assert_eq!(discovery.directories().len(), 2);
         assert_eq!(discovery.directories()[0].path(), Path::new("/opt/first"));
@@ -615,7 +730,7 @@ mod tests {
             "#,
         )
         .expect("user provider fixture is valid");
-        let (_, _, users, _, _) = config.for_greeter().into_parts();
+        let (_, _, users, _, _, _) = config.for_greeter().into_parts();
         assert_eq!(users.provider(), UserProvider::None);
 
         assert!(
@@ -638,7 +753,7 @@ mod tests {
             "#,
         )
         .expect("power policy fixture is valid");
-        let (_, _, _, power, _) = config.for_greeter().into_parts();
+        let (_, _, _, power, _, _) = config.for_greeter().into_parts();
         assert_eq!(
             power.actions(),
             &[PowerAction::Poweroff, PowerAction::Suspend]
@@ -674,7 +789,7 @@ mod tests {
             "#,
         )
         .expect("fractional display scale is within bounds");
-        let (_, _, _, _, display) = config.for_greeter().into_parts();
+        let (_, _, _, _, display, _) = config.for_greeter().into_parts();
         assert_eq!(display.scale(), 1.5);
         assert_eq!(config.for_locker().display().scale(), 1.5);
 
@@ -686,7 +801,7 @@ mod tests {
             "#,
         )
         .expect("role-specific display scales are valid dotted keys");
-        let (_, _, _, _, greeter_display) = roles.for_greeter().into_parts();
+        let (_, _, _, _, greeter_display, _) = roles.for_greeter().into_parts();
         assert_eq!(greeter_display.scale(), 1.5);
         assert_eq!(roles.for_locker().display().scale(), 1.0);
 
@@ -698,7 +813,7 @@ mod tests {
             "#,
         )
         .expect("an explicit role scale table is equivalent to dotted keys");
-        let (_, _, _, _, greeter_display) = role_table.for_greeter().into_parts();
+        let (_, _, _, _, greeter_display, _) = role_table.for_greeter().into_parts();
         assert_eq!(greeter_display.scale(), 2.0);
         assert_eq!(role_table.for_locker().display().scale(), 1.25);
 
@@ -723,6 +838,52 @@ mod tests {
         ] {
             assert_eq!(parse(invalid).err(), Some(ConfigError::Parse));
         }
+    }
+
+    #[test]
+    fn locale_override_is_strict_and_shared_by_both_roles() {
+        let config = parse("[locale]\nlanguage = \"zh-CN\"\n")
+            .expect("a supported locale override is valid");
+        let (_, discovery, _, _, _, greeter_locale) = config.for_greeter().into_parts();
+
+        assert_eq!(greeter_locale, UiLocale::ZhCn);
+        assert_eq!(config.for_locker().locale(), UiLocale::ZhCn);
+        assert_eq!(
+            discovery,
+            discovery
+                .clone()
+                .with_locales(vec!["zh_CN".to_owned(), "zh".to_owned()])
+        );
+        assert_eq!(
+            parse("[locale]\nlanguage = \"fr\"\n").err(),
+            Some(ConfigError::Parse)
+        );
+    }
+
+    #[test]
+    fn posix_locale_detection_normalizes_chinese_and_falls_back_to_english() {
+        for value in ["zh_CN.UTF-8", "zh-TW@variant", " zh_Hans ", "zh"] {
+            assert_eq!(ui_locale_from_posix(value), UiLocale::ZhCn);
+        }
+        for value in ["en_US.UTF-8", "C.UTF-8", "POSIX", "fr_FR", ""] {
+            assert_eq!(ui_locale_from_posix(value), UiLocale::En);
+        }
+
+        let raw = toml::from_str::<RawConfig>("")
+            .expect("an empty configuration is a valid detection fixture");
+        let config = validate_with_detected_locale(raw, UiLocale::ZhCn)
+            .expect("a detected locale is accepted without an override");
+        let (_, _, _, _, _, locale) = config.for_greeter().into_parts();
+        assert_eq!(locale, UiLocale::ZhCn);
+
+        assert_eq!(
+            ui_locale_from_candidates([Some("en_US.UTF-8"), Some("zh_CN"), None]),
+            UiLocale::En
+        );
+        assert_eq!(
+            ui_locale_from_candidates([Some(""), Some("zh_TW.UTF-8"), Some("en_US")]),
+            UiLocale::ZhCn
+        );
     }
 
     #[test]

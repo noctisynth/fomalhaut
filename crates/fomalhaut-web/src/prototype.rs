@@ -3,7 +3,7 @@
 use crate::protocol::{
     AuthState, Capabilities, Event, EventEnvelope, EventSequence, FrontendRequest,
     GreeterSnapshotFields, LoginState, ProtocolErrorBody, ProtocolErrorCode, ResponseEnvelope,
-    ResponseResult, StateChangedData, StateSnapshot, decode_request,
+    ResponseResult, StateChangedData, StateSnapshot, UiLocale, decode_request,
 };
 
 const INVALID_MESSAGE: &str = "the native protocol bridge rejected the message";
@@ -87,6 +87,7 @@ impl std::error::Error for PrototypeScriptError {}
 
 fn prototype_state() -> Result<StateSnapshot, ProtocolErrorBody> {
     StateSnapshot::greeter(GreeterSnapshotFields {
+        locale: UiLocale::En,
         authentication: AuthState::Failed,
         login: LoginState::Idle,
         prompt: None,

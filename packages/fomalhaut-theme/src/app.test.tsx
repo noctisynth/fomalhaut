@@ -1,7 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createFomalhautClient } from "fomalhaut-sdk";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { App } from "@/app";
 import { createThemeStore } from "@/state/theme-store";
 import { ThemeStoreProvider } from "@/state/theme-store-provider";
@@ -20,6 +20,57 @@ async function renderTheme(transport: MockTransport) {
 }
 
 describe("SPA authentication UI", () => {
+  test("uses the host Chinese locale for greeter text, dates, and power actions", async () => {
+    const dateFormat = vi.spyOn(Date.prototype, "toLocaleDateString");
+    const transport = new MockTransport(
+      snapshot([], null, ["reboot"], "zh-CN"),
+    );
+    await renderTheme(transport);
+    const user = userEvent.setup();
+
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(screen.getByRole("heading", { name: "谁要登录？" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /其他用户/ })).toBeVisible();
+    expect(dateFormat).toHaveBeenCalledWith(
+      "zh-CN",
+      expect.objectContaining({ weekday: "long" }),
+    );
+    await user.click(screen.getByRole("button", { name: "电源菜单" }));
+    await user.click(screen.getByRole("button", { name: "重启" }));
+    expect(screen.getByRole("button", { name: "确认重启" })).toBeVisible();
+    dateFormat.mockRestore();
+  });
+
+  test("localizes locker-owned failures without translating PAM prompts", async () => {
+    const transport = new MockTransport(
+      lockerSnapshot(
+        { promptId: 9, kind: "secret", message: "Password from PAM" },
+        [],
+        "zh-CN",
+      ),
+    );
+    await renderTheme(transport);
+
+    expect(screen.getByText("Fomalhaut 锁屏")).toBeVisible();
+    expect(screen.getByLabelText("Password from PAM")).toBeEnabled();
+    act(() => {
+      transport.emit({
+        protocol: 1,
+        sequence: 1,
+        event: "state.changed",
+        data: { state: "failed" },
+      });
+      transport.emit({
+        protocol: 1,
+        sequence: 2,
+        event: "auth.failed",
+        data: {},
+      });
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("认证失败，请重试。");
+    expect(screen.getByRole("button", { name: "重试" })).toBeVisible();
+  });
+
   test("renders locker mode for the fixed identity without greeter controls", async () => {
     const transport = new MockTransport(lockerSnapshot());
     await renderTheme(transport);

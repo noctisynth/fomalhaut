@@ -25,6 +25,25 @@ session 默认目录；文件存在但无法读取、包含未知字段或验证
 首次创建 `/etc/fomalhaut/config.toml` 时，源码安装器还会默认允许 poweroff、reboot 和 suspend；
 更新安装不会新增、覆盖或扩大既有配置中的电源策略。
 
+### 界面语言
+
+默认不需要写语言配置。greeter 和 locker 会在各自启动时按 `LC_ALL`、`LC_MESSAGES`、`LANG`
+的顺序检测进程 locale；`zh`、`zh_CN`、`zh-TW` 等中文变体统一使用简体中文界面，其余语言、
+`C`、`POSIX` 或无法识别的值稳定回退英语。编码后缀（如 `.UTF-8`）和 modifier 不参与判断。
+
+管理员可以在全局配置中显式覆盖两个角色：
+
+```toml
+[locale]
+language = "zh-CN"
+```
+
+首阶段只接受 `en` 和 `zh-CN`；其他值会使严格配置校验失败。修改配置后需要重启 greeter 或
+locker 进程才会生效。宿主会把最终语言写入 `state.get.locale`，同时用它选择 Desktop Entry
+中的本地化 session 名称；主题收到快照后必须以该字段覆盖浏览器的临时语言判断。Fomalhaut
+自身的界面文案支持英语和简体中文，但 PAM module 提供的 prompt/message 属于外部认证文本，
+会按原文显示，不做机器翻译。更新安装会保留已有 `[locale]` 配置。
+
 ### 全新安装
 
 使用适合显示器的缩放倍率运行安装器：
@@ -243,7 +262,8 @@ window.addEventListener('fomalhaut:event', (event) => {
 ```
 
 完整请求、响应、事件和长度约束见仓库根目录的 `protocol/v1.schema.json`。`state.get` 返回以
-`mode: "greeter" | "locker"` 判别的联合快照，并携带已经发布的最后一个 event `sequence`。
+`mode: "greeter" | "locker"` 判别的联合快照，并携带 `locale: "en" | "zh-CN"` 和已经发布的
+最后一个 event `sequence`。
 同一主题入口应先按 `mode` 收窄：greeter 处理用户与 session 选择，并以
 `auth.begin(username)` 开始认证；locker 只展示宿主固定的 `identity`，不提供用户/session
 切换，并以无参数 `auth.begin()` 重新认证当前用户。两者共享 `auth.respond`、`auth.cancel`、

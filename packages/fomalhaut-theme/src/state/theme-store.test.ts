@@ -1,5 +1,6 @@
 import { createFomalhautClient } from "fomalhaut-sdk";
 import { describe, expect, test } from "vitest";
+import { detectBrowserLocale } from "@/i18n";
 import { createThemeStore } from "@/state/theme-store";
 import { lockerSnapshot, MockTransport, snapshot } from "@/test/mock-transport";
 
@@ -9,6 +10,11 @@ const alice = {
   avatarUrl: null,
 };
 const bob = { username: "bob", displayName: "Bob", avatarUrl: null };
+
+test("browser locale detection normalizes Chinese variants", () => {
+  expect(detectBrowserLocale(["zh_TW", "en-US"])).toBe("zh-CN");
+  expect(detectBrowserLocale(["fr-FR", "en-US"])).toBe("en");
+});
 
 describe("SPA identity selection", () => {
   test.each([{ users: [] }, { users: [alice, bob] }])(

@@ -77,6 +77,7 @@ export type EventEnvelope = { protocol: 1; sequence: Sequence } & (
  * Greeter-only public state.
  */
 export type GreeterStateSnapshot = {
+  locale: UiLocale;
   authentication: AuthState;
   login: LoginState;
   prompt: Prompt | null;
@@ -111,6 +112,7 @@ export type LockState =
  * Locker-only public state.
  */
 export type LockerStateSnapshot = {
+  locale: UiLocale;
   authentication: AuthState;
   lock: LockState;
   prompt: Prompt | null;
@@ -198,6 +200,11 @@ export type SuccessResponse = {
   ok: true;
   result: ResponseResult;
 };
+
+/**
+ * UI language resolved by the trusted native host.
+ */
+export type UiLocale = "en" | "zh-CN";
 
 /**
  * Frontend-safe user metadata discovered by the trusted host.

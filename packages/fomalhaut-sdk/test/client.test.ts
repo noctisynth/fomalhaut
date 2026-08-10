@@ -13,6 +13,7 @@ import {
 
 const GREETER_STATE: StateSnapshotFor<"greeter"> = {
   mode: "greeter",
+  locale: "en",
   authentication: "idle",
   login: "idle",
   prompt: null,
@@ -26,6 +27,7 @@ const GREETER_STATE: StateSnapshotFor<"greeter"> = {
 
 const LOCKER_STATE: StateSnapshotFor<"locker"> = {
   mode: "locker",
+  locale: "en",
   authentication: "idle",
   lock: "locked",
   prompt: null,
@@ -217,6 +219,32 @@ describe("FomalhautClient", () => {
       result: LOCKER_STATE,
     });
     await expect(client.state.get()).rejects.toBeInstanceOf(
+      FomalhautBridgeError,
+    );
+  });
+
+  test("rejects missing or unsupported bootstrap locales", async () => {
+    const unsupported = new MockTransport();
+    unsupported.handler = async (request) => ({
+      protocol: 1,
+      id: request.id,
+      ok: true,
+      result: { ...GREETER_STATE, locale: "fr" },
+    });
+    await expect(createFomalhautClient(unsupported)).rejects.toBeInstanceOf(
+      FomalhautBridgeError,
+    );
+
+    const missing = new MockTransport();
+    const { locale: omittedLocale, ...snapshotWithoutLocale } = GREETER_STATE;
+    expect(omittedLocale).toBe("en");
+    missing.handler = async (request) => ({
+      protocol: 1,
+      id: request.id,
+      ok: true,
+      result: snapshotWithoutLocale,
+    });
+    await expect(createFomalhautClient(missing)).rejects.toBeInstanceOf(
       FomalhautBridgeError,
     );
   });

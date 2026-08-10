@@ -107,6 +107,7 @@ function requireStateSnapshot(
   if (
     !isRecord(value) ||
     (value.mode !== "greeter" && value.mode !== "locker") ||
+    (value.locale !== "en" && value.locale !== "zh-CN") ||
     typeof value.sequence !== "number" ||
     !Number.isSafeInteger(value.sequence) ||
     value.sequence < 0

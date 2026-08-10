@@ -2,12 +2,14 @@
 
 use std::{env, error::Error, fmt, path::PathBuf, rc::Rc};
 
-use fomalhaut_config::AppConfig;
+use fomalhaut_config::{AppConfig, UiLocale as ConfigUiLocale};
 use fomalhaut_gtk::{ApplicationHandle, ViewCallbacks, build_web_view, run_application};
 use fomalhaut_session::{DiscoveryConfig, SessionKind as CatalogSessionKind, discover};
 use fomalhaut_web::{
     controller::TrustedSession,
-    protocol::{MAX_SESSIONS, RuntimeMode, SessionKind as WebSessionKind, SessionSummary},
+    protocol::{
+        MAX_SESSIONS, RuntimeMode, SessionKind as WebSessionKind, SessionSummary, UiLocale,
+    },
     theme::ThemeSource,
 };
 use gtk4 as gtk;
@@ -36,7 +38,7 @@ fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindo
             "Fomalhaut configuration uses deprecated [frontend].path; migrate to [themes].default"
         );
     }
-    let (theme_directory, discovery, user_discovery, power, display) =
+    let (theme_directory, discovery, user_discovery, power, display, locale) =
         config.for_greeter().into_parts();
     let theme = match theme_directory {
         Some(directory) => {
@@ -46,8 +48,14 @@ fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindo
     };
     let socket_path = greetd_socket_path()?;
     let sessions = discover_trusted_sessions(&discovery)?;
-    let (worker, outputs) = WorkerHandle::spawn(socket_path, sessions, user_discovery, power)
-        .map_err(|_| HostError::WorkerSpawn)?;
+    let (worker, outputs) = WorkerHandle::spawn(
+        socket_path,
+        sessions,
+        user_discovery,
+        power,
+        protocol_locale(locale),
+    )
+    .map_err(|_| HostError::WorkerSpawn)?;
     let worker = Rc::new(worker);
 
     let terminal_application = application.clone();
@@ -91,6 +99,13 @@ fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindo
 
     view.load_theme();
     Ok(window)
+}
+
+const fn protocol_locale(locale: ConfigUiLocale) -> UiLocale {
+    match locale {
+        ConfigUiLocale::En => UiLocale::En,
+        ConfigUiLocale::ZhCn => UiLocale::ZhCn,
+    }
 }
 
 fn discover_trusted_sessions(config: &DiscoveryConfig) -> Result<Vec<TrustedSession>, HostError> {

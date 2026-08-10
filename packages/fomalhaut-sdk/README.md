@@ -7,6 +7,7 @@ import { createFomalhautClient } from "fomalhaut-sdk";
 
 const client = await createFomalhautClient();
 const state = await client.state.get();
+document.documentElement.lang = state.locale;
 
 if (state.capabilities.power.includes("suspend")) {
   await client.power.request("suspend");
@@ -36,3 +37,6 @@ Authentication responses are not queued or logged by the SDK. Clear credential i
 awaiting a request, and only load trusted theme code in either host.
 
 Generated protocol types are also available from `fomalhaut-sdk/protocol`.
+Every bootstrapped snapshot carries the host-resolved `locale` union (`"en" | "zh-CN"`). Themes
+should treat it as authoritative after bootstrap; browser locale detection is only suitable for
+loading or fatal UI shown before the first snapshot.

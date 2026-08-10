@@ -8,14 +8,14 @@ mod secret;
 mod value;
 
 pub use error::{ProtocolDecodeError, ProtocolErrorBody, ProtocolErrorCode, ProtocolValueError};
-pub(crate) use message::GreeterSnapshotFields;
 pub use message::{
     AuthMessage, AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
     GreeterStateSnapshot, IdentitySummary, LockState, LockerStateSnapshot, LoginState,
     MessageLevel, PowerAction, Prompt, PromptKind, ResponseEnvelope, ResponseResult, RuntimeMode,
     Sequence, SessionKind, SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot,
-    UserSummary, WireMessage,
+    UiLocale, UserSummary, WireMessage,
 };
+pub(crate) use message::{GreeterSnapshotFields, LockerSnapshotFields};
 pub use request::{
     AuthBeginParams, AuthRespondParams, EmptyParams, FrontendRequest, GreeterAuthBeginParams,
     LockerAuthBeginParams, PowerRequestParams, PromptId, RequestEnvelope, RequestId,

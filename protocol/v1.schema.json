@@ -798,6 +798,9 @@
             "capabilities": {
               "$ref": "#/$defs/Capabilities"
             },
+            "locale": {
+              "$ref": "#/$defs/UiLocale"
+            },
             "login": {
               "$ref": "#/$defs/LoginState"
             },
@@ -850,6 +853,7 @@
           "additionalProperties": false,
           "required": [
             "mode",
+            "locale",
             "authentication",
             "login",
             "prompt",
@@ -873,6 +877,9 @@
             },
             "identity": {
               "$ref": "#/$defs/IdentitySummary"
+            },
+            "locale": {
+              "$ref": "#/$defs/UiLocale"
             },
             "lock": {
               "$ref": "#/$defs/LockState"
@@ -905,6 +912,7 @@
           "additionalProperties": false,
           "required": [
             "mode",
+            "locale",
             "authentication",
             "lock",
             "prompt",
@@ -943,6 +951,21 @@
         "id",
         "ok",
         "result"
+      ]
+    },
+    "UiLocale": {
+      "description": "UI language resolved by the trusted native host.",
+      "oneOf": [
+        {
+          "description": "English UI strings.",
+          "type": "string",
+          "const": "en"
+        },
+        {
+          "description": "Simplified Chinese UI strings.",
+          "type": "string",
+          "const": "zh-CN"
+        }
       ]
     },
     "UserSummary": {

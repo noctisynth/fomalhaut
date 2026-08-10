@@ -21,7 +21,7 @@ use fomalhaut_user::discover_current_avatar;
 use fomalhaut_web::{
     bridge::event_dispatch_script,
     controller::LockerController,
-    protocol::{IdentitySummary, RequestEnvelope},
+    protocol::{IdentitySummary, RequestEnvelope, UiLocale},
 };
 
 const COMMAND_CAPACITY: usize = 16;
@@ -116,12 +116,13 @@ impl WorkerHandle {
     pub fn spawn(
         identity: CurrentUserIdentity,
         power: PowerConfig,
+        locale: UiLocale,
     ) -> Result<(Rc<Self>, Receiver<NativeEvent>), WorkerSpawnError> {
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_CAPACITY);
         let (native_sender, native_receiver) = mpsc::sync_channel(NATIVE_OUTPUT_CAPACITY);
         let thread = thread::Builder::new()
             .name("fomalhaut-lock-controller".to_owned())
-            .spawn(move || run_worker(identity, power, command_receiver, native_sender))
+            .spawn(move || run_worker(identity, power, locale, command_receiver, native_sender))
             .map_err(WorkerSpawnError)?;
         Ok((
             Rc::new(Self {
@@ -257,6 +258,7 @@ fn map_try_send<T>(result: Result<(), TrySendError<T>>) -> Result<(), SubmitErro
 fn run_worker(
     identity: CurrentUserIdentity,
     power_config: PowerConfig,
+    locale: UiLocale,
     commands: Receiver<WorkerCommand>,
     native: SyncSender<NativeEvent>,
 ) {
@@ -308,7 +310,8 @@ fn run_worker(
         None => (fallback_identity, Vec::new()),
     };
     let power = LogindPowerControl::discover(&power_config);
-    let mut controller = LockerController::with_power_control(backend, identity, power);
+    let mut controller =
+        LockerController::with_locale_and_power_control(backend, identity, power, locale);
     let mut views = HashMap::new();
 
     while let Ok(command) = commands.recv() {

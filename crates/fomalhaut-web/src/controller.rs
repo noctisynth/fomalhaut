@@ -12,10 +12,11 @@ use crate::{
     bridge::{event_dispatch_script, response_json},
     protocol::{
         AuthMessage, AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
-        FrontendRequest, GreeterSnapshotFields, IdentitySummary, LockState, LoginState,
-        MAX_AUTH_MESSAGES, MessageLevel, PowerAction, Prompt, PromptId, PromptKind,
+        FrontendRequest, GreeterSnapshotFields, IdentitySummary, LockState, LockerSnapshotFields,
+        LoginState, MAX_AUTH_MESSAGES, MessageLevel, PowerAction, Prompt, PromptId, PromptKind,
         ProtocolErrorBody, ProtocolErrorCode, RequestEnvelope, ResponseEnvelope, ResponseResult,
-        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot, UserSummary,
+        SessionSelectedData, SessionSummary, StateChangedData, StateSnapshot, UiLocale,
+        UserSummary,
     },
 };
 
@@ -326,6 +327,7 @@ pub struct GreeterController<B> {
     users: Vec<UserSummary>,
     power: Box<dyn PowerControl>,
     selected_session: Option<usize>,
+    locale: UiLocale,
 }
 
 impl<B: LoginBackend> GreeterController<B> {
@@ -359,6 +361,18 @@ impl<B: LoginBackend> GreeterController<B> {
         users: Vec<UserSummary>,
         power: impl PowerControl + 'static,
     ) -> Self {
+        Self::with_locale_and_power_control(client, sessions, users, power, UiLocale::En)
+    }
+
+    /// Wraps a connected client with trusted catalogs, power, and host-resolved UI locale.
+    #[must_use]
+    pub fn with_locale_and_power_control(
+        client: B,
+        sessions: Vec<TrustedSession>,
+        users: Vec<UserSummary>,
+        power: impl PowerControl + 'static,
+        locale: UiLocale,
+    ) -> Self {
         let auth = AuthPublicState::new(client.state());
         let login = if client.session_started() {
             LoginState::Started
@@ -374,12 +388,14 @@ impl<B: LoginBackend> GreeterController<B> {
             users,
             power: Box::new(power),
             selected_session,
+            locale,
         }
     }
 
     /// Returns a bounded, frontend-safe snapshot of the current controller state.
     pub fn snapshot(&self) -> Result<StateSnapshot, ControllerError> {
         StateSnapshot::greeter(GreeterSnapshotFields {
+            locale: self.locale,
             authentication: self.auth.authentication,
             login: self.login,
             prompt: self.auth.prompt.clone(),
@@ -637,6 +653,7 @@ pub struct LockerController<B> {
     lock: LockState,
     identity: IdentitySummary,
     power: Box<dyn PowerControl>,
+    locale: UiLocale,
 }
 
 impl<B: ReauthBackend> LockerController<B> {
@@ -653,6 +670,17 @@ impl<B: ReauthBackend> LockerController<B> {
         identity: IdentitySummary,
         power: impl PowerControl + 'static,
     ) -> Self {
+        Self::with_locale_and_power_control(client, identity, power, UiLocale::En)
+    }
+
+    /// Wraps reauthentication with identity, power, and host-resolved UI locale.
+    #[must_use]
+    pub fn with_locale_and_power_control(
+        client: B,
+        identity: IdentitySummary,
+        power: impl PowerControl + 'static,
+        locale: UiLocale,
+    ) -> Self {
         let auth = AuthPublicState::new(client.state());
         Self {
             client,
@@ -660,20 +688,22 @@ impl<B: ReauthBackend> LockerController<B> {
             lock: LockState::Acquiring,
             identity,
             power: Box::new(power),
+            locale,
         }
     }
 
     /// Returns a bounded locker snapshot without user or session selection capabilities.
     pub fn snapshot(&self) -> Result<StateSnapshot, ControllerError> {
-        StateSnapshot::locker(
-            self.auth.authentication,
-            self.lock,
-            self.auth.prompt.clone(),
-            self.auth.messages.iter().cloned().collect(),
-            self.auth.sequences.watermark(),
-            self.identity.clone(),
-            self.power.capabilities(),
-        )
+        StateSnapshot::locker(LockerSnapshotFields {
+            locale: self.locale,
+            authentication: self.auth.authentication,
+            lock: self.lock,
+            prompt: self.auth.prompt.clone(),
+            messages: self.auth.messages.iter().cloned().collect(),
+            sequence: self.auth.sequences.watermark(),
+            identity: self.identity.clone(),
+            capabilities: self.power.capabilities(),
+        })
         .map_err(|_| ControllerError::new("the controller public state is invalid"))
     }
 

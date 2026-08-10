@@ -22,7 +22,7 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
   <main aria-labelledby="title">
     <p class="eyebrow">FOMALHAUT</p>
     <h1 id="title">Sign in</h1>
-    <p class="introduction">Minimal example theme for the Fomalhaut frontend protocol.</p>
+    <p id="introduction" class="introduction">Minimal example theme for the Fomalhaut frontend protocol.</p>
 
     <section id="locker-identity" aria-labelledby="locker-identity-name" hidden>
       <div id="locker-avatar" class="user-fallback" aria-hidden="true">?</div>
@@ -42,7 +42,7 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
              autocapitalize="none" spellcheck="false" required autofocus>
 
       <div id="session-control">
-        <label for="session">Session</label>
+        <label id="session-label" for="session">Session</label>
         <select id="session" name="session"></select>
       </div>
 
@@ -54,7 +54,7 @@ const INDEX_HTML: &[u8] = br#"<!doctype html>
 
     <p id="status" role="status" aria-live="polite">Connecting to the login service...</p>
     <ul id="messages" aria-live="polite"></ul>
-    <p class="notice">This is the built-in example theme, not a fixed product interface.</p>
+    <p id="notice" class="notice">This is the built-in example theme, not a fixed product interface.</p>
   </main>
   <script src="app.js"></script>
 </body>
@@ -243,10 +243,11 @@ select:disabled {
 }
 "#;
 
-const APP_JS: &[u8] = br#"'use strict';
+const APP_JS: &[u8] = r#"'use strict';
 
 const form = document.getElementById('login-form');
 const title = document.getElementById('title');
+const introduction = document.getElementById('introduction');
 const credentialLabel = document.getElementById('credential-label');
 const credential = document.getElementById('credential');
 const lockerIdentity = document.getElementById('locker-identity');
@@ -254,14 +255,88 @@ const lockerAvatar = document.getElementById('locker-avatar');
 const lockerIdentityName = document.getElementById('locker-identity-name');
 const lockerUsername = document.getElementById('locker-username');
 const knownUsers = document.getElementById('known-users');
+const knownUsersTitle = document.getElementById('known-users-title');
 const userList = document.getElementById('user-list');
 const otherUser = document.getElementById('other-user');
 const sessionControl = document.getElementById('session-control');
+const sessionLabel = document.getElementById('session-label');
 const session = document.getElementById('session');
 const submit = document.getElementById('submit');
 const cancel = document.getElementById('cancel');
 const status = document.getElementById('status');
 const messages = document.getElementById('messages');
+const notice = document.getElementById('notice');
+
+const translations = {
+  en: {
+    signIn: 'Sign in',
+    introduction: 'Minimal example theme for the Fomalhaut frontend protocol.',
+    users: 'Users',
+    otherUser: 'Other user',
+    username: 'Username',
+    session: 'Session',
+    continue: 'Continue',
+    cancel: 'Cancel',
+    connecting: 'Connecting to the login service...',
+    notice: 'This is the built-in example theme, not a fixed product interface.',
+    credential: 'Credential',
+    tryAgain: 'Try again',
+    waiting: 'Waiting...',
+    respond: 'Respond',
+    startingSession: 'Starting the selected session...',
+    enterUsername: 'Enter your username to continue.',
+    sessionLocked: 'Session locked',
+    lockFailed: 'The native session lock failed.',
+    sessionUnlocked: 'Session unlocked.',
+    authSucceededUnlocking: 'Authentication succeeded. Unlocking...',
+    authRequiresResponse: 'Authentication requires a response.',
+    securingSession: 'Securing this session...',
+    authFailed: 'Authentication failed. Try again.',
+    authWaiting: 'Waiting for the authentication service...',
+    requestCounterExhausted: 'The frontend request counter is exhausted.',
+    bridgeUnavailable: 'The Fomalhaut host bridge is unavailable.',
+    authSucceededStarting: 'Authentication succeeded. Starting the selected session...',
+    authCancelled: 'Authentication was cancelled.',
+    sessionSelectionUpdated: 'Session selection updated.',
+    sessionStarted: 'Session started.',
+    lockedWaiting: 'Session locked. Waiting for authentication...',
+    authServiceFailure: 'The authentication service could not complete the request.'
+  },
+  'zh-CN': {
+    signIn: '登录',
+    introduction: 'Fomalhaut 前端协议的内置最小示例主题。',
+    users: '用户',
+    otherUser: '其他用户',
+    username: '用户名',
+    session: '会话',
+    continue: '继续',
+    cancel: '取消',
+    connecting: '正在连接登录服务…',
+    notice: '这是内置示例主题，不是固定的产品界面。',
+    credential: '认证凭据',
+    tryAgain: '重试',
+    waiting: '请稍候…',
+    respond: '提交',
+    startingSession: '正在启动所选会话…',
+    enterUsername: '输入用户名以继续。',
+    sessionLocked: '会话已锁定',
+    lockFailed: '原生会话锁失败。',
+    sessionUnlocked: '会话已解锁。',
+    authSucceededUnlocking: '认证成功，正在解锁…',
+    authRequiresResponse: '认证需要输入响应。',
+    securingSession: '正在保护当前会话…',
+    authFailed: '认证失败，请重试。',
+    authWaiting: '正在等待认证服务…',
+    requestCounterExhausted: '前端请求计数器已耗尽。',
+    bridgeUnavailable: 'Fomalhaut 宿主桥接不可用。',
+    authSucceededStarting: '认证成功，正在启动所选会话…',
+    authCancelled: '认证已取消。',
+    sessionSelectionUpdated: '会话选择已更新。',
+    sessionStarted: '会话已启动。',
+    lockedWaiting: '会话已锁定，正在等待认证…',
+    authServiceFailure: '认证服务无法完成请求。'
+  }
+};
 
 let nextRequestId = 1;
 let activePrompt = null;
@@ -270,6 +345,39 @@ let busy = false;
 let terminal = false;
 let retryAvailable = false;
 let lastSequence = 0;
+let locale = 'en';
+
+function browserLocale() {
+  const languages = Array.isArray(navigator.languages)
+    ? navigator.languages
+    : [navigator.language];
+  return languages.some((language) => {
+    if (typeof language !== 'string') {
+      return false;
+    }
+    const normalized = language.trim().replaceAll('_', '-').toLowerCase();
+    return normalized === 'zh' || normalized.startsWith('zh-');
+  }) ? 'zh-CN' : 'en';
+}
+
+function text(key) {
+  return translations[locale][key];
+}
+
+function applyLocale(nextLocale) {
+  locale = nextLocale === 'zh-CN' ? 'zh-CN' : 'en';
+  document.documentElement.lang = locale;
+  title.textContent = text('signIn');
+  introduction.textContent = text('introduction');
+  knownUsersTitle.textContent = text('users');
+  otherUser.textContent = text('otherUser');
+  credentialLabel.textContent = text('username');
+  sessionLabel.textContent = text('session');
+  submit.textContent = text('continue');
+  cancel.textContent = text('cancel');
+  status.textContent = text('connecting');
+  notice.textContent = text('notice');
+}
 
 function setStatus(message) {
   status.textContent = message;
@@ -302,8 +410,8 @@ function showUsernameInput() {
   credential.type = 'text';
   credential.name = 'username';
   credential.autocomplete = 'username';
-  credentialLabel.textContent = 'Username';
-  submit.textContent = 'Continue';
+  credentialLabel.textContent = text('username');
+  submit.textContent = text('continue');
   cancel.hidden = true;
   if (!terminal) {
     credential.focus();
@@ -318,8 +426,8 @@ function showLockerWaiting(canRetry) {
   credential.type = 'password';
   credential.name = 'response';
   credential.autocomplete = 'off';
-  credentialLabel.textContent = 'Credential';
-  submit.textContent = canRetry ? 'Try again' : 'Waiting...';
+  credentialLabel.textContent = text('credential');
+  submit.textContent = canRetry ? text('tryAgain') : text('waiting');
   cancel.hidden = true;
   updateControls();
 }
@@ -332,7 +440,7 @@ function showPrompt(prompt) {
   credential.name = 'response';
   credential.autocomplete = 'off';
   credentialLabel.textContent = prompt.message;
-  submit.textContent = 'Respond';
+  submit.textContent = text('respond');
   cancel.hidden = false;
   if (!terminal) {
     credential.focus();
@@ -408,6 +516,7 @@ function setUsers(snapshot) {
 }
 
 function applySnapshot(snapshot) {
+  applyLocale(snapshot.locale);
   mode = snapshot.mode;
   lastSequence = Math.max(lastSequence, snapshot.sequence);
   terminal = false;
@@ -417,7 +526,7 @@ function applySnapshot(snapshot) {
   }
 
   if (mode === 'greeter') {
-    title.textContent = 'Sign in';
+    title.textContent = text('signIn');
     lockerIdentity.hidden = true;
     sessionControl.hidden = false;
     setUsers(snapshot);
@@ -426,43 +535,43 @@ function applySnapshot(snapshot) {
       showPrompt(snapshot.prompt);
     } else if (snapshot.login === 'starting_session' || snapshot.login === 'started') {
       terminal = true;
-      setStatus('Starting the selected session...');
+      setStatus(text('startingSession'));
     } else {
       showUsernameInput();
-      setStatus('Enter your username to continue.');
+      setStatus(text('enterUsername'));
     }
     updateControls();
     return false;
   }
 
-  title.textContent = 'Session locked';
+  title.textContent = text('sessionLocked');
   knownUsers.hidden = true;
   sessionControl.hidden = true;
   setLockerIdentity(snapshot.identity);
   if (snapshot.lock === 'failed') {
     terminal = true;
     showLockerWaiting(false);
-    setStatus('The native session lock failed.');
+    setStatus(text('lockFailed'));
   } else if (snapshot.lock === 'released') {
     terminal = true;
     showLockerWaiting(false);
-    setStatus('Session unlocked.');
+    setStatus(text('sessionUnlocked'));
   } else if (snapshot.lock === 'unlocking' || snapshot.authentication === 'authenticated') {
     terminal = true;
     showLockerWaiting(false);
-    setStatus('Authentication succeeded. Unlocking...');
+    setStatus(text('authSucceededUnlocking'));
   } else if (snapshot.prompt) {
     showPrompt(snapshot.prompt);
-    setStatus('Authentication requires a response.');
+    setStatus(text('authRequiresResponse'));
   } else if (snapshot.lock === 'acquiring') {
     showLockerWaiting(false);
-    setStatus('Securing this session...');
+    setStatus(text('securingSession'));
   } else if (snapshot.authentication === 'failed') {
     showLockerWaiting(true);
-    setStatus('Authentication failed. Try again.');
+    setStatus(text('authFailed'));
   } else {
     showLockerWaiting(false);
-    setStatus('Waiting for the authentication service...');
+    setStatus(text('authWaiting'));
   }
   updateControls();
   return snapshot.lock === 'locked' && snapshot.authentication === 'idle';
@@ -472,7 +581,7 @@ async function sendRequest(method, params) {
   if (nextRequestId > Number.MAX_SAFE_INTEGER) {
     terminal = true;
     updateControls();
-    setStatus('The frontend request counter is exhausted.');
+    setStatus(text('requestCounterExhausted'));
     return null;
   }
   const request = { protocol: 1, id: nextRequestId, method, params };
@@ -486,7 +595,7 @@ async function sendRequest(method, params) {
     return response;
   } catch (_error) {
     terminal = true;
-    setStatus('The Fomalhaut host bridge is unavailable.');
+    setStatus(text('bridgeUnavailable'));
     return null;
   } finally {
     setBusy(false);
@@ -571,7 +680,7 @@ window.addEventListener('fomalhaut:event', (event) => {
   switch (message.event) {
     case 'auth.prompt':
       showPrompt(message.data);
-      setStatus('Authentication requires a response.');
+      setStatus(text('authRequiresResponse'));
       break;
     case 'auth.message':
       addMessage(message.data);
@@ -580,8 +689,8 @@ window.addEventListener('fomalhaut:event', (event) => {
       terminal = true;
       updateControls();
       setStatus(mode === 'locker'
-        ? 'Authentication succeeded. Unlocking...'
-        : 'Authentication succeeded. Starting the selected session...');
+        ? text('authSucceededUnlocking')
+        : text('authSucceededStarting'));
       break;
     case 'auth.failed':
       if (mode === 'locker') {
@@ -589,7 +698,7 @@ window.addEventListener('fomalhaut:event', (event) => {
       } else {
         showUsernameInput();
       }
-      setStatus('Authentication failed. Try again.');
+      setStatus(text('authFailed'));
       break;
     case 'auth.cancelled':
       if (mode === 'locker') {
@@ -597,23 +706,23 @@ window.addEventListener('fomalhaut:event', (event) => {
       } else {
         showUsernameInput();
       }
-      setStatus('Authentication was cancelled.');
+      setStatus(text('authCancelled'));
       break;
     case 'session.selected':
       if (mode === 'greeter') {
         session.value = message.data.sessionId;
-        setStatus('Session selection updated.');
+        setStatus(text('sessionSelectionUpdated'));
       }
       break;
     case 'session.started':
       terminal = true;
       updateControls();
-      setStatus('Session started.');
+      setStatus(text('sessionStarted'));
       break;
     case 'lock.acquired':
       if (mode === 'locker') {
         showLockerWaiting(false);
-        setStatus('Session locked. Waiting for authentication...');
+        setStatus(text('lockedWaiting'));
         void sendRequest('auth.begin', {});
       }
       break;
@@ -621,14 +730,14 @@ window.addEventListener('fomalhaut:event', (event) => {
       if (mode === 'locker') {
         terminal = true;
         showLockerWaiting(false);
-        setStatus('The native session lock failed.');
+        setStatus(text('lockFailed'));
       }
       break;
     case 'lock.released':
       if (mode === 'locker') {
         terminal = true;
         showLockerWaiting(false);
-        setStatus('Session unlocked.');
+        setStatus(text('sessionUnlocked'));
       }
       break;
     case 'state.changed':
@@ -638,7 +747,7 @@ window.addEventListener('fomalhaut:event', (event) => {
         } else {
           showUsernameInput();
         }
-        setStatus('The authentication service could not complete the request.');
+        setStatus(text('authServiceFailure'));
       }
       break;
     default:
@@ -646,8 +755,10 @@ window.addEventListener('fomalhaut:event', (event) => {
   }
 });
 
+applyLocale(browserLocale());
 void refreshState();
-"#;
+"#
+.as_bytes();
 
 /// One immutable resource exposed by the embedded theme scheme.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -758,6 +869,11 @@ mod tests {
         assert!(script.contains("snapshot.users"));
         assert!(script.contains("snapshot.identity"));
         assert!(script.contains("snapshot.sequence"));
+        assert!(script.contains("applyLocale(snapshot.locale)"));
+        assert!(script.contains("document.documentElement.lang = locale"));
+        assert!(script.contains("navigator.languages"));
+        assert!(script.contains("'zh-CN':"));
+        assert!(script.contains("认证失败，请重试。"));
         assert!(script.contains("user.avatarUrl"));
         assert!(script.contains("message.sequence <= lastSequence"));
         assert!(script.contains("mode === 'locker' ? {} : { username: value }"));

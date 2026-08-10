@@ -10,11 +10,12 @@ import {
   type Prompt,
   type RuntimeMode,
   type StateSnapshot,
+  type UiLocale,
   type UserSummary,
 } from "fomalhaut-sdk";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import { detectBrowserLocale, translate } from "@/i18n";
 
-const AUTHENTICATION_FAILURE_MESSAGE = "Authentication failed. Try again.";
 const MAX_AUTHENTICATION_MESSAGES = 16;
 
 export type ThemePhase = "loading" | "ready" | "failed";
@@ -30,6 +31,7 @@ export interface ThemeState {
   phase: ThemePhase;
   screen: ThemeScreen;
   snapshot: StateSnapshot | null;
+  locale: UiLocale;
   busy: boolean;
   error: string | null;
   chooseKnownUser(user: UserSummary): Promise<boolean>;
@@ -51,17 +53,17 @@ export interface ThemeStoreRuntime {
   destroy(): void;
 }
 
-function displayError(error: unknown): string {
+function displayError(error: unknown, locale: UiLocale): string {
   if (error instanceof FomalhautProtocolError) {
     return error.message;
   }
   if (error instanceof FomalhautBusyError) {
-    return "Another authentication request is still in progress.";
+    return translate(locale, "error.busy");
   }
   if (error instanceof FomalhautBridgeError) {
-    return "The Fomalhaut host is unavailable.";
+    return translate(locale, "error.host-unavailable");
   }
-  return "Fomalhaut could not complete the request.";
+  return translate(locale, "error.request-failed");
 }
 
 function authenticationIsActive(authentication: AuthState): boolean {
@@ -96,7 +98,7 @@ export function createThemeStore(
         await operation();
         return true;
       } catch (error) {
-        set({ error: displayError(error) });
+        set({ error: displayError(error, get().locale) });
         return false;
       } finally {
         set({ busy: false });
@@ -115,6 +117,7 @@ export function createThemeStore(
       phase: "loading",
       screen: { name: "user-selection" },
       snapshot: null,
+      locale: detectBrowserLocale(),
       busy: false,
       error: null,
       chooseKnownUser: async (user) => {
@@ -294,6 +297,7 @@ export function createThemeStore(
           store.setState({
             phase: "ready",
             snapshot,
+            locale: snapshot.locale,
             screen: { name: "locker" },
             error: null,
           });
@@ -312,6 +316,7 @@ export function createThemeStore(
         store.setState({
           phase: "ready",
           snapshot,
+          locale: snapshot.locale,
           screen: authenticationIsActive(snapshot.authentication)
             ? { name: "authentication-recovery" }
             : singleUser
@@ -323,7 +328,10 @@ export function createThemeStore(
           await store.getState().chooseKnownUser(singleUser);
         }
       } catch (error) {
-        store.setState({ phase: "failed", error: displayError(error) });
+        store.setState({
+          phase: "failed",
+          error: displayError(error, store.getState().locale),
+        });
       }
     },
     destroy: () => {
@@ -362,7 +370,10 @@ function recordAuthenticationFailure(
             ? messages
             : [
                 ...messages.slice(-(MAX_AUTHENTICATION_MESSAGES - 1)),
-                { level: "error", text: AUTHENTICATION_FAILURE_MESSAGE },
+                {
+                  level: "error",
+                  text: translate(state.locale, "authentication.failure"),
+                },
               ],
         sequence,
       },

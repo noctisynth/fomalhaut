@@ -119,6 +119,15 @@ controller 和主题测试没有覆盖安装后二进制的真实系统边界，
 隔离 `--system-root` 的首次和幂等安装也已通过。仍需重新安装到真实系统，并在 locker 与
 greeter 上确认头像、输入延迟和视觉一致性。
 
+随后完成首阶段 UI i18n：共享配置支持 `[locale].language = "en" | "zh-CN"`，省略时按
+`LC_ALL`、`LC_MESSAGES`、`LANG` 自动归一化检测，并将结果同时用于 Desktop Entry session
+名称、greeter/locker 快照、Schema 与泛型 SDK。内嵌 minimal theme 使用完整静态双语目录；
+React/Nocturne 使用 `i18next`/`react-i18next` 与 TypeScript module augmentation 收敛消息 key，
+快照前按浏览器语言显示，快照后以宿主 locale 为准，PAM 文本保持原样。验证覆盖 workspace
+168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 8 个测试、参考主题 30 个测试和生产构建，
+并在隔离 system root 中确认更新安装保留管理员 `[locale]`。尚未在真实 greeter/locker 进程中
+复测语言切换、中文字体 fallback 和本地化 session 名称。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -205,6 +214,11 @@ greeter 上确认头像、输入延迟和视觉一致性。
 - [x] 同步 Rust wire、Draft 2020-12 Schema、ts-rs 产物、SDK、两个主题、
       `docs/CONFIGURATION.md` 和 changeset；密码继续进入 JavaScript，主题必须在 SDK
       调用前同步清空 input。
+- [x] 实现有界 `en`/`zh-CN` UI locale：支持 `[locale].language` 覆盖和 POSIX 环境自动检测，
+      将解析结果用于 session 名称并经角色快照、Schema 与泛型 SDK 严格透传；为内嵌 minimal
+      theme 提供完整静态双语目录，并以 `i18next`/`react-i18next` 实现 React/Nocturne 的类型化
+      英中资源、文档语言与本地化日期/时间，同时保留 PAM prompt/message 原文，并同步配置文档、
+      自动化测试与 Semifold changeset。
 
 ## P0：项目基础与无 UI 核心
 
@@ -572,6 +586,8 @@ greeter 上确认头像、输入延迟和视觉一致性。
 - [ ] 在 2560×1600、240 Hz 的真实 niri locker 中复测键盘/指针响应，并在 greeter 中确认
       性能优化没有破坏共用页面的视觉与交互。
 - [ ] 在真实 WebKitGTK/Cage 中验证 React module script、CSS、用户/session、认证与退出流程。
+- [ ] 在真实 greeter 与 niri locker 中验证 locale 环境自动检测和 `[locale]` 覆盖、中文字体
+      fallback、Desktop Entry 本地化 session 名称，以及 PAM prompt/message 保持系统原文。
 
 ## P1：用户发现与头像
 

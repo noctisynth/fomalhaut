@@ -1,6 +1,7 @@
 import type { ErrorInfo, ReactNode } from "react";
 import { Component } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { detectBrowserLocale, i18n, translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface AppErrorBoundaryProps {
@@ -9,6 +10,12 @@ interface AppErrorBoundaryProps {
 
 interface AppErrorBoundaryState {
   failed: boolean;
+}
+
+function resolvedLocale() {
+  return i18n.resolvedLanguage === "zh-CN" || i18n.resolvedLanguage === "en"
+    ? i18n.resolvedLanguage
+    : detectBrowserLocale();
 }
 
 export class AppErrorBoundary extends Component<
@@ -23,10 +30,12 @@ export class AppErrorBoundary extends Component<
 
   public componentDidCatch(_error: Error, _info: ErrorInfo): void {
     // The greeter deliberately avoids logging values from the authentication UI.
+    document.documentElement.lang = resolvedLocale();
   }
 
   public render(): ReactNode {
     if (this.state.failed) {
+      const locale = resolvedLocale();
       return (
         <main
           className={cn(
@@ -35,11 +44,13 @@ export class AppErrorBoundary extends Component<
           )}
         >
           <div className="w-full max-w-md space-y-4 text-center">
-            <h1 className="text-2xl font-medium">Fomalhaut could not start</h1>
+            <h1 className="text-2xl font-medium">
+              {translate(locale, "error.start-title")}
+            </h1>
             <Alert variant="destructive">
-              <AlertTitle>Theme error</AlertTitle>
+              <AlertTitle>{translate(locale, "error.theme-title")}</AlertTitle>
               <AlertDescription>
-                Restart the greeter or ask an administrator to inspect the host.
+                {translate(locale, "error.theme-description")}
               </AlertDescription>
             </Alert>
           </div>

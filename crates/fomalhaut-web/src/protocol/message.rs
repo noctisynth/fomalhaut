@@ -22,6 +22,18 @@ pub enum RuntimeMode {
     Locker,
 }
 
+/// UI language resolved by the trusted native host.
+#[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "v1/protocol-message.ts")]
+pub enum UiLocale {
+    /// English UI strings.
+    #[serde(rename = "en")]
+    En,
+    /// Simplified Chinese UI strings.
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
 /// Authentication lifecycle visible to the frontend.
 #[derive(Clone, Copy, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -318,6 +330,7 @@ pub enum StateSnapshot {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 #[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct GreeterStateSnapshot {
+    locale: UiLocale,
     authentication: AuthState,
     login: LoginState,
     prompt: Option<Prompt>,
@@ -335,6 +348,7 @@ pub struct GreeterStateSnapshot {
 
 /// Crate-internal fields used to construct and validate a greeter snapshot atomically.
 pub(crate) struct GreeterSnapshotFields {
+    pub(crate) locale: UiLocale,
     pub(crate) authentication: AuthState,
     pub(crate) login: LoginState,
     pub(crate) prompt: Option<Prompt>,
@@ -350,6 +364,7 @@ impl StateSnapshot {
     /// Constructs a bounded, internally consistent greeter snapshot.
     pub(crate) fn greeter(fields: GreeterSnapshotFields) -> Result<Self, ProtocolValueError> {
         let GreeterSnapshotFields {
+            locale,
             authentication,
             login,
             prompt,
@@ -373,6 +388,7 @@ impl StateSnapshot {
             }
         }
         Ok(Self::Greeter(GreeterStateSnapshot {
+            locale,
             authentication,
             login,
             prompt,
@@ -386,19 +402,22 @@ impl StateSnapshot {
     }
 
     /// Constructs a bounded locker snapshot without user or session enumeration capabilities.
-    pub fn locker(
-        authentication: AuthState,
-        lock: LockState,
-        prompt: Option<Prompt>,
-        messages: Vec<AuthMessage>,
-        sequence: Sequence,
-        identity: IdentitySummary,
-        capabilities: Capabilities,
-    ) -> Result<Self, ProtocolValueError> {
+    pub(crate) fn locker(fields: LockerSnapshotFields) -> Result<Self, ProtocolValueError> {
+        let LockerSnapshotFields {
+            locale,
+            authentication,
+            lock,
+            prompt,
+            messages,
+            sequence,
+            identity,
+            capabilities,
+        } = fields;
         if messages.len() > MAX_AUTH_MESSAGES {
             return Err(ProtocolValueError::TooManyItems);
         }
         Ok(Self::Locker(LockerStateSnapshot {
+            locale,
             authentication,
             lock,
             prompt,
@@ -410,11 +429,24 @@ impl StateSnapshot {
     }
 }
 
+/// Crate-internal fields used to construct a locker snapshot atomically.
+pub(crate) struct LockerSnapshotFields {
+    pub(crate) locale: UiLocale,
+    pub(crate) authentication: AuthState,
+    pub(crate) lock: LockState,
+    pub(crate) prompt: Option<Prompt>,
+    pub(crate) messages: Vec<AuthMessage>,
+    pub(crate) sequence: Sequence,
+    pub(crate) identity: IdentitySummary,
+    pub(crate) capabilities: Capabilities,
+}
+
 /// Locker-only public state.
 #[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 #[ts(export, export_to = "v1/protocol-message.ts")]
 pub struct LockerStateSnapshot {
+    locale: UiLocale,
     authentication: AuthState,
     lock: LockState,
     prompt: Option<Prompt>,
@@ -663,9 +695,9 @@ pub enum WireMessage {
 mod tests {
     use super::{
         AuthState, Capabilities, EmptyResult, Event, EventEnvelope, EventSequence,
-        GreeterSnapshotFields, IdentitySummary, LockState, LoginState, ResponseEnvelope,
-        ResponseResult, Sequence, SessionKind, SessionSelectedData, SessionSummary, StateSnapshot,
-        UserSummary,
+        GreeterSnapshotFields, IdentitySummary, LockState, LockerSnapshotFields, LoginState,
+        ResponseEnvelope, ResponseResult, Sequence, SessionKind, SessionSelectedData,
+        SessionSummary, StateSnapshot, UiLocale, UserSummary,
     };
     use crate::protocol::{
         MAX_SAFE_INTEGER, ProtocolErrorBody, ProtocolErrorCode, ProtocolValueError, RequestId,
@@ -701,6 +733,7 @@ mod tests {
         )
         .expect("the session fixture is within bounds");
         let snapshot = StateSnapshot::greeter(GreeterSnapshotFields {
+            locale: UiLocale::ZhCn,
             authentication: AuthState::Idle,
             login: LoginState::Idle,
             prompt: None,
@@ -721,6 +754,7 @@ mod tests {
         assert!(snapshot.is_ok());
 
         let error = StateSnapshot::greeter(GreeterSnapshotFields {
+            locale: UiLocale::En,
             authentication: AuthState::Idle,
             login: LoginState::Idle,
             prompt: None,
@@ -743,19 +777,21 @@ mod tests {
             Some("fomalhaut://avatar/1".to_owned()),
         )
         .expect("the trusted identity fixture is valid");
-        let snapshot = StateSnapshot::locker(
-            AuthState::Idle,
-            LockState::Locked,
-            None,
-            Vec::new(),
-            Sequence::initial(),
+        let snapshot = StateSnapshot::locker(LockerSnapshotFields {
+            locale: UiLocale::ZhCn,
+            authentication: AuthState::Idle,
+            lock: LockState::Locked,
+            prompt: None,
+            messages: Vec::new(),
+            sequence: Sequence::initial(),
             identity,
-            Capabilities::disabled(),
-        )
+            capabilities: Capabilities::disabled(),
+        })
         .expect("the locker snapshot is valid");
         let value = serde_json::to_value(snapshot).expect("snapshot serialization succeeds");
 
         assert_eq!(value["mode"], "locker");
+        assert_eq!(value["locale"], "zh-CN");
         assert_eq!(value["sequence"], 0);
         assert!(value.get("users").is_none());
         assert!(value.get("sessions").is_none());
