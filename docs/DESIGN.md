@@ -492,10 +492,12 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
   版本事务，publish output 才描述 package 的实际 `succeeded`、`skipped`、`failed` 或
   `not-started` 结果。下游发布自动化必须消费该结构化事实，不能重新扫描 tag 或从人类可读日志
   推断发布结果。
-- `semifold-status.yaml` 与 `semifold-ci.yaml` 必须通过 `setup-semifold` 的 `version` 输入
-  pin 到和仓库本地开发环境一致的 Semifold CLI 版本。该 action 输入使用带 `v` 的发布版本
-  格式；当前按已审计的 `../semifold` 源码 pin 到 `v0.3.0-rc.6`，不得依赖 action 的 latest
-  release 默认值。升级 Semifold 时必须在同一变更中同步两处 workflow 并验证本地版本。
+- Semifold 承诺 `0.3.x` 向前兼容，因此 `semifold-status.yaml` 与 `semifold-ci.yaml` 通过
+  `setup-semifold` 的默认行为跟随 latest release，不提供 `version` 输入或保留旧 RC pin。
+  两处 workflow 必须保持相同策略；Semifold release 更新后应以本地最新 CLI 验证配置与
+  release plan，无需为兼容的 `0.3.x` patch release 逐次修改 workflow。
+- Rust registry HTTP pre-check 不显式覆盖 `User-Agent`；正式版 Semifold 由运行时注入包含实际
+  engine 版本与项目地址的默认值，避免仓库配置保留与当前 CLI 不一致的旧 RC 版本标识。
 
 本地允许的 Semifold 操作限于 changeset 创建、只读状态查询和配置维护，例如
 `smif commit`、`smif status`、`smif config sync` 和 `smif config channel`。本地验证不得

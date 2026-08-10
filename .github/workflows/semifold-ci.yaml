@@ -33,8 +33,6 @@ jobs:
             libwebkitgtk-6.0-dev
       - name: Setup Semifold
         uses: noctisynth/setup-semifold@main
-        with:
-          version: v0.3.0-rc.6
       - name: Install Bun canary
         uses: oven-sh/setup-bun@v2
         with:

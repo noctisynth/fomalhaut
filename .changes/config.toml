@@ -82,9 +82,6 @@ channel-bump = "preserve"
 type = "http"
 url = "https://crates.io/api/v1/crates/{{ package.name }}/{{ package.version }}"
 
-[resolver.rust.pre-check.extra-headers]
-User-Agent = "Semifold 0.3.0-rc.6"
-
 [[resolver.rust.publish]]
 command = "cargo"
 args = ["publish"]

@@ -797,6 +797,9 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       publish。
 - [x] 将 status 与 CI workflow 的 Semifold CLI 从 `v0.3.0-rc.1` 升级并 pin 到已审计的
       `../semifold` 最新源码版本 `v0.3.0-rc.6`。
+- [x] Semifold `v0.3.0` 正式发布并承诺 `0.3.x` 向前兼容后，移除 status 与 CI workflow 的
+      RC CLI pin，改为跟随 setup action 的 latest release；同时移除 Rust registry HTTP
+      pre-check 中遗留的 RC `User-Agent` 覆盖，改用运行时注入的版本化默认值。
 - [x] 为四个 Rust crate 补齐 crates.io 所需 description、license 和 repository metadata，
       并为 `fomalhaut-sdk` 补齐 npm repository metadata。
 - [x] 在 Semifold CI 发布前使用 frozen `bun.lock` 安装依赖并构建 SDK，确保 npm payload
