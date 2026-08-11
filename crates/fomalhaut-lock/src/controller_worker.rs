@@ -20,7 +20,7 @@ use fomalhaut_pam::{CurrentUserIdentity, PamReauthBackend};
 use fomalhaut_user::discover_current_avatar;
 use fomalhaut_web::{
     bridge::event_dispatch_script,
-    controller::LockerController,
+    controller::{LockerController, LockerLifecycleBatch},
     protocol::{IdentitySummary, RequestEnvelope, UiLocale},
 };
 
@@ -98,6 +98,8 @@ enum WorkerCommand {
         request: RequestEnvelope,
     },
     CancelForPage,
+    PrepareForSleep,
+    ResumeAfterSleep,
     LockAcquired,
     LockFailed,
     LockReleased,
@@ -175,6 +177,16 @@ impl WorkerHandle {
     /// Records the compositor `unlocked` signal for authorization validation and release.
     pub fn mark_lock_released(&self) -> Result<(), SubmitError> {
         self.try_send(WorkerCommand::LockReleased)
+    }
+
+    /// Serializes cancellation of the current PAM transaction before system sleep.
+    pub fn prepare_for_sleep(&self) -> Result<(), SubmitError> {
+        self.try_send(WorkerCommand::PrepareForSleep)
+    }
+
+    /// Serializes creation of one fresh PAM transaction after system resume.
+    pub fn resume_after_sleep(&self) -> Result<(), SubmitError> {
+        self.try_send(WorkerCommand::ResumeAfterSleep)
     }
 
     /// Stops the shared controller and waits for its PAM transaction to be cleaned up.
@@ -356,6 +368,38 @@ fn run_worker(
                     return;
                 }
             }
+            WorkerCommand::PrepareForSleep => {
+                let handled = runtime
+                    .block_on(controller.prepare_for_sleep())
+                    .is_ok_and(|batch| {
+                        handle_lifecycle_batch(&mut controller, &mut views, &native, batch).is_ok()
+                    });
+                if !handled {
+                    send_fatal(
+                        &mut views,
+                        &native,
+                        "the locker could not prepare authentication for system sleep",
+                    );
+                    return;
+                }
+            }
+            WorkerCommand::ResumeAfterSleep => {
+                let handled =
+                    runtime
+                        .block_on(controller.resume_after_sleep())
+                        .is_ok_and(|batch| {
+                            handle_lifecycle_batch(&mut controller, &mut views, &native, batch)
+                                .is_ok()
+                        });
+                if !handled {
+                    send_fatal(
+                        &mut views,
+                        &native,
+                        "authentication could not restart after system resume",
+                    );
+                    return;
+                }
+            }
             WorkerCommand::LockAcquired => {
                 let events = match controller.mark_lock_acquired() {
                     Ok(events) => events,
@@ -477,6 +521,24 @@ fn handle_request<B: ReauthBackend>(
     Ok(())
 }
 
+fn handle_lifecycle_batch<B: ReauthBackend>(
+    controller: &mut LockerController<B>,
+    views: &mut HashMap<u64, SyncSender<ControllerOutput<LockerViewAction>>>,
+    native: &SyncSender<NativeEvent>,
+    mut batch: LockerLifecycleBatch,
+) -> Result<(), ()> {
+    let unlock = batch.take_unlock_authorization();
+    let unlock_authorized = unlock.is_some();
+    if let Some(authorization) = unlock {
+        controller.begin_unlock(authorization).map_err(|_| ())?;
+    }
+    broadcast_events(views, batch.into_events())?;
+    if unlock_authorized {
+        native.send(NativeEvent::Unlock).map_err(|_| ())?;
+    }
+    Ok(())
+}
+
 fn broadcast_events(
     views: &mut HashMap<u64, SyncSender<ControllerOutput<LockerViewAction>>>,
     events: Vec<fomalhaut_web::protocol::EventEnvelope>,
@@ -552,7 +614,9 @@ mod tests {
         protocol::{IdentitySummary, RuntimeMode, decode_request_for_mode},
     };
 
-    use super::{LockerViewAction, NativeEvent, attach_view, handle_request};
+    use super::{
+        LockerViewAction, NativeEvent, attach_view, handle_lifecycle_batch, handle_request,
+    };
 
     struct FakeReauth {
         conversation: AuthConversation,
@@ -792,6 +856,71 @@ mod tests {
             receiver.recv_timeout(Duration::from_secs(1)),
             Ok(ControllerOutput::Events(events)) if events == ["occupied"]
         ));
+    }
+
+    #[test]
+    fn sleep_lifecycle_broadcasts_cancellation_and_a_fresh_prompt_to_every_view() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("test runtime can be created");
+        let mut controller = controller();
+        let (first_sender, first_receiver) = mpsc::sync_channel(8);
+        let (second_sender, second_receiver) = mpsc::sync_channel(8);
+        let mut views = HashMap::from([(1, first_sender), (2, second_sender)]);
+        let (native_sender, native_receiver) = mpsc::sync_channel(8);
+        let begin = decode_request_for_mode(
+            br#"{"protocol":1,"id":1,"method":"auth.begin","params":{}}"#,
+            RuntimeMode::Locker,
+        )
+        .expect("locker begin request is valid");
+        handle_request(
+            &runtime,
+            &mut controller,
+            &mut views,
+            &native_sender,
+            1,
+            7,
+            begin,
+        )
+        .expect("begin request is routed");
+        let _ = first_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("origin receives the first prompt");
+        let _ = second_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("secondary receives the first prompt");
+
+        let prepare = runtime
+            .block_on(controller.prepare_for_sleep())
+            .expect("sleep preparation cancels PAM");
+        handle_lifecycle_batch(&mut controller, &mut views, &native_sender, prepare)
+            .expect("sleep preparation is broadcast");
+        for receiver in [&first_receiver, &second_receiver] {
+            let ControllerOutput::Events(events) = receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("each view receives cancellation")
+            else {
+                panic!("sleep preparation must only broadcast events");
+            };
+            assert!(events.iter().any(|event| event.contains("auth.cancelled")));
+        }
+
+        let resume = runtime
+            .block_on(controller.resume_after_sleep())
+            .expect("resume starts fresh PAM");
+        handle_lifecycle_batch(&mut controller, &mut views, &native_sender, resume)
+            .expect("resume is broadcast");
+        for receiver in [&first_receiver, &second_receiver] {
+            let ControllerOutput::Events(events) = receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("each view receives the fresh prompt")
+            else {
+                panic!("resume must only broadcast events");
+            };
+            assert!(events.iter().any(|event| event.contains("auth.prompt")));
+            assert!(events.iter().any(|event| event.contains("promptId\\\":2")));
+        }
+        assert!(native_receiver.try_recv().is_err());
     }
 
     #[test]

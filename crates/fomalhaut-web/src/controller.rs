@@ -78,11 +78,35 @@ impl ControllerBatch {
     }
 }
 
+/// Ordered frontend events and optional native unlock authority produced by a locker lifecycle.
+#[derive(Debug)]
+pub struct LockerLifecycleBatch {
+    events: Vec<EventEnvelope>,
+    unlock_authorized: bool,
+}
+
+impl LockerLifecycleBatch {
+    /// Consumes the lifecycle batch into ordered frontend events.
+    #[must_use]
+    pub fn into_events(self) -> Vec<EventEnvelope> {
+        self.events
+    }
+
+    /// Takes one-shot native unlock authority when fresh post-resume PAM succeeds immediately.
+    pub fn take_unlock_authorization(&mut self) -> Option<UnlockAuthorization> {
+        if !self.unlock_authorized {
+            return None;
+        }
+        self.unlock_authorized = false;
+        Some(UnlockAuthorization { private: () })
+    }
+}
+
 /// One-shot proof that the reauthentication controller authorized a native unlock attempt.
 ///
-/// Only [`ControllerBatch::take_unlock_authorization`] can construct this value. Consuming it does
-/// not unlock the session; the locker host remains responsible for the session-lock handle and
-/// the compositor roundtrip.
+/// Only a successful request batch or post-resume lifecycle batch can construct this value.
+/// Consuming it does not unlock the session; the locker host remains responsible for the
+/// session-lock handle and the compositor roundtrip.
 #[derive(Debug)]
 pub struct UnlockAuthorization {
     private: (),
@@ -589,6 +613,7 @@ impl<B: LoginBackend> GreeterController<B> {
                 false,
             ));
         }
+        let cancelled = self.client.needs_cancel();
         self.cancel_for_lifecycle().await.map_err(|_| {
             ProtocolErrorBody::new(
                 ProtocolErrorCode::Internal,
@@ -603,7 +628,11 @@ impl<B: LoginBackend> GreeterController<B> {
                 true,
             )
         })?;
-        Ok(Vec::new())
+        Ok(if cancelled {
+            vec![Event::AuthCancelled(EmptyResult {})]
+        } else {
+            Vec::new()
+        })
     }
 
     fn select_session(&mut self, session_id: &str) -> Result<Vec<Event>, ProtocolErrorBody> {
@@ -834,6 +863,84 @@ impl<B: ReauthBackend> LockerController<B> {
         self.auth.cancel_for_lifecycle(&mut self.client).await
     }
 
+    /// Cancels any active PAM transaction before system sleep without releasing the lock.
+    pub async fn prepare_for_sleep(&mut self) -> Result<LockerLifecycleBatch, ControllerError> {
+        if self.lock != LockState::Locked {
+            return Ok(LockerLifecycleBatch {
+                events: Vec::new(),
+                unlock_authorized: false,
+            });
+        }
+        let previous_state = self.auth.authentication;
+        let cancelled = self.client.needs_cancel();
+        self.auth.cancel_for_lifecycle(&mut self.client).await?;
+        let detail_events = if cancelled {
+            vec![Event::AuthCancelled(EmptyResult {})]
+        } else {
+            Vec::new()
+        };
+        self.finish_lifecycle_batch(previous_state, detail_events)
+    }
+
+    /// Starts one fresh PAM transaction after system resume while retaining the session lock.
+    pub async fn resume_after_sleep(&mut self) -> Result<LockerLifecycleBatch, ControllerError> {
+        if self.lock != LockState::Locked {
+            return Ok(LockerLifecycleBatch {
+                events: Vec::new(),
+                unlock_authorized: false,
+            });
+        }
+        let previous_state = self.auth.authentication;
+        let cancelled = self.client.needs_cancel();
+        self.auth.cancel_for_lifecycle(&mut self.client).await?;
+        self.auth.reset_conversation();
+        if self.client.begin_reauth().await.is_err() {
+            self.auth
+                .cancel_after_internal_failure(&mut self.client)
+                .await;
+            return Err(ControllerError::new(
+                "authentication could not restart after system resume",
+            ));
+        }
+        let mut detail_events = if cancelled {
+            vec![Event::AuthCancelled(EmptyResult {})]
+        } else {
+            Vec::new()
+        };
+        let core_events = match self.auth.drain_core_events(&mut self.client).await {
+            Ok(events) => events,
+            Err(error) => {
+                self.auth
+                    .cancel_after_internal_failure(&mut self.client)
+                    .await;
+                return Err(error);
+            }
+        };
+        detail_events.extend(core_events);
+        self.auth.update_state(self.client.state());
+        self.finish_lifecycle_batch(previous_state, detail_events)
+    }
+
+    fn finish_lifecycle_batch(
+        &mut self,
+        previous_state: AuthState,
+        detail_events: Vec<Event>,
+    ) -> Result<LockerLifecycleBatch, ControllerError> {
+        let unlock_authorized = previous_state != AuthState::Authenticated
+            && self.auth.authentication == AuthState::Authenticated;
+        let mut events = Vec::with_capacity(detail_events.len().saturating_add(1));
+        if previous_state != self.auth.authentication {
+            events.push(Event::StateChanged(StateChangedData::new(
+                self.auth.authentication,
+            )));
+        }
+        events.extend(detail_events);
+        Ok(LockerLifecycleBatch {
+            events: self.auth.envelope_events(events)?,
+            unlock_authorized,
+        })
+    }
+
     async fn execute(&mut self, request: FrontendRequest) -> Result<Vec<Event>, ProtocolErrorBody> {
         if self.lock != LockState::Locked {
             return Err(ProtocolErrorBody::new(
@@ -900,6 +1007,7 @@ impl<B: ReauthBackend> LockerController<B> {
                 false,
             ));
         }
+        let cancelled = self.client.needs_cancel();
         self.cancel_for_lifecycle().await.map_err(|_| {
             ProtocolErrorBody::new(
                 ProtocolErrorCode::Internal,
@@ -914,7 +1022,11 @@ impl<B: ReauthBackend> LockerController<B> {
                 true,
             )
         })?;
-        Ok(Vec::new())
+        Ok(if cancelled {
+            vec![Event::AuthCancelled(EmptyResult {})]
+        } else {
+            Vec::new()
+        })
     }
 }
 
@@ -1295,7 +1407,9 @@ mod tests {
         let (response, events) = batch.into_parts();
 
         assert_eq!(json(response)["ok"], true);
-        assert_eq!(json(events)[0]["event"], "state.changed");
+        let events = json(events);
+        assert_eq!(events[0]["event"], "state.changed");
+        assert_eq!(events[1]["event"], "auth.cancelled");
         assert_eq!(
             calls
                 .lock()
@@ -1754,7 +1868,9 @@ mod tests {
         assert!(suspended.take_unlock_authorization().is_none());
         let (response, events) = suspended.into_parts();
         assert!(json(response)["ok"].as_bool().is_some_and(|ok| ok));
-        assert_eq!(json(events)[0]["data"]["state"], "idle");
+        let events = json(events);
+        assert_eq!(events[0]["data"]["state"], "idle");
+        assert_eq!(events[1]["event"], "auth.cancelled");
         assert_eq!(
             *calls.lock().expect("recording power mutex is not poisoned"),
             [PowerAction::Suspend]
@@ -1767,6 +1883,71 @@ mod tests {
         assert_eq!(snapshot["lock"], "locked");
         assert_eq!(snapshot["authentication"], "idle");
         assert_eq!(snapshot["capabilities"]["power"][0], "suspend");
+    }
+
+    #[tokio::test]
+    async fn locker_resume_replaces_the_cancelled_prompt_with_a_fresh_transaction() {
+        let client = ScriptedReauthBackend::new([
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Old password:".to_owned(),
+            },
+            ScriptStep::Success,
+            ScriptStep::Prompt {
+                kind: PromptKind::Secret,
+                message: "Fresh password:".to_owned(),
+            },
+            ScriptStep::Success,
+        ]);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let power = RecordingPower {
+            capabilities: Capabilities::with_power(&[PowerAction::Suspend]),
+            calls,
+            succeeds: true,
+        };
+        let mut controller = LockerController::with_power_control(client, locker_identity(), power);
+        controller
+            .mark_lock_acquired()
+            .expect("the compositor confirms the lock");
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":50,"method":"auth.begin","params":{}}"#,
+            ))
+            .await
+            .expect("the original locker prompt is available");
+        controller
+            .handle(request(
+                r#"{"protocol":1,"id":51,"method":"power.request","params":{"action":"suspend"}}"#,
+            ))
+            .await
+            .expect("suspend cancels the original transaction");
+
+        let mut resumed = controller
+            .resume_after_sleep()
+            .await
+            .expect("resume starts a fresh transaction");
+        assert!(resumed.take_unlock_authorization().is_none());
+        let events = json(resumed.into_events());
+        assert_eq!(events[0]["data"]["state"], "waiting_for_secret");
+        assert_eq!(events[1]["event"], "auth.prompt");
+        assert_eq!(events[1]["data"]["promptId"], 2);
+        assert_eq!(events[1]["data"]["message"], "Fresh password:");
+
+        let stale = controller
+            .handle(request(
+                r#"{"protocol":1,"id":52,"method":"auth.respond","params":{"promptId":1,"response":"old"}}"#,
+            ))
+            .await
+            .expect("the pre-suspend prompt receives a protocol rejection");
+        assert_eq!(json(stale.into_parts().0)["error"]["code"], "stale_prompt");
+
+        let mut authenticated = controller
+            .handle(request(
+                r#"{"protocol":1,"id":53,"method":"auth.respond","params":{"promptId":2,"response":"fresh"}}"#,
+            ))
+            .await
+            .expect("the post-resume prompt authenticates");
+        assert!(authenticated.take_unlock_authorization().is_some());
     }
 
     #[tokio::test]

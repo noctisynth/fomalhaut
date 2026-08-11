@@ -28,6 +28,10 @@ use crate::readiness::notify_ready;
 
 const APPLICATION_ID: &str = "org.fomalhautdm.FomalhautLock";
 const NATIVE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const LOGIN1_DESTINATION: &str = "org.freedesktop.login1";
+const LOGIN1_PATH: &str = "/org/freedesktop/login1";
+const LOGIN1_INTERFACE: &str = "org.freedesktop.login1.Manager";
+const LOGIN1_PREPARE_FOR_SLEEP: &str = "PrepareForSleep";
 
 /// Runs the locker until an authorized compositor release or a pre-lock failure.
 pub fn run() -> glib::ExitCode {
@@ -61,10 +65,13 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
         lock_requested: Cell::new(false),
         lock_acquired: Cell::new(false),
         lock_failure_sent: Cell::new(false),
+        sleep_preparing: Cell::new(false),
+        sleep_subscription: RefCell::new(None),
         next_surface: Cell::new(1),
         surfaces: RefCell::new(Vec::new()),
     });
     connect_session_lock(&state);
+    connect_sleep_lifecycle(&state);
     poll_native_events(&state, native);
     Ok(())
 }
@@ -93,6 +100,8 @@ struct LockHost {
     lock_requested: Cell<bool>,
     lock_acquired: Cell<bool>,
     lock_failure_sent: Cell<bool>,
+    sleep_preparing: Cell<bool>,
+    sleep_subscription: RefCell<Option<gio::SignalSubscription>>,
     next_surface: Cell<u64>,
     surfaces: RefCell<Vec<Rc<MonitorSurface>>>,
 }
@@ -206,6 +215,70 @@ impl LockHost {
         }
         glib::ControlFlow::Continue
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SleepLifecycleTransition {
+    Prepare,
+    Resume,
+}
+
+fn sleep_lifecycle_transition(
+    sleep_preparing: &Cell<bool>,
+    preparing: bool,
+) -> Option<SleepLifecycleTransition> {
+    if preparing {
+        return (!sleep_preparing.replace(true)).then_some(SleepLifecycleTransition::Prepare);
+    }
+    sleep_preparing
+        .replace(false)
+        .then_some(SleepLifecycleTransition::Resume)
+}
+
+fn connect_sleep_lifecycle(state: &Rc<LockHost>) {
+    let connection = match gio::bus_get_sync(gio::BusType::System, None::<&gio::Cancellable>) {
+        Ok(connection) => connection,
+        Err(error) => {
+            eprintln!("Fomalhaut could not monitor system sleep lifecycle: {error}");
+            return;
+        }
+    };
+    let weak_state = Rc::downgrade(state);
+    let subscription = connection.subscribe_to_signal(
+        Some(LOGIN1_DESTINATION),
+        Some(LOGIN1_INTERFACE),
+        Some(LOGIN1_PREPARE_FOR_SLEEP),
+        Some(LOGIN1_PATH),
+        None,
+        gio::DBusSignalFlags::NONE,
+        move |signal| {
+            let Some(state) = weak_state.upgrade() else {
+                return;
+            };
+            let Some((preparing,)) = signal.parameters.get::<(bool,)>() else {
+                eprintln!("Fomalhaut received an invalid system sleep lifecycle signal");
+                state.show_trusted_failure(
+                    "System sleep state is unavailable. The session remains locked.",
+                );
+                return;
+            };
+            let Some(transition) = sleep_lifecycle_transition(&state.sleep_preparing, preparing)
+            else {
+                return;
+            };
+            let submit = match transition {
+                SleepLifecycleTransition::Prepare => state.worker.prepare_for_sleep(),
+                SleepLifecycleTransition::Resume => state.worker.resume_after_sleep(),
+            };
+            if submit.is_err() {
+                eprintln!("Fomalhaut could not serialize the system sleep lifecycle");
+                state.show_trusted_failure(
+                    "Authentication could not follow system sleep. The session remains locked.",
+                );
+            }
+        },
+    );
+    state.sleep_subscription.replace(Some(subscription));
 }
 
 fn connect_session_lock(state: &Rc<LockHost>) {
@@ -438,3 +511,25 @@ impl fmt::Display for HostError {
 }
 
 impl Error for HostError {}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{SleepLifecycleTransition, sleep_lifecycle_transition};
+
+    #[test]
+    fn repeated_sleep_signals_only_produce_one_ordered_lifecycle_pair() {
+        let sleep_preparing = Cell::new(false);
+        assert_eq!(
+            sleep_lifecycle_transition(&sleep_preparing, true),
+            Some(SleepLifecycleTransition::Prepare)
+        );
+        assert_eq!(sleep_lifecycle_transition(&sleep_preparing, true), None);
+        assert_eq!(
+            sleep_lifecycle_transition(&sleep_preparing, false),
+            Some(SleepLifecycleTransition::Resume)
+        );
+        assert_eq!(sleep_lifecycle_transition(&sleep_preparing, false), None);
+    }
+}

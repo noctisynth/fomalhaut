@@ -190,11 +190,27 @@ export function createThemeStore(
     authentication: AuthState,
     sequence: number,
   ): void => {
-    store.setState((state) => ({
-      snapshot: state.snapshot
-        ? { ...state.snapshot, authentication, sequence }
-        : state.snapshot,
-    }));
+    store.setState((state) => {
+      if (!state.snapshot) {
+        return { snapshot: state.snapshot };
+      }
+      const prompt = state.snapshot.prompt;
+      const promptStillActive = Boolean(
+        prompt &&
+          ((authentication === "waiting_for_secret" &&
+            prompt.kind === "secret") ||
+            (authentication === "waiting_for_visible" &&
+              prompt.kind === "visible")),
+      );
+      return {
+        snapshot: {
+          ...state.snapshot,
+          authentication,
+          prompt: promptStillActive ? prompt : null,
+          sequence,
+        },
+      };
+    });
   };
 
   const subscribeCommonEvents = <M extends RuntimeMode>(

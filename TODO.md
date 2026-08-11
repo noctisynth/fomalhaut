@@ -151,6 +151,16 @@ workspace 168 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致性与 8 个测试、参考主题
 32 个测试和生产构建及 packaging 检查；安装后的 WebKit/真实 PAM 复测仍保留在 Host 集成任务中。
 
+当前设备进一步确认 greeter 登录、locker 启动/解锁和错误密码后的重试均已恢复，但从 locker
+电源菜单发起 suspend 并 resume 后，Nocturne 仍保留已经由 controller 取消的旧密码 prompt；
+提交该 `promptId` 只会得到 `stale_prompt`，且当前 host 没有恢复后启动新 PAM transaction 的
+入口。现已让 live 页面收到取消语义，由 locker host 对 logind `PrepareForSleep` 成对去重并在
+`false` 恢复信号后串行启动全新 transaction；Nocturne 与 minimal theme 都不会继续提交旧 prompt，
+且前者在 sleep 信号不可用时提供显式重试。controller、共享多 monitor worker、signal 去重和主题
+回归均已覆盖；验证通过 workspace 173 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致性
+与静态检查、参考主题 34 个测试和生产构建。Semifold CLI 已创建覆盖 `fomalhaut-lock`、
+`fomalhaut-web` 与 `fomalhaut` 的 patch/fix changeset；仍需重新部署并进行真实 suspend/resume 验证。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -188,14 +198,15 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       `fomalhaut-core`、`fomalhaut-greetd`、`fomalhaut-web` 和 `fomalhaut`。
 - [x] 随 crate 实现同步 CI、源码安装器、AUR package payload 与兼容说明；
       `fomalhaut-pam`、`fomalhaut-lock` 和共享 `fomalhaut-gtk` 变更进入同一待发布 changeset。
-- [ ] 在 Semifold CI 联合版本事务后验证新增 `fomalhaut-pam`、`fomalhaut-lock` 与更新后的
-      `fomalhaut-gtk` 最终发布 tarball；本地 path workspace 编译不能替代 registry 依赖验证。
-- [ ] 在 Semifold CI 联合更新 `fomalhaut-core` 与 `fomalhaut-greetd` 版本/包间依赖后验证
-      `fomalhaut-greetd` 的最终发布 tarball；本地版本事务前的 `cargo package` 会按 registry
-      解析尚未包含新 core API 的已发布 `fomalhaut-core 0.1.0-alpha.1`，不能替代该验证。
-- [ ] 在 Semifold CI 联合发布 `fomalhaut-config`、`fomalhaut-greetd`、`fomalhaut-gtk` 与
-      `fomalhaut` 后验证 greeter 的最终 tarball；本地版本事务前无法从 registry 解析尚未发布的
-      config/GTK crate，单独验证两个库的 payload 不能替代下游联合验证。
+- [x] 在 Semifold CI 联合版本事务后验证新增 `fomalhaut-pam`、`fomalhaut-lock` 与更新后的
+      `fomalhaut-gtk` 最终发布 tarball；已直接使用 crates.io registry source 的规范化 manifest
+      完成离线 `cargo check`，不以本地 path workspace 替代发布依赖解析。
+- [x] 在 Semifold CI 联合更新 `fomalhaut-core` 与 `fomalhaut-greetd` 版本/包间依赖后验证
+      `fomalhaut-greetd` 的最终发布 tarball；已使用发布后的 `fomalhaut-core 0.1.0-alpha.2` 与
+      `fomalhaut-greetd 0.1.0-alpha.0` registry source 完成离线 `cargo check`。
+- [x] 在 Semifold CI 联合发布 `fomalhaut-config`、`fomalhaut-greetd`、`fomalhaut-gtk` 与
+      `fomalhaut` 后验证 greeter 的最终 tarball；已使用 `fomalhaut 0.1.0-alpha.2` registry source
+      的规范化依赖完成离线 `cargo check`。
 
 ### PAM wrapper 选择与实现门槛
 
@@ -424,10 +435,11 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       `1.5`、locker `1.0`，systemd unit 清除继承的 `GDK_SCALE`/`GDK_DPI_SCALE`。
 - [ ] 让 `LockerController` 接收共享 `PowerControl`，按 capability 处理 `power.request`；请求前
       取消当前 PAM transaction，但不生成 unlock authorization、不释放 session lock，覆盖
-      suspend/resume 保持锁定所需的 controller/主题行为；controller/主题 mock 已覆盖，但当前
-      niri 实机请求曾长期 busy。已定位为取消 worker 后 IPC reader 在 EOF 上重复写满 channel、
-      父线程 `join` 死锁，并增加首个 IPC 错误退出回归；仍需重新部署并验证请求到达 logind、
-      suspend/resume 后保持锁定。
+      suspend/resume 保持锁定所需的 controller/host/主题行为；自动化现已覆盖 live-page 取消事件、
+      恢复信号成对去重、新 PAM transaction、多 monitor 广播、stale prompt 清理和降级重试。此前
+      niri 实机长期 busy 已定位为取消 worker 后 IPC reader 在 EOF 上重复写满 channel、父线程
+      `join` 死锁，并增加首个 IPC 错误退出回归；最新实测已经能 suspend/resume 且保持锁定，仍需
+      重新部署本次修复并验证恢复后的新密码 prompt 可以正常解锁。
 - [x] 实现并由隔离测试验证 `Type=notify` readiness 与 compositor-neutral systemd user unit；
       locker 保持前台、不自行 fork，且只在 compositor `locked` 与 controller
       `lock.acquired` 后通过 `NOTIFY_SOCKET` 发出 readiness。
@@ -450,8 +462,8 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 - [ ] 定位当前安装后二进制相对 2026-08-10 05:16 成功记录的 greeter 认证回归；补充超出
       scripted greetd transport 的安装/真实 PAM 边界验证。主题异步提交已断言完整回答，真实 Unix
       greetd IPC 必须覆盖普通拒绝后的 cleanup `CancelSession` 允许 `Success`/`Error`、主动取消、
-      重试、成功与 session start；仍需在安装后的 WebKit/真实 PAM 上确认修复，区分系统输入/PAM
-      状态与未覆盖的宿主边界。
+      重试、成功与 session start；当前实机已确认普通拒绝后重试、成功登录和 session start，仍需
+      补充主动取消及安装后的完整 WebKit/真实 PAM 边界记录。
 
 - [x] 在 `fomalhaut-web` 实现不依赖 GTK 的认证 controller，维护公开状态、core prompt 映射
       和单调事件 sequence。
@@ -737,16 +749,17 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 - [x] 确定发行边界：源码安装器仍可一次安装完整套件，AUR 按独立 Semifold 版本拆成
       `greetd-fomalhaut` 与 `fomalhaut-lock` 两个可同时安装的源码包。
 - [x] 让源码安装器原子安装
-      `/usr/bin/fomalhaut`、`/usr/bin/fomalhaut-lock`、共享/角色主题、PAM service 与
+      默认 `/usr/local/bin/fomalhaut`、`/usr/local/bin/fomalhaut-lock`、共享/角色主题、PAM service 与
       systemd 集成资产。
 - [x] 将源码安装器的 idle 文档资产改为 niri 优先、compositor-neutral 的 KDL/swayidle 示例。
 - [x] 在 Arch/CI/AUR 元数据中加入经实际验证的 PAM 和 `gtk4-layer-shell` 1.2+
       构建/运行依赖，同时保持 Cage/greetd 仅为 greeter 路径依赖。
-- [x] 让安装器通过结构化 TOML updater 安全迁移 `[frontend].path` 到
-      `[themes].default`，保留管理员的 `greeter`/`locker` 覆盖、PAM 策略和其他配置。
-- [ ] 新 Rust crate 的 crates.io metadata、Semifold package/channel、changeset 和 CI 构建已补齐；
-      仍需在 Semifold 联合版本事务后完成最终 `cargo package` payload/registry 依赖验证，且不在
-      本地执行 version/publish。
+- [x] 结束安装器对 `[frontend].path` 的迁移兼容：preflight 在切换任何安装文件前明确拒绝旧
+      table，并要求管理员手工迁移到 `[themes].default`；合法更新继续保留角色主题覆盖、PAM 策略
+      和其他配置。
+- [x] 新 Rust crate 的 crates.io metadata、Semifold package/channel、changeset 和 CI 构建已补齐；
+      已使用最终发布到 crates.io 的 registry source/规范化 manifest 完成 payload 依赖编译验证，
+      且未在本地执行 version/publish。
 - [x] 添加根目录安全安装器：支持首次/更新构建、原子二进制与主题部署、TOML 备份验证更新、
       显式 greetd restart 和临时 system-root 集成测试。
 - [x] 让源码安装器在 Arch 上检查构建与运行包（包括 PAM bindgen 所需的 `clang`/libclang），

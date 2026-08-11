@@ -712,13 +712,19 @@ function AuthenticationWaiting({
   const authentication = useThemeStore(
     (state) => state.snapshot?.authentication ?? "idle",
   );
+  const mode = useThemeStore((state) => state.snapshot?.mode ?? null);
   const busy = useThemeStore((state) => state.busy);
   const error = useThemeStore((state) => state.error);
   const retryAuthentication = useThemeStore(
     (state) => state.retryAuthentication,
   );
 
-  if ((authentication === "failed" || error) && allowRetry) {
+  if (
+    (authentication === "failed" ||
+      error ||
+      (mode === "locker" && authentication === "idle")) &&
+    allowRetry
+  ) {
     return (
       <Button
         className="w-full rounded-xl border-white/15 bg-[#102a52]/90"

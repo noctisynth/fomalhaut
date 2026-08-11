@@ -370,3 +370,31 @@ test("locker mode reauthenticates the fixed identity without session APIs", asyn
     sequence: 3,
   });
 });
+
+test("locker discards a cancelled pre-suspend prompt and can start a fresh transaction", async () => {
+  const transport = new MockTransport(
+    lockerSnapshot({ promptId: 7, kind: "secret", message: "Password" }),
+  );
+  const client = await createFomalhautClient(transport);
+  const runtime = createThemeStore(client);
+  await runtime.initialize();
+
+  transport.emit({
+    protocol: 1,
+    sequence: 1,
+    event: "state.changed",
+    data: { state: "idle" },
+  });
+
+  expect(runtime.store.getState().snapshot).toMatchObject({
+    mode: "locker",
+    authentication: "idle",
+    prompt: null,
+    sequence: 1,
+  });
+  expect(await runtime.store.getState().retryAuthentication()).toBe(true);
+  expect(transport.requests.at(-1)).toMatchObject({
+    method: "auth.begin",
+    params: {},
+  });
+});

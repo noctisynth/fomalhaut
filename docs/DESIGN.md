@@ -1038,8 +1038,21 @@ wire 值分离。第三方主题可以按该字段选择自己的资源或消息
 取消 greetd session，locker 取消当前一次性 PAM transaction。随后通过 systemd-logind 的
 `PowerOff(false)`、`Reboot(false)` 或 `Suspend(false)` 执行动作。这里的 `false` 明确禁止
 D-Bus 方法发起交互授权。locker 发起电源操作时不产生 unlock authorization，也不释放
-session-lock；尤其 suspend/resume 后必须仍由 compositor lock 覆盖，主题可以重新开始新的 PAM
-transaction。电源后端故障不得使 greeter 或 locker 启动失败：启动时退化为空 capability；
+session-lock。取消发生在仍然存活的页面上下文时，controller 必须发布 `state.changed = idle`
+和 `auth.cancelled`，使主题立即清除旧 prompt；页面不得在后续任何生命周期中重新提交已经取消的
+`promptId`。
+
+locker host 还必须订阅 systemd-logind `PrepareForSleep(bool)`：收到 `true` 时取消仍然活动的
+PAM transaction 并向所有 monitor 页面广播取消结果；收到 `false` 且 compositor lock 仍然有效
+时，只启动一次全新的 PAM transaction，并广播其新 prompt。恢复路径不得重放休眠前的用户名、
+回答或 prompt ID，也不得产生 unlock authorization，除非这次新的 PAM transaction 本身完成了
+认证。重复、延迟或与 locker 自身 `Suspend(false)` 请求交错的 sleep 信号必须按 controller
+串行顺序收敛，不能创建并发 transaction。若 sleep 信号监控不可用，locker 仍保持 fail closed
+和 session-lock；主题在公开状态为 `idle` 时必须清除 prompt 并提供显式重新认证入口，不能保留
+一个看似可输入但必然 stale 的密码框。内嵌 minimal theme 与参考主题都必须覆盖该降级行为。
+
+因此 suspend/resume 后必须仍由 compositor lock 覆盖，并且恢复认证只使用新 PAM transaction。
+电源后端故障不得使 greeter 或 locker 启动失败：启动时退化为空 capability；
 请求与能力查询之间发生竞态时，调用失败只返回稳定、脱敏错误，不回退到 `systemctl`、shell
 或任意命令执行。
 

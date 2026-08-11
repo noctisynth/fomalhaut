@@ -762,6 +762,14 @@ window.addEventListener('fomalhaut:event', (event) => {
           showUsernameInput();
         }
         setStatus(text('authServiceFailure'));
+      } else if (message.data.state === 'idle') {
+        if (mode === 'locker') {
+          showLockerWaiting(true);
+          setStatus(text('authCancelled'));
+        } else {
+          showUsernameInput();
+          setStatus(text('authCancelled'));
+        }
       }
       break;
     default:

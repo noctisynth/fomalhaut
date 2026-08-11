@@ -321,6 +321,31 @@ describe("SPA authentication UI", () => {
     });
   });
 
+  test("replaces a cancelled locker prompt with an explicit fresh-auth retry", async () => {
+    const transport = new MockTransport(
+      lockerSnapshot({ promptId: 7, kind: "secret", message: "Password" }),
+    );
+    await renderTheme(transport);
+    const user = userEvent.setup();
+    expect(screen.getByLabelText("Password")).toBeVisible();
+
+    act(() => {
+      transport.emit({
+        protocol: 1,
+        sequence: 1,
+        event: "state.changed",
+        data: { state: "idle" },
+      });
+    });
+
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(transport.requests.at(-1)).toMatchObject({
+      method: "auth.begin",
+      params: {},
+    });
+  });
+
   test("retries the same user after authentication failure", async () => {
     const transport = new MockTransport(
       snapshot([
