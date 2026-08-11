@@ -230,10 +230,10 @@ locker = "/etc/fomalhaut/themes/custom-locker"
 提供的运行模式呈现 greeter 或 locker。两个宿主都使用上述主题选择；配置两个角色路径用于
 允许管理员选择两套独立主题。
 
-迁移期仍接受单独出现的旧 `[frontend].path`，greeter 会输出弃用提示。`[frontend]` 与
-`[themes]` 同时出现时配置无效，避免隐式选择。源码安装器更新旧配置时会把
-`[frontend].path` 迁移为 `[themes].default`，保留已有的 `greeter`/`locker` 覆盖和其他
-管理员配置；若旧 `[frontend]` 包含未知键，安装器会拒绝删除该 table。
+旧 `[frontend].path` 已不再兼容；运行时会把 `[frontend]` 作为未知顶层字段拒绝，源码安装器
+也不会自动迁移或删除它。升级旧安装前，管理员必须手工把 `path` 改为
+`[themes].default`；安装器若在 preflight 发现 `[frontend]`，会在切换二进制、主题或其他已安装
+文件前明确失败。
 
 主题目录必须是绝对路径，并包含 `theme.toml`：
 

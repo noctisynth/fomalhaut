@@ -30,7 +30,6 @@ pub struct AppConfig {
     power: PowerConfig,
     display: RoleDisplayConfig,
     locale: UiLocale,
-    uses_legacy_frontend: bool,
 }
 
 impl AppConfig {
@@ -61,12 +60,6 @@ impl AppConfig {
             display: self.display.locker,
             locale: self.locale,
         }
-    }
-
-    /// Reports that legacy `[frontend].path` supplied the default theme.
-    #[must_use]
-    pub const fn uses_legacy_frontend(&self) -> bool {
-        self.uses_legacy_frontend
     }
 }
 
@@ -283,7 +276,6 @@ pub enum UserProvider {
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     themes: Option<RawThemes>,
-    frontend: Option<RawFrontend>,
     sessions: Option<RawSessions>,
     users: Option<RawUsers>,
     power: Option<RawPower>,
@@ -303,12 +295,6 @@ struct RawThemes {
     default: Option<PathBuf>,
     greeter: Option<PathBuf>,
     locker: Option<PathBuf>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawFrontend {
-    path: PathBuf,
 }
 
 #[derive(Default, Deserialize)]
@@ -366,8 +352,6 @@ pub enum ConfigError {
     InvalidPowerPolicy,
     /// Display scale was not finite or outside the supported range.
     InvalidDisplayScale,
-    /// Legacy and current theme configuration were both present.
-    ConflictingThemeConfiguration,
 }
 
 impl fmt::Display for ConfigError {
@@ -380,9 +364,6 @@ impl fmt::Display for ConfigError {
             Self::InvalidPowerPolicy => "the system configuration contains an invalid power policy",
             Self::InvalidDisplayScale => {
                 "the system configuration contains an invalid display scale"
-            }
-            Self::ConflictingThemeConfiguration => {
-                "the system configuration mixes legacy and current theme fields"
             }
         })
     }
@@ -428,23 +409,13 @@ fn validate_with_detected_locale(
     raw: RawConfig,
     detected_locale: UiLocale,
 ) -> Result<AppConfig, ConfigError> {
-    if raw.themes.is_some() && raw.frontend.is_some() {
-        return Err(ConfigError::ConflictingThemeConfiguration);
-    }
-
-    let uses_legacy_frontend = raw.frontend.is_some();
-    let themes = match (raw.themes, raw.frontend) {
-        (Some(themes), None) => ThemeConfig {
+    let themes = match raw.themes {
+        Some(themes) => ThemeConfig {
             default: themes.default,
             greeter: themes.greeter,
             locker: themes.locker,
         },
-        (None, Some(frontend)) => ThemeConfig {
-            default: Some(frontend.path),
-            ..ThemeConfig::default()
-        },
-        (None, None) => ThemeConfig::default(),
-        (Some(_), Some(_)) => return Err(ConfigError::ConflictingThemeConfiguration),
+        None => ThemeConfig::default(),
     };
     validate_optional_path(themes.default.as_deref())?;
     validate_optional_path(themes.greeter.as_deref())?;
@@ -532,7 +503,6 @@ fn validate_with_detected_locale(
         power,
         display,
         locale,
-        uses_legacy_frontend,
     })
 }
 
@@ -625,7 +595,6 @@ mod tests {
         assert_eq!(locker.theme_directory(), None);
         assert!(locker.power().actions().is_empty());
         assert_eq!(locker.display().scale(), 1.0);
-        assert!(!config.uses_legacy_frontend());
     }
 
     #[test]
@@ -669,34 +638,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_frontend_is_an_exclusive_deprecated_alias() {
-        let legacy = parse(
-            r#"
-                [frontend]
-                path = "/srv/fomalhaut/legacy"
-            "#,
-        )
-        .expect("legacy frontend remains accepted during migration");
-        let (theme, _, _, _, _, _) = legacy.for_greeter().into_parts();
-        assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/legacy")));
-        assert_eq!(
-            legacy.for_locker().theme_directory(),
-            Some(Path::new("/srv/fomalhaut/legacy"))
-        );
-        assert!(legacy.uses_legacy_frontend());
-
+    fn legacy_frontend_is_rejected_as_an_unknown_field() {
         assert_eq!(
             parse(
                 r#"
-                    [themes]
-                    default = "/srv/fomalhaut/current"
-
-                    [frontend]
-                    path = "/srv/fomalhaut/legacy"
-                "#,
+                [frontend]
+                path = "/srv/fomalhaut/legacy"
+            "#,
             )
             .err(),
-            Some(ConfigError::ConflictingThemeConfiguration)
+            Some(ConfigError::Parse)
         );
     }
 

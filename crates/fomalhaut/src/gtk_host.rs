@@ -33,11 +33,6 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
 
 fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindow, HostError> {
     let config = AppConfig::load().map_err(|_| HostError::Configuration)?;
-    if config.uses_legacy_frontend() {
-        eprintln!(
-            "Fomalhaut configuration uses deprecated [frontend].path; migrate to [themes].default"
-        );
-    }
     let (theme_directory, discovery, user_discovery, power, display, locale) =
         config.for_greeter().into_parts();
     let theme = match theme_directory {

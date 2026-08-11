@@ -32,6 +32,9 @@ client/transport 已迁入 `fomalhaut-greetd` 并实现 `LoginBackend`，Web gre
 `for_greeter()`/`for_locker()`、通用/角色主题优先级、旧字段独占迁移别名和新旧冲突拒绝。
 greeter 已改用角色视图；安装器会迁移 `[frontend].path`，保留角色覆盖、显示和电源策略，
 并通过全新安装、旧配置迁移和重复运行幂等的隔离测试。该切片将 workspace 测试增至 120 个。
+当前已经结束上述迁移兼容期：运行时别名、弃用警告和安装器自动迁移均已移除；配置解析与安装
+preflight 现在都会明确拒绝 `[frontend]`，并提示管理员手工迁移到 `[themes].default`。针对性
+配置测试及隔离 system-root 的旧配置拒绝、首次安装和重复安装幂等验证均已通过。
 
 随后完成共享 GTK host 切片：GTK application 生命周期、hardened WebView、资源 scheme、
 bridge、页面 epoch、renderer 观测和辅助内存资源服务已迁入 `fomalhaut-gtk`；角色无关的
@@ -228,6 +231,8 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       greeter `auth.begin(username)` 与 locker `auth.begin()` facade，不新建 locker SDK。
 - [x] 把全局配置从 `[frontend].path` 迁移为 `[themes].default`、`greeter`、
       `locker`，按“角色专用 → default → 内嵌”选择；新旧字段同时出现时拒绝。
+- [x] 结束 `[frontend].path` 迁移兼容期：从严格配置 schema 和 greeter 中移除别名/弃用警告，
+      并让源码安装器在切换任何已安装文件前拒绝旧 table、提示手工迁移到 `[themes].default`。
 - [x] 保持每个 `theme.toml` 只有一个 entrypoint；让内嵌 minimal theme 和
       React/Nocturne 参考主题在同一页面内同时支持 greeter/locker mode，同时保留
       分别配置两个主题的能力。

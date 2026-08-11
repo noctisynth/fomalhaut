@@ -334,8 +334,6 @@ if path.exists() and not path.is_file():
     raise SystemExit(f"refusing to replace non-regular configuration: {path}")
 
 def typed_value(kind: str, raw: str):
-    if kind == "remove-table":
-        return None
     if kind == "string":
         return raw
     if kind == "string-array":
@@ -485,27 +483,6 @@ for section, key, kind, raw in updates:
     starts = [line_index for name, line_index in tables if name == section]
     if len(starts) > 1:
         raise SystemExit(f"refusing to modify duplicate TOML section [{section}]")
-    if kind == "remove-table":
-        if not starts:
-            continue
-        start = starts[0]
-        later_starts = [line_index for _, line_index in tables if line_index > start]
-        end = min(later_starts, default=len(lines))
-        assignments = []
-        assignment_pattern = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
-        for line_index in range(start + 1, end):
-            match = assignment_pattern.match(lines[line_index])
-            if match:
-                assignments.append((match.group(1), line_index))
-        if len(assignments) != 1 or assignments[0][0] != key:
-            raise SystemExit(
-                f"refusing to remove [{section}]: expected it to contain only {key}"
-            )
-        del lines[start:end]
-        while start > 0 and start <= len(lines) and not lines[start - 1].strip():
-            del lines[start - 1]
-            start -= 1
-        continue
     rendered = f"{key} = {encoded_value(kind, raw)}"
     if not starts:
         if lines and lines[-1].strip():
@@ -536,10 +513,6 @@ except tomllib.TOMLDecodeError as error:
     raise SystemExit(f"generated TOML is invalid for {path}: {error}")
 
 for section, key, kind, raw in updates:
-    if kind == "remove-table":
-        if section in parsed:
-            raise SystemExit(f"generated TOML did not remove [{section}]")
-        continue
     expected = typed_value(kind, raw)
     if parsed.get(section, {}).get(key) != expected:
         raise SystemExit(f"generated TOML did not preserve [{section}].{key}")
@@ -589,7 +562,7 @@ from pathlib import Path
 import sys
 import tomllib
 
-for raw_path in sys.argv[1:]:
+for path_index, raw_path in enumerate(sys.argv[1:]):
     path = Path(raw_path)
     if path.is_symlink():
         raise SystemExit(f"refusing to replace symbolic-link configuration: {path}")
@@ -599,9 +572,14 @@ for raw_path in sys.argv[1:]:
         raise SystemExit(f"refusing to replace non-regular configuration: {path}")
     try:
         with path.open("rb") as source:
-            tomllib.load(source)
+            parsed = tomllib.load(source)
     except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as error:
         raise SystemExit(f"refusing to modify invalid TOML at {path}: {error}")
+    if path_index == 0 and "frontend" in parsed:
+        raise SystemExit(
+            f"refusing unsupported [frontend] configuration at {path}; "
+            "migrate path to [themes].default"
+        )
 PY
 }
 
@@ -797,7 +775,7 @@ fi
 
 run_privileged install -d -m 0755 -- "${fomalhaut_config%/*}" "${greetd_config%/*}"
 
-fomalhaut_updates=(frontend path remove-table "" themes default string "$theme_runtime")
+fomalhaut_updates=(themes default string "$theme_runtime")
 if [[ -n "$display_scale" ]]; then
   fomalhaut_updates+=(display scale display-scale-shared "$display_scale")
 elif [[ -n "$greeter_scale" ]]; then

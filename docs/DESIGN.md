@@ -632,10 +632,11 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   symlink 或其他非普通文件时必须拒绝修改。两个配置目标的类型和现有 TOML 必须在切换二进制、
   主题或任一配置前完成 preflight；无法解析、重复目标 key 或验证失败必须 fail closed，不能留下
   已知可提前避免的部分安装。只有新旧 TOML 文本确实不同时才创建备份并原子替换。
-- 安装器已通过同一个可验证 updater 将旧 `[frontend].path` 迁移为
-  `[themes].default`，并独立保留管理员已有的 `[themes].greeter`/`locker`。迁移只删除
-  仅含 `path` 的旧 `[frontend]` table；出现其他键时拒绝修改，避免丢失未知管理员配置。
-  新结构下仍在明确传入缩放参数或首次创建文件时维护 `[display].scale`。安装器接受互斥的
+- `[frontend].path` 兼容期已经结束。源码安装器不再代管理员迁移或删除该 table；配置 preflight
+  发现 `[frontend]` 时必须在切换二进制、主题或其他已安装文件前明确失败，并提示管理员将
+  `path` 手工迁移到 `[themes].default`。这样安装器与运行时保持同一严格 schema，避免升级过程
+  静默解释已经移除的字段。新结构下仍在明确传入缩放参数或首次创建文件时维护
+  `[display].scale`。安装器接受互斥的
   两种缩放参数形式：`--display-scale SCALE` 写入 greeter/locker 共用的标量；
   `--greeter-scale SCALE --locker-scale SCALE` 必须成对出现，并写入角色专用的
   `scale.greeter`/`scale.locker` dotted keys。共享参数不得与任一角色参数混用，所有值都在写入前
@@ -1200,8 +1201,9 @@ locker = "/etc/fomalhaut/themes/nocturne-locker"
 允许管理员为两个角色分别选择目录。同一目录的 `theme.toml` 仍只有一个
 `entrypoint`，页面通过 SDK 的 `mode` 分支呈现，不在主题清单中增加两个入口。
 
-现有 `[frontend].path` 迁移为 `[themes].default`。兼容期可以只接受旧字段并产生
-弃用警告，但新旧字段同时出现必须拒绝，不得隐式选择其一。
+`[frontend].path` 兼容期已经结束；`[frontend]` 现在与其他未知顶层字段一样由严格配置解析直接
+拒绝。管理员必须在启动或升级前显式改用 `[themes].default`，运行时和安装器均不得继续提供
+别名、弃用警告或自动迁移。
 
 外部主题目录必须包含主题清单：
 
@@ -1663,8 +1665,8 @@ scale.locker = 1.0
 
 - `themes` 中的每个字段都是可选绝对主题目录；选择顺序是角色专用、
   `default`、内嵌 minimal theme。入口和协议版本由目录内必需的 `theme.toml`
-  决定，避免配置与清单出现两个互相冲突的入口来源。旧 `[frontend].path`
-  只可作为 `[themes].default` 的迁移别名单独出现；新旧配置同时出现必须拒绝。
+  决定，避免配置与清单出现两个互相冲突的入口来源。已经移除的 `[frontend]` 不再属于配置
+  schema，出现时按未知顶层字段拒绝。
 - `sessions` 缺失时沿用固定默认目录。section 存在时，每个缺失字段仍继承对应默认值；显式
   空数组用于禁用该类目录。所有目录必须是无 NUL 的绝对路径，保持数组顺序作为优先级；
   至少要发现一个最终可用 session，否则启动失败。
@@ -1697,14 +1699,14 @@ scale.locker = 1.0
 
 共享 `fomalhaut-config` 已实现 `[themes]` 与 `for_greeter()`/`for_locker()` 角色视图；
 角色专用主题优先于 default，locker 视图不暴露 session discovery 或用户枚举配置。
-旧 `[frontend].path` 在迁移期单独出现时作为 deprecated default theme alias 接受并由 greeter
-记录警告，新旧字段同时出现则拒绝。配置和外部主题纵向切片已用自动化测试验证：配置缺失时
-安全回退、角色主题优先级、新旧字段冲突、未知字段和相对路径拒绝、
+`[frontend].path` 兼容已经移除，任何 `[frontend]` table 都由严格反序列化作为未知字段拒绝；
+安装器 preflight 同样拒绝旧 table 并要求管理员显式迁移。配置和外部主题纵向切片已用自动化
+测试验证：配置缺失时安全回退、角色主题优先级、旧 `[frontend]` 与其他未知字段拒绝、相对路径拒绝、
 显示缩放边界、显式 session 优先级、64 KiB 上限、清单 protocol/入口校验、URI 语法、MIME 白名单、顶层导航
 限制、配置根 symlink、根内相对 symlink、根外 symlink 拒绝以及资源读取边界。完整 workspace
 测试同时继续覆盖真实 Unix socket greetd 流程；内嵌主题仍通过 Wayland/WebKitGTK 运行探针
 验证，外部主题的真实系统安装步骤记录在 `docs/CONFIGURATION.md`。安装器隔离测试还覆盖
-全新 `[themes].default`、旧字段迁移、角色覆盖/显示/电源策略保留和重复运行幂等。
+全新 `[themes].default`、旧字段 preflight 拒绝、角色覆盖/显示/电源策略保留和重复运行幂等。
 
 无效安全配置应导致启动失败或回退到安全默认值，不能静默放宽限制。
 
