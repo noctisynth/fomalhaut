@@ -38,7 +38,7 @@ cargo build --workspace
 Build the Nocturne reference theme with:
 
 ```sh
-bun run build:theme
+bun run build:theme:nocturne
 ```
 
 ## Checks
@@ -57,9 +57,9 @@ For the TypeScript SDK and reference theme:
 ```sh
 bun run check:sdk
 bun run --cwd packages/fomalhaut-sdk test
-bun run check:theme
-bun run test:theme
-bun run build:theme
+bun run check:theme:nocturne
+bun run test:theme:nocturne
+bun run build:theme:nocturne
 ```
 
 The continuous integration workflow is the source of truth for the complete

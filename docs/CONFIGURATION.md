@@ -298,14 +298,14 @@ if (client.mode === "greeter") {
 仓库中的 React 参考主题可通过以下命令构建：
 
 ```sh
-bun run build:theme
+bun run build:theme:nocturne
 ```
 
-构建产物位于 `packages/fomalhaut-theme/dist`。在本地仓库测试时，可将其绝对路径直接写入：
+构建产物位于 `themes/nocturne/dist`。在本地仓库测试时，可将其绝对路径直接写入：
 
 ```toml
 [themes]
-default = "/home/example/Projects/fomalhaut/packages/fomalhaut-theme/dist"
+default = "/home/example/Projects/fomalhaut/themes/nocturne/dist"
 ```
 
 该目录必须允许 `greeter` 用户遍历和读取。普通浏览器开发服务器会使用仅开发环境存在的模拟

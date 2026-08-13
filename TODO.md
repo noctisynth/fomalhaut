@@ -605,7 +605,10 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 
 ## P1：React 参考主题
 
-- [x] 在 `packages/fomalhaut-theme` 初始化不参与发布的 Bun/Vite React TypeScript 项目，使用
+- [x] 在 `themes/nocturne` 维护包名为 `@fomalhaut/theme-nocturne`、显示名为
+      `Fomalhaut Nocturne` 的私有 Bun/Vite React TypeScript 主题；保持 `private: true`，由
+      Semifold 管理 changeset/版本/changelog 并在发布阶段跳过 npm，允许未来按
+      `themes/<id>`、`@fomalhaut/theme-<id>` 扩展多个主题。使用
       Tailwind CSS v4 Vite plugin、shadcn/ui Luma style、Zustand、Biome 与 Vitest。
 - [x] 保证所有项目自有文件/目录为 ASCII kebab-case，添加命名审计；长或动态 `className`
       使用 shadcn `cn()`，不引入 inline style、CSS Modules、CSS-in-JS 或远程资源。

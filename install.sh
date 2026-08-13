@@ -593,11 +593,11 @@ log_step "Installing frozen Bun dependencies"
 run_build_command bun install --frozen-lockfile
 
 log_step "Building the Nocturne theme"
-run_build_command bun run build:theme
+run_build_command bun run build:theme:nocturne
 
 binary_source="$SCRIPT_DIR/target/release/fomalhaut"
 lock_binary_source="$SCRIPT_DIR/target/release/fomalhaut-lock"
-theme_source="$SCRIPT_DIR/packages/fomalhaut-theme/dist"
+theme_source="$SCRIPT_DIR/themes/nocturne/dist"
 [[ -x "$binary_source" ]] || die "release binary was not produced"
 [[ -x "$lock_binary_source" ]] || die "locker release binary was not produced"
 [[ -f "$SCRIPT_DIR/packaging/pam/fomalhaut-lock" ]] || die "locker PAM policy is missing"

@@ -616,7 +616,7 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   可执行，且配置的 greeter 账户可由系统账户数据库解析；验证失败不得生成不可启动的配置。
 - 当前 Rust 使用 `cargo build --release --locked -p fomalhaut -p fomalhaut-lock`，安装交易
   同时构建并安装两个二进制。前端先执行
-  `bun install --frozen-lockfile` 再调用 workspace 的 `build:theme`，不得隐式更新 lockfile。
+  `bun install --frozen-lockfile` 再调用 workspace 的 `build:theme:nocturne`，不得隐式更新 lockfile。
 - `fomalhaut-lock` 的 `pam-client` 依赖通过 `pam-sys` 在构建时运行 bindgen，因此构建环境必须
   提供可加载的 libclang。Arch 源码安装器与 locker AUR 构建安装 `clang`，Ubuntu CI 安装
   `libclang-dev`；这是构建期依赖，不应扩大已安装 locker 的运行时依赖集合。
@@ -1115,7 +1115,8 @@ SDK 的主收敛机制固定为泛型 `FomalhautClient<M extends RuntimeMode>`�
 事件，并拒绝 bootstrap 前或 mode 不匹配的状态结果。
 
 Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfile。根 `package.json`
-以 `workspaces = ["packages/*"]` 发现 package，根 package 必须为 private；`bun install` 产生
+以 `workspaces = ["packages/*", "themes/*"]` 分别发现通用 package 与主题 package，根 package
+必须为 private；`bun install` 产生
 并提交文本格式的 `bun.lock`，CI 使用 `bun install --frozen-lockfile`，禁止隐式迁移或同时提交
 其他包管理器 lockfile。
 
@@ -1123,7 +1124,8 @@ Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfi
 `npm publish --provenance --access public`，以支持 npm trusted publishing/OIDC provenance。
 npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockfile 生成，本地与 Agent 也不得
 执行 publish；该命令只能由 GitHub Actions 中的 `semifold ci` 间接调用。根 private package
-不登记为 Semifold 发布包，只同步 `packages/fomalhaut-sdk`。
+不登记为 Semifold package；Node.js resolver 同步可发布的 `packages/fomalhaut-sdk` 与各私有
+H5 主题，后者由 Semifold 管理 changeset、版本和 changelog，但发布时依据 `private` 标记跳过。
 
 `fomalhaut-sdk` 首次发布已经完成，后续 npm 发布仅使用 trusted publishing/OIDC：workflow
 保留 `id-token: write`，并通过 `actions/setup-node@v6` 提供支持 OIDC 的 Node.js 24/npm
@@ -1309,8 +1311,13 @@ JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源�
 
 ### 8.1 React 参考主题
 
-仓库在 `packages/fomalhaut-theme` 维护一个独立、私有且不参与 Semifold/npm 发布的官方参考
-主题。它用于证明 `fomalhaut-sdk` 能支持完整的框架前端，并向主题作者提供可构建示例；它不
+仓库在 `themes/nocturne` 维护名为 `Fomalhaut Nocturne` 的官方参考主题。主题源码包使用
+`@fomalhaut/theme-nocturne` 名称，并始终保持 `private = true`；它属于 Bun workspace 和
+Semifold package 列表，以便参与统一的 changeset、版本与 changelog 管理，但 Semifold 发布阶段
+必须根据 package 的私有标记跳过 npm 发布。`themes/<id>` 是仓库内多主题源码布局，
+`@fomalhaut/theme-<id>` 是同类 H5 主题包的命名约定，面向用户的显示名称则来自各主题
+`theme.toml`；显示名称只是主题自声明元数据，不构成来源或安全认证。该主题用于证明
+`fomalhaut-sdk` 能支持完整的框架前端，并向主题作者提供可构建示例；它不
 嵌入 Rust 二进制、不替代无构建依赖的内置 minimal theme，也不改变用户通过
 `[themes]` 选择通用或角色专用可信静态主题的能力。生产产物是 `dist/` 下的纯静态目录，根目录
 包含 `theme.toml` 与 `index.html`，管理员可以直接让配置指向该绝对路径。
