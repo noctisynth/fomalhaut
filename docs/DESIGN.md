@@ -1337,8 +1337,10 @@ CSS variables 和 Luma 的圆角、柔和层级与宽松布局基础。session �
 
 所有项目自有文件与目录使用 ASCII `kebab-case`；`package.json`、`components.json`、
 `tsconfig.json`、`index.html` 等生态固定单词文件名继续保持小写，Vite 配置显式命名为
-`vite-config.ts`。TypeScript 类型和 React component 标识符仍使用语言惯例的 PascalCase。
-项目添加文件名审计测试，阻止后续引入 PascalCase/camelCase 文件名。组件样式只使用 Tailwind
+`vite-config.ts`。Semifold 在发布分支生成的标准 `CHANGELOG.md` 是固定文件名例外，文件名
+审计必须接受它，同时继续拒绝其他未经列举的 PascalCase/camelCase 路径。TypeScript 类型和
+React component 标识符仍使用语言惯例的 PascalCase。项目添加文件名审计测试，阻止后续引入
+PascalCase/camelCase 文件名。组件样式只使用 Tailwind
 utility 与 shadcn semantic token，不允许 `style` prop、内联 `<style>` 或手写 component
 selector；动态或较长的 `className` 必须通过 shadcn 提供的 `cn()` 分组组合。
 

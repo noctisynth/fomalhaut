@@ -4,6 +4,7 @@ import path from "node:path";
 const ignoredDirectories = new Set(["dist", "node_modules"]);
 const fixedNames = new Set([
   ".gitignore",
+  "CHANGELOG.md",
   "biome.json",
   "components.json",
   "index.html",

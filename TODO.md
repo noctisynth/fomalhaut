@@ -610,8 +610,9 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       Semifold 管理 changeset/版本/changelog 并在发布阶段跳过 npm，允许未来按
       `themes/<id>`、`@fomalhaut/theme-<id>` 扩展多个主题。使用
       Tailwind CSS v4 Vite plugin、shadcn/ui Luma style、Zustand、Biome 与 Vitest。
-- [x] 保证所有项目自有文件/目录为 ASCII kebab-case，添加命名审计；长或动态 `className`
-      使用 shadcn `cn()`，不引入 inline style、CSS Modules、CSS-in-JS 或远程资源。
+- [x] 保证所有项目自有文件/目录为 ASCII kebab-case，添加命名审计，并兼容 Semifold 在发布
+      分支生成的标准 `CHANGELOG.md`；长或动态 `className` 使用 shadcn `cn()`，不引入
+      inline style、CSS Modules、CSS-in-JS 或远程资源。
 - [x] 以可注入 `FomalhautClient`、runtime、Zustand vanilla store 和 React provider 实现
       `state.get`、全部 v1 事件、busy 背压、脱敏错误恢复以及选择/已知用户/其他用户/通用恢复
       SPA 状态，不持久化或记录 PAM 回答。
