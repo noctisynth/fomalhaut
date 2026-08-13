@@ -620,6 +620,9 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       源码审计禁止网络 API，构建检查不得包含 demo 标记、远程资源引用、inline script/style
       或越界资源；不对包含 ReactDOM 内部 stylesheet preload 的生产 bundle 使用字符串级
       `fetch(` 禁令。
+- [x] 让 Vite DEV transport 安全模拟三项电源 capability 和成功响应，并将 Nocturne 电源列表与
+      确认交互分别迁移到 shadcn/ui `DropdownMenu`、`AlertDialog`，覆盖外部点击、Escape、键盘
+      导航、焦点恢复和模拟请求回归测试。
 - [x] 让 `dist/` 包含相对资源引用、`index.html` 和 `theme.toml`，补齐 store、组件、DOM 清空、
       文件命名与构建契约测试，并把 format/typecheck/test/build 接入根脚本和 CI。
 - [x] 让 Nocturne 与内嵌 minimal theme 严格识别 `Password`/`Password for <目标>` 标准 secret

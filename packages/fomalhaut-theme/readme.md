@@ -12,4 +12,6 @@ The deployable theme is written to `packages/fomalhaut-theme/dist`. Point
 
 During `bun run dev`, a development-only transport presents the user-selection
 screen and simulates PAM prompts in an ordinary browser. Use `fomalhaut` as the
-fixture password. Production builds never fall back to the simulated transport.
+fixture password. It also advertises simulated power actions so the complete
+power menu can be previewed without invoking host or system power APIs.
+Production builds never fall back to the simulated transport.

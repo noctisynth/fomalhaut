@@ -20,8 +20,25 @@ import type { FormEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   InputGroup,
   InputGroupAddon,
@@ -888,7 +905,6 @@ function PowerMenu() {
   const busy = useThemeStore((state) => state.busy);
   const requestPower = useThemeStore((state) => state.requestPower);
   const error = useThemeStore((state) => state.error);
-  const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<PowerAction | null>(null);
 
   if (actions.length === 0) {
@@ -901,93 +917,88 @@ function PowerMenu() {
     }
     if (await requestPower(confirmation)) {
       setConfirmation(null);
-      setOpen(false);
     }
   };
 
   return (
     <div className="absolute bottom-6 left-6 z-20 sm:bottom-9 sm:left-10">
-      {open && (
-        <div
+      <DropdownMenu>
+        <DropdownMenuTrigger
           className={cn(
-            "absolute bottom-12 left-0 w-64 rounded-2xl border border-white/10",
-            "bg-[#081426]/95 p-2 shadow-2xl",
+            buttonVariants({ variant: "outline", size: "icon" }),
+            "rounded-full border-white/10 bg-[#081426]/90",
           )}
+          disabled={busy}
+          aria-label={t("power.menu")}
         >
-          {confirmation ? (
-            <div className="space-y-3 p-2">
-              <p className="text-sm font-medium">
-                {t(powerQuestionKeys[confirmation])}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {t("power.warning")}
-              </p>
-              {error && (
-                <p className="text-xs text-destructive" role="alert">
-                  {error}
-                </p>
-              )}
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
+          <Power aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          className="w-64 border border-white/10 bg-[#081426]/95"
+          side="top"
+          align="start"
+        >
+          <DropdownMenuGroup aria-label={t("power.actions")}>
+            {actions.map((action) => {
+              const Icon = powerIcons[action];
+              return (
+                <DropdownMenuItem
+                  key={action}
                   disabled={busy}
-                  onClick={() => setConfirmation(null)}
+                  variant={action === "poweroff" ? "destructive" : "default"}
+                  onClick={() => setConfirmation(action)}
                 >
-                  {t("power.cancel")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  disabled={busy}
-                  onClick={() => void submit()}
-                >
-                  {busy ? (
-                    <LoaderCircle className="animate-spin motion-reduce:animate-none" />
-                  ) : null}
-                  {t(powerConfirmKeys[confirmation])}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <fieldset className="grid gap-1" aria-label={t("power.actions")}>
-              {actions.map((action) => {
-                const Icon = powerIcons[action];
-                return (
-                  <Button
-                    key={action}
-                    className="justify-start"
-                    type="button"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => setConfirmation(action)}
-                  >
-                    <Icon aria-hidden="true" />
-                    {t(powerLabelKeys[action])}
-                  </Button>
-                );
-              })}
-            </fieldset>
-          )}
-        </div>
-      )}
-      <Button
-        className="rounded-full border-white/10 bg-[#081426]/90"
-        type="button"
-        size="icon"
-        variant="outline"
-        disabled={busy}
-        aria-label={t("power.menu")}
-        aria-expanded={open}
-        onClick={() => {
-          setOpen((value) => !value);
-          setConfirmation(null);
+                  <Icon aria-hidden="true" />
+                  {t(powerLabelKeys[action])}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog
+        open={confirmation !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setConfirmation(null);
+          }
         }}
       >
-        <Power aria-hidden="true" />
-      </Button>
+        {confirmation && (
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t(powerQuestionKeys[confirmation])}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("power.warning")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busy}>
+                {t("power.cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                type="button"
+                variant="destructive"
+                disabled={busy}
+                onClick={() => void submit()}
+              >
+                {busy ? (
+                  <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+                ) : null}
+                {t(powerConfirmKeys[confirmation])}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        )}
+      </AlertDialog>
     </div>
   );
 }

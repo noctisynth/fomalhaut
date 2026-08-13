@@ -35,7 +35,7 @@ export class DevelopmentTransport implements FomalhautTransport {
       { id: "x11", name: "X11", kind: "x11" },
     ],
     selectedSessionId: "wayland",
-    capabilities: { power: [] },
+    capabilities: { power: ["poweroff", "reboot", "suspend"] },
   };
 
   public async request(request: RequestEnvelope): Promise<unknown> {
@@ -81,16 +81,7 @@ export class DevelopmentTransport implements FomalhautTransport {
         this.#emit({ event: "auth.cancelled", data: {} });
         return this.#success(request.id, {});
       case "power.request":
-        return {
-          protocol: 1,
-          id: request.id,
-          ok: false,
-          error: {
-            code: "method_disabled",
-            message: "Power actions are disabled in the development fixture",
-            retryable: false,
-          },
-        };
+        return this.#success(request.id, {});
     }
   }
 

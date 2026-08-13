@@ -1397,13 +1397,19 @@ blur 或 backdrop-filter；最终流畅性仍须在高 DPI/高刷新率的真实
 普通浏览器中的 Vite 开发服务器没有 WebKit bridge，因此项目提供只在
 `import.meta.env.DEV` 分支动态加载的 `development-transport.ts`，以实现
 `FomalhautTransport` 并模拟公开状态、prompt、失败、取消和事件。它只是主题开发 fixture，
-不等同于宿主级 demo mode。生产构建必须 dead-code eliminate 该 transport；缺少真实 bridge
+并公开 `poweroff`、`reboot`、`suspend` 三项模拟 capability，以便在普通浏览器中预览完整电源
+交互；模拟 `power.request` 只返回成功，不得访问宿主、systemd-logind 或真实电源接口。它不等同于
+宿主级 demo mode。生产构建必须 dead-code eliminate 该 transport；缺少真实 bridge
 时显示拒绝式错误，不能静默使用模拟认证。项目自有源码禁止调用 `fetch`、WebSocket 或其他
 网络 API；构建测试检查产物没有 demo 标记，检查 HTML/CSS 没有远程 URL、inline
 script/style、form navigation 或绝对资源 URL，并确认所有资源小于宿主 8 MiB 上限且清单位于
 产物根目录。生产 JavaScript bundle 不采用简单的 `fetch(` 字符串禁令，因为 ReactDOM 19
 自身包含 stylesheet preload 的内部 `fetch` 实现；它不是主题发起网络访问的授权边界。网络
 隔离仍由主题源码审查、静态资源引用检查以及宿主 CSP/WebKit policy 共同强制执行。
+
+Nocturne 的电源操作列表使用 shadcn/ui `DropdownMenu`，危险操作确认使用独立的
+`AlertDialog`；菜单必须支持点击外部或 Escape 关闭、键盘导航和关闭后的焦点恢复，确认层保持
+模态语义。主题不得用自维护 document listener 或绝对定位容器重新实现这些基础交互。
 
 测试至少覆盖 store 初始恢复和事件转换、零/多用户选择页、单用户跳过选择页并启动 PAM、居中
 用户集合、已知用户与其他用户分支、身份未知的活动认证恢复、session 选择、secret/visible

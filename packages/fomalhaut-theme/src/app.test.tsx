@@ -1,13 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createFomalhautClient } from "fomalhaut-sdk";
+import { createFomalhautClient, type FomalhautTransport } from "fomalhaut-sdk";
 import { describe, expect, test, vi } from "vitest";
 import { App } from "@/app";
+import { DevelopmentTransport } from "@/runtime/development-transport";
 import { createThemeStore } from "@/state/theme-store";
 import { ThemeStoreProvider } from "@/state/theme-store-provider";
 import { lockerSnapshot, MockTransport, snapshot } from "@/test/mock-transport";
 
-async function renderTheme(transport: MockTransport) {
+async function renderTheme(transport: FomalhautTransport) {
   const client = await createFomalhautClient(transport);
   const runtime = createThemeStore(client);
   await runtime.initialize();
@@ -17,6 +18,16 @@ async function renderTheme(transport: MockTransport) {
     </ThemeStoreProvider>,
   );
   return { runtime, client };
+}
+
+async function openPowerMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  name: "Power menu" | "电源菜单" = "Power menu",
+): Promise<HTMLElement> {
+  const trigger = screen.getByRole("button", { name });
+  trigger.focus();
+  await user.keyboard("{ArrowDown}");
+  return trigger;
 }
 
 describe("SPA authentication UI", () => {
@@ -37,8 +48,8 @@ describe("SPA authentication UI", () => {
       "zh-CN",
       expect.objectContaining({ weekday: "long" }),
     );
-    await user.click(screen.getByRole("button", { name: "电源菜单" }));
-    await user.click(screen.getByRole("button", { name: "重启" }));
+    await openPowerMenu(user, "电源菜单");
+    await user.click(screen.getByRole("menuitem", { name: "重启" }));
     expect(screen.getByRole("button", { name: "确认重启" })).toBeVisible();
     dateFormat.mockRestore();
   });
@@ -290,12 +301,12 @@ describe("SPA authentication UI", () => {
     await renderTheme(transport);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "Power menu" }));
+    await openPowerMenu(user);
     expect(
-      screen.queryByRole("button", { name: "Power off" }),
+      screen.queryByRole("menuitem", { name: "Power off" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Restart" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Suspend" }));
+    expect(screen.getByRole("menuitem", { name: "Restart" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Suspend" }));
 
     expect(transport.requests.at(-1)?.method).toBe("state.get");
     await user.click(screen.getByRole("button", { name: "Confirm suspend" }));
@@ -305,14 +316,66 @@ describe("SPA authentication UI", () => {
     });
   });
 
+  test("dismisses the power menu through outside click", async () => {
+    const transport = new MockTransport(snapshot([], null, ["reboot"]));
+    await renderTheme(transport);
+    const user = userEvent.setup();
+    const trigger = await openPowerMenu(user);
+    expect(screen.getByRole("menuitem", { name: "Restart" })).toBeVisible();
+    await user.click(
+      screen.getByRole("heading", { name: "Who’s signing in?" }),
+    );
+    await waitFor(() =>
+      expect(trigger).toHaveAttribute("aria-expanded", "false"),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("menuitem", { name: "Restart" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  test("dismisses the power menu through Escape and restores focus", async () => {
+    const transport = new MockTransport(snapshot([], null, ["reboot"]));
+    await renderTheme(transport);
+    const user = userEvent.setup();
+    const trigger = await openPowerMenu(user);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(trigger).toHaveAttribute("aria-expanded", "false"),
+    );
+    expect(trigger).toHaveFocus();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("menuitem", { name: "Restart" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  test("previews simulated power actions without a host bridge", async () => {
+    await renderTheme(new DevelopmentTransport());
+    const user = userEvent.setup();
+
+    await openPowerMenu(user);
+    expect(screen.getByRole("menuitem", { name: "Power off" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Restart" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Suspend" }));
+    await user.click(screen.getByRole("button", { name: "Confirm suspend" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Confirm suspend" }),
+    ).not.toBeInTheDocument();
+  });
+
   test("offers advertised power actions in locker mode", async () => {
     const transport = new MockTransport(lockerSnapshot(null, ["suspend"]));
     await renderTheme(transport);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "Power menu" }));
-    expect(screen.getByRole("button", { name: "Suspend" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Suspend" }));
+    await openPowerMenu(user);
+    expect(screen.getByRole("menuitem", { name: "Suspend" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Suspend" }));
     await user.click(screen.getByRole("button", { name: "Confirm suspend" }));
 
     expect(transport.requests.at(-1)).toMatchObject({
@@ -399,7 +462,8 @@ describe("SPA authentication UI", () => {
     expect(trigger).toHaveClass("w-52");
     expect(trigger).toHaveTextContent("Wayland · wayland");
 
-    await user.click(trigger);
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
     expect(document.querySelector('[data-slot="select-group"]')).not.toBeNull();
     await user.click(screen.getByRole("option", { name: "X11 · x11" }));
 
