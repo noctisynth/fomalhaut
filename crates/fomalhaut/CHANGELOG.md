@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.0-alpha.3
+
+### Bug Fixes
+
+- [`3fec55b`](https://github.com/noctisynth/fomalhaut/commit/3fec55b78678b0eb8ba8bba584de54d7d7d2eeec): Clean up the failed greetd configuration slot after authentication errors while treating an already-exited PAM worker response as a recoverable rejection.
+- [`7b061a8`](https://github.com/noctisynth/fomalhaut/commit/7b061a8b36315eadfe23cf0bce74c9bae99c208b): Treat greetd authentication errors as already-cancelled failures so the greeter clears stale prompts and can retry without sending a redundant CancelSession request.
+- [`27c5ee8`](https://github.com/noctisynth/fomalhaut/commit/27c5ee8e57a99546534a39069edc09585497ec45): Normalize standard password prompts to the active theme locale in both greeter and locker while preserving OTP, PIN, visible, and custom PAM prompts.
+- [`2c274c9`](https://github.com/noctisynth/fomalhaut/commit/2c274c901a5ec73d79c45755a77f2a1ce882d99b): Restart locker authentication with a fresh PAM transaction after system resume and prevent themes from submitting prompts cancelled before suspend.
+
+### New Features
+
+- [`20c6832`](https://github.com/noctisynth/fomalhaut/commit/20c68328cbfd7f0a1aa75260f5bb6932a1b38269): Add host-resolved English and Simplified Chinese locales across configuration, session discovery, protocol snapshots, SDK validation, and both frontend themes.
+- [`abd58a8`](https://github.com/noctisynth/fomalhaut/commit/abd58a88a2aec5cc4200b735860a2aa99255217c): Remove the legacy [frontend].path configuration alias and installer migration; deployments must use [themes].default.
+
 ## v0.1.0-alpha.2
 
 ### Bug Fixes

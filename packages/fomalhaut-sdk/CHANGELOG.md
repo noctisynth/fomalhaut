@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.0-alpha.3
+
+### New Features
+
+- [`20c6832`](https://github.com/noctisynth/fomalhaut/commit/20c68328cbfd7f0a1aa75260f5bb6932a1b38269): Add host-resolved English and Simplified Chinese locales across configuration, session discovery, protocol snapshots, SDK validation, and both frontend themes.
+
 ## v0.1.0-alpha.2
 
 ### New Features
