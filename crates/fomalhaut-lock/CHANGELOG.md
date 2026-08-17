@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.0-alpha.1
+
+### Bug Fixes
+
+- [`27c5ee8`](https://github.com/noctisynth/fomalhaut/commit/27c5ee8e57a99546534a39069edc09585497ec45): Normalize standard password prompts to the active theme locale in both greeter and locker while preserving OTP, PIN, visible, and custom PAM prompts.
+- [`2c274c9`](https://github.com/noctisynth/fomalhaut/commit/2c274c901a5ec73d79c45755a77f2a1ce882d99b): Restart locker authentication with a fresh PAM transaction after system resume and prevent themes from submitting prompts cancelled before suspend.
+
+### New Features
+
+- [`20c6832`](https://github.com/noctisynth/fomalhaut/commit/20c68328cbfd7f0a1aa75260f5bb6932a1b38269): Add host-resolved English and Simplified Chinese locales across configuration, session discovery, protocol snapshots, SDK validation, and both frontend themes.
+- [`abd58a8`](https://github.com/noctisynth/fomalhaut/commit/abd58a88a2aec5cc4200b735860a2aa99255217c): Remove the legacy [frontend].path configuration alias and installer migration; deployments must use [themes].default.
+
 ## v0.1.0-alpha.0
 
 ### Bug Fixes
@@ -22,4 +34,3 @@
 - [`a66e689`](https://github.com/noctisynth/fomalhaut/commit/a66e689814a577da88a449f4b3166daf7cb3beeb): Implement the compositor-neutral Wayland session locker with isolated PAM reauthentication, per-monitor session-lock surfaces, trusted native fallback, and systemd readiness.
 
     Expose shared host and controller signals required to route cross-view events and fail closed when the authentication worker becomes unavailable.
-

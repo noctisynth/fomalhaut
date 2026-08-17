@@ -1,6 +1,6 @@
 [package]
 name = "fomalhaut-greetd"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 description = "greetd login backend for Fomalhaut"
 license.workspace = true
