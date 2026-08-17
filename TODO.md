@@ -773,6 +773,10 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       按 `paru`、`yay`、`sudo pacman` 优先级安装缺失的系统依赖；Rust 与 Bun 工具链由用户
       自行提供；Ubuntu CI 对应安装 `libclang-dev`。
 - [x] 让源码安装器达到内容级幂等：连续相同安装不新增二进制/配置备份或主题 release。
+- [x] 添加兼作 AUR 迁移工具的通用源码卸载器：无 AUR package 时也能卸载，默认保留配置与
+      Nocturne 主题；检测到对应 AUR package 时原子迁移 greetd 的 `/usr/local` greeter 路径并
+      保留 package 接管的 PAM，删除未接管配置前必须交互确认；隔离 `--system-root` 覆盖纯卸载、
+      完整/部分接管、确认清理和配置 preflight 失败路径。
 - [x] 让源码安装器首次创建 Fomalhaut 配置时默认允许 poweroff、reboot 和 suspend，并验证原地
       更新保留缺失、显式关闭或自定义的既有电源策略。
 - [x] 更新源码安装器缩放参数：保留 `--display-scale` 写共享标量，新增必须成对使用的

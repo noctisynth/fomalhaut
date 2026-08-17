@@ -43,9 +43,47 @@ from sources you trust and have reviewed.
 
 ## Installation
 
-The source installer is the currently supported installation path. It builds
-the greeter, locker, and Nocturne theme; installs the PAM policy and systemd
-user unit; and updates the Fomalhaut and greetd configuration files.
+On Arch Linux, install the independently versioned greeter and locker packages
+from the AUR:
+
+```sh
+paru -S --removemake greetd-fomalhaut fomalhaut-lock
+```
+
+This is the recommended installation command. `--removemake` removes temporary
+build dependencies that were installed for the AUR build after installation
+succeeds; runtime dependencies remain installed. `yay` can be used in place of
+`paru` with the same option. The packages install their binaries, runtime
+dependencies, PAM policy, locker user unit, and integration examples. They
+intentionally do not overwrite `/etc/fomalhaut/config.toml` or
+`/etc/greetd/config.toml`; without a Fomalhaut configuration the applications
+use safe defaults and the embedded minimal theme. The greetd example is
+installed at `/usr/share/doc/greetd-fomalhaut/greetd-config.toml`.
+
+### Migrating a source installation to AUR
+
+For the recommended migration, install both AUR packages first, update the
+existing checkout, and then run:
+
+```sh
+./uninstall.sh
+```
+
+The same script is also the normal source-install uninstaller and can run
+without either AUR package. It removes source-installed files below
+`/usr/local` and keeps the existing Fomalhaut configuration and Nocturne theme
+by default. When an AUR greeter is present it switches the preserved greetd
+command to `/usr/bin/fomalhaut`; when an AUR locker owns the PAM policy it never
+removes that file. Deleting unowned configuration always requires confirmation,
+and a non-interactive run keeps it. The script does not restart greetd, and user
+niri or swayidle configuration that explicitly names
+`/usr/local/bin/fomalhaut-lock` must be updated separately.
+
+### Source installation
+
+The source installer builds the greeter, locker, and Nocturne theme; installs
+the PAM policy and systemd user unit; and updates the Fomalhaut and greetd
+configuration files.
 
 You will need:
 

@@ -70,6 +70,8 @@ jobs:
           python3 packaging/aur/test_resolve.py
           bash -n packaging/aur/render.sh
           bash -n install.sh
+          bash -n uninstall.sh
+          tests/uninstall.sh
 
       - name: Check SDK
         run: bun run check:sdk

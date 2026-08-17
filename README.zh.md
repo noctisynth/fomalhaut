@@ -35,8 +35,36 @@ Fomalhaut 不是 Web 服务器。可信 Rust 宿主通过精简、版本化且�
 
 ## 安装
 
-目前支持的安装方式是仓库自带的源码安装器。它会构建 greeter、locker 和 Nocturne 主题，
-安装 PAM 策略与 systemd 用户服务，并更新 Fomalhaut 与 greetd 配置。
+Arch Linux 用户可以从 AUR 安装独立版本的 greeter 与 locker 包：
+
+```sh
+paru -S --removemake greetd-fomalhaut fomalhaut-lock
+```
+
+这是推荐的安装命令。`--removemake` 会在安装成功后删除本次 AUR 构建临时安装的构建依赖，运行
+依赖仍会保留。也可以使用带相同选项的 `yay`。两个包会安装二进制、运行依赖、PAM 策略、locker
+systemd 用户服务和集成示例，但按设计不会覆盖 `/etc/fomalhaut/config.toml` 或
+`/etc/greetd/config.toml`。缺少 Fomalhaut 配置时应用使用安全默认值和内嵌 minimal theme；
+greetd 示例位于 `/usr/share/doc/greetd-fomalhaut/greetd-config.toml`。
+
+### 从源码安装迁移到 AUR
+
+推荐的迁移顺序是先安装两个 AUR 包、更新原来的源码 checkout，然后运行：
+
+```sh
+./uninstall.sh
+```
+
+同一个脚本也是普通的源码安装卸载器，没有安装任何 AUR 包时也可以运行。它会删除 `/usr/local`
+下由源码安装器部署的文件，并默认保留现有 Fomalhaut 配置与 Nocturne 主题；检测到 AUR greeter
+时才把保留的 greetd 命令切换到 `/usr/bin/fomalhaut`，检测到 AUR locker 接管 PAM 时则永远不
+删除该策略。删除未被 package 接管的配置前一定会询问，非交互运行始终保留。脚本不会重启
+greetd；用户 niri 或 swayidle 配置中显式写入的 `/usr/local/bin/fomalhaut-lock` 仍需单独修改。
+
+### 从源码安装
+
+仓库自带的源码安装器会构建 greeter、locker 和 Nocturne 主题，安装 PAM 策略与 systemd
+用户服务，并更新 Fomalhaut 与 greetd 配置。
 
 安装前需要准备：
 

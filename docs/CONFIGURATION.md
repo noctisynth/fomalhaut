@@ -3,6 +3,38 @@
 Fomalhaut 固定读取 `/etc/fomalhaut/config.toml`。文件不存在时使用内嵌 minimal theme 和系统
 session 默认目录；文件存在但无法读取、包含未知字段或验证失败时，Fomalhaut 以非零状态退出。
 
+## 从 AUR 安装、源码卸载与迁移
+
+Arch Linux 用户可以同时安装两个独立 AUR 包：
+
+```sh
+paru -S greetd-fomalhaut fomalhaut-lock
+```
+
+包管理器会安装运行依赖、两个 `/usr/bin` 二进制、locker PAM/systemd 资产和集成示例，但不会
+覆盖 `/etc/fomalhaut/config.toml` 或 `/etc/greetd/config.toml`。全新安装可从
+`/usr/share/doc/greetd-fomalhaut/greetd-config.toml` 合并 greetd/Cage 示例；未创建 Fomalhaut
+配置时两个角色使用安全默认值和内嵌 minimal theme。
+
+如果当前系统曾运行源码安装器，应先安装两个 AUR 包，再从更新后的源码 checkout 执行：
+
+```sh
+./uninstall.sh
+```
+
+脚本不要求 AUR package 存在，因此也可以作为普通源码安装卸载器。它删除默认 `/usr/local`
+prefix 下的旧二进制、locker user unit 和集成示例，默认保留 Fomalhaut/greetd 配置、配置备份
+以及完整 Nocturne 主题。检测到 `greetd-fomalhaut` 时，保留的
+`[default_session].command` 中旧 greeter 路径会原子迁移为 `/usr/bin/fomalhaut`；没有 AUR
+greeter 时保留原配置并警告其中可能存在失效路径。删除配置和主题前会列出范围并要求显式
+`[y/N]` 确认，非交互调用始终保留。AUR locker 管理的 `/etc/pam.d/fomalhaut-lock` 与可能存在
+的 `.pacnew` 不会删除；没有 AUR locker 时，PAM policy 仅在同一次明确确认后删除。
+
+卸载器不重启或启用 greetd，也不扫描用户家目录。运行后应检查 niri、swayidle 等用户配置是否
+仍引用 `/usr/local/bin/fomalhaut-lock`，确认 user systemd 已完成 daemon reload，并只在确认可以
+结束当前 greeter session 时手工重启 greetd。非默认源码 prefix 可传入 `--prefix`；
+`--system-root` 仅用于隔离验证。
+
 ## 从源码安装
 
 仓库根目录的安装器会锁定依赖构建 release 二进制和 React 参考主题，并安装到系统目录：

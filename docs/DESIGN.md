@@ -661,6 +661,35 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
   连接 TTY 时启用，并遵守 `NO_COLOR`。重定向、管道和无颜色环境必须输出不含转义序列的纯文本，
   不得为了样式引入新的运行时工具依赖。
 
+仓库根目录同时提供 `uninstall.sh`，用于卸载曾由默认源码安装器部署的完整 greeter 与 locker
+套件；它也在检测到对应 AUR package 时承担从源码安装迁移到包管理安装的职责，但不负责卸载
+AUR package 本身。真实 Arch 系统通过 pacman 分别检测 `greetd-fomalhaut` 和
+`fomalhaut-lock`，不要求任一 AUR package 预先存在，因此纯源码卸载和只接管一个角色都必须可用；
+如果 pacman 声明某个 AUR package 已安装，对应 `/usr/bin` 二进制以及 locker unit 又缺失，则必须
+在删除源码文件前失败，避免把仍可工作的源码安装切换到损坏的 package。`--system-root` 隔离验证
+以目标 root 中对应的 `/usr` 文件分别模拟 package 接管状态。脚本支持与安装器一致的绝对
+`--prefix` 和隔离 `--system-root`，默认 prefix 为 `/usr/local`，真实系统写入仍只通过 `sudo`
+完成，并且不得自动重启、启用或卸载任何 system package。
+
+卸载默认删除 prefix 下由源码安装器部署的两个二进制、locker systemd user unit、
+idle/compositor 示例及这些文件的安装器备份，但保留 `/etc/fomalhaut/config.toml`、
+`/etc/greetd/config.toml`、Nocturne 主题 release/legacy 树和相关配置备份。保留配置时，只有
+`greetd-fomalhaut` 已接管且 greetd 的 `[default_session].command` 仍精确引用旧 prefix 下的
+greeter，才在完成 TOML 解析、目标类型检查和结果复验后把它原子迁移到
+`/usr/bin/fomalhaut`，同时保留带时间戳备份；需要迁移但无法安全识别或更新时不得删除旧二进制。
+没有 AUR greeter 的普通卸载保留原配置文本，并明确警告其中可能仍有失效的 prefix 引用。无论
+locker 是否已由 AUR 接管，移除旧的 prefix unit 后都应尽力执行 user systemd daemon reload，
+但 reload 失败只给出明确警告，不得回滚已经完成的文件变更，也不得触发锁屏或结束用户会话。
+
+删除系统配置属于独立的破坏性选择：脚本每次运行都必须在任何配置删除前向交互用户列出准确
+范围并以默认否定的 `[y/N]` 确认；标准输入不是终端或读取失败时一律按保留处理，不提供绕过确认
+的强制参数。只有明确确认后才能删除两个 TOML、它们由安装器生成的备份及完整 Nocturne 安装树。
+`/etc/pam.d/fomalhaut-lock` 在 `fomalhaut-lock` AUR package 已接管时无论用户如何回答都不得删除，
+pacman 首次接管既有 PAM 策略时产生的 `.pacnew` 也留给管理员审阅；没有 AUR locker 的普通卸载
+则把 PAM policy 视为同一确认范围内的安全配置，只在明确确认后删除。脚本不得扫描或修改用户
+家目录中的 niri、swayidle 等 compositor 配置；如果未检测到相应 AUR package，只能提示其中的
+旧 prefix 引用已经失效，如果已接管则提示迁移到 `/usr/bin`。
+
 ### 4.14 `fomalhaut-user` 用户发现与头像资源
 
 用户发现是 Linux 宿主集成，不属于 greetd IPC core。greeter 与 locker 都需要可信用户资料和
