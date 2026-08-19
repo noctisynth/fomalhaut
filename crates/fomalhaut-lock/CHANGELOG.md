@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.0-alpha.2
+
+### New Features
+
+- [`7c3c5b0`](https://github.com/noctisynth/fomalhaut/commit/7c3c5b008ca55d29cbd0ea439903da3d29a9c959): Discover installed themes by stable manifest ID across source and package installation roots, with deterministic precedence and safe migration between local and AUR installations.
+
 ## v0.1.0-alpha.1
 
 ### Bug Fixes

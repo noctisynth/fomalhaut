@@ -1,19 +1,19 @@
 [package]
 name = "fomalhaut"
 edition = "2024"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 description = "WebKitGTK display manager greeter for greetd"
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-fomalhaut-config = { version = "0.1.0-alpha.1", path = "../fomalhaut-config" }
+fomalhaut-config = { version = "0.1.0-alpha.2", path = "../fomalhaut-config" }
 fomalhaut-greetd = { version = "0.1.0-alpha.1", path = "../fomalhaut-greetd" }
 fomalhaut-gtk = { version = "0.1.0-alpha.0", path = "../fomalhaut-gtk" }
 fomalhaut-logind = { version = "0.1.0-alpha.0", path = "../fomalhaut-logind" }
 fomalhaut-session = { version = "0.1.0-alpha.1", path = "../fomalhaut-session" }
 fomalhaut-user = { version = "0.1.0-alpha.0", path = "../fomalhaut-user" }
-fomalhaut-web = { version = "0.1.0-alpha.3", path = "../fomalhaut-web" }
+fomalhaut-web = { version = "0.1.0-alpha.4", path = "../fomalhaut-web" }
 gtk4 = "0.11.4"
 libc = "0.2.189"
 tokio = { version = "1.53.1", features = ["net", "rt"] }
