@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "fomalhaut-config",
  "fomalhaut-core",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-config"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "fomalhaut-session",
  "serde",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-lock"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "fomalhaut-config",
  "fomalhaut-core",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "fomalhaut-web"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "cap-std",
  "fomalhaut-core",
