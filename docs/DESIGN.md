@@ -571,7 +571,7 @@ binding 的 `gtk4-layer-shell`，以及直接链接的 GLib、glibc、libgcc 和
 `fomalhaut-theme-nocturne` 是 `arch=('any')` 的纯静态资产包，安装到
 `/usr/share/fomalhaut/themes/nocturne`，运行时不依赖 Node.js、Bun、greetd 或 locker；后两者只
 作为 `optdepends` 提示可消费该主题。包不创建或修改 `/etc/fomalhaut/config.toml`，管理员通过
-`[themes].default = "/usr/share/fomalhaut/themes/nocturne"` 或角色覆盖显式启用。项目开发工具链
+`[themes].default = "nocturne"` 按稳定主题 ID 发现，或使用角色覆盖/绝对路径显式启用。项目开发工具链
 跟随不承诺向下兼容的 Bun canary，而 Arch 官方 `bun` 是较旧稳定版，因此 AUR 不得用发行版 Bun
 冒充受支持构建环境。主题 AUR 改用 Arch `npm`（及其 Node.js 依赖）作为 `makedepends`，通过只在
 `packaging/aur/fomalhaut-theme-nocturne` 维护的最小 npm build manifest 与锁文件运行 `npm ci`；
@@ -647,8 +647,11 @@ React 参考主题。它不是 AUR/package manager 的替代品，也不参与�
 - 安装必须内容级幂等：构建后的二进制、主题树或 updater 生成的 TOML 与当前安装内容完全相同
   时，分别跳过备份、替换、release 创建和 symlink 切换。确有变化的二进制先写入同目录临时
   文件，保留现有文件的带时间戳备份后通过 rename 切换。变化的主题安装到只读 release 目录，
-  `/etc/fomalhaut/themes/nocturne` 使用相对 symlink 原子指向新 release；既有普通目录首次迁移时
-  保留为 `legacy` 备份，不递归删除旧主题或 release。
+  默认 prefix 下的 `/usr/local/share/fomalhaut/themes/nocturne` 使用相对 symlink 原子指向同一
+  `themes` 目录中的 `.nocturne-releases`；既有普通目录首次迁移时保留为 `legacy` 备份，不递归
+  删除旧主题或 release。默认源码安装配置写稳定 ID `nocturne`；非默认 prefix 不属于固定发现根，
+  因而写入该 prefix 下主题目录的绝对路径。旧版安装器遗留的 `/etc/fomalhaut/themes/nocturne`
+  不再是发现根，也不得继续承载新构建资产。
 - `/etc/fomalhaut/config.toml` 与 `/etc/greetd/config.toml` 不允许用 `sed`/正则盲目覆盖整份
   文件。内置 updater 必须先用 Python 标准库 `tomllib` 验证旧内容，只修改脚本拥有的 table/key，
   再验证新 TOML 和预期值；现有文件先生成同目录时间戳备份，临时文件继承 mode/owner，并用
@@ -696,18 +699,26 @@ AUR package 本身。真实 Arch 系统通过 pacman 分别检测 `greetd-fomalh
 完成，并且不得自动重启、启用或卸载任何 system package。
 
 卸载默认删除 prefix 下由源码安装器部署的两个二进制、locker systemd user unit、
-idle/compositor 示例及这些文件的安装器备份，但保留 `/etc/fomalhaut/config.toml`、
-`/etc/greetd/config.toml`、Nocturne 主题 release/legacy 树和相关配置备份。保留配置时，只有
+idle/compositor 示例、Nocturne 主题 symlink/release 树及这些文件的安装器备份，但保留
+`/etc/fomalhaut/config.toml`、`/etc/greetd/config.toml` 和相关配置备份。旧版源码安装器在
+`/etc/fomalhaut/themes` 创建的、仍符合受控相对 symlink/release 布局的 Nocturne 当前链接和
+release 树也作为源码资产删除；无法证明属于该布局的普通目录和 `legacy` 备份只在后述明确
+配置清理确认后删除。保留配置时，只有
 `greetd-fomalhaut` 已接管且 greetd 的 `[default_session].command` 仍精确引用旧 prefix 下的
 greeter，才在完成 TOML 解析、目标类型检查和结果复验后把它原子迁移到
 `/usr/bin/fomalhaut`，同时保留带时间戳备份；需要迁移但无法安全识别或更新时不得删除旧二进制。
-没有 AUR greeter 的普通卸载保留原配置文本，并明确警告其中可能仍有失效的 prefix 引用。无论
+检测到 `fomalhaut-theme-nocturne` 接管时，同一结构化更新流程把精确引用旧版 `/etc` 或当前
+prefix Nocturne 路径的 `[themes]` 选择迁移为稳定 ID `nocturne`；没有主题 package 接管时保留
+管理员配置并明确警告其中可能引用即将移除的源码主题。没有 AUR greeter 的普通卸载保留原配置
+文本，并明确警告其中可能仍有失效的 prefix 引用。无论
 locker 是否已由 AUR 接管，移除旧的 prefix unit 后都应尽力执行 user systemd daemon reload，
 但 reload 失败只给出明确警告，不得回滚已经完成的文件变更，也不得触发锁屏或结束用户会话。
 
 删除系统配置属于独立的破坏性选择：脚本每次运行都必须在任何配置删除前向交互用户列出准确
 范围并以默认否定的 `[y/N]` 确认；标准输入不是终端或读取失败时一律按保留处理，不提供绕过确认
-的强制参数。只有明确确认后才能删除两个 TOML、它们由安装器生成的备份及完整 Nocturne 安装树。
+的强制参数。只有明确确认后才能删除两个 TOML、它们由安装器生成的备份及旧版 `/etc` 下无法
+自动证明为当前源码 release 的 Nocturne legacy 树；prefix 下的可证明源码主题已属于默认卸载
+范围，不因保留配置而继续残留。
 `/etc/pam.d/fomalhaut-lock` 在 `fomalhaut-lock` AUR package 已接管时无论用户如何回答都不得删除，
 pacman 首次接管既有 PAM 策略时产生的 `.pacnew` 也留给管理员审阅；没有 AUR locker 的普通卸载
 则把 PAM policy 视为同一确认范围内的安全配置，只在明确确认后删除。脚本不得扫描或修改用户
@@ -1264,14 +1275,15 @@ typecheck、SDK 单元测试和 build，并在重新生成后以 Git diff 检查
 
 ```toml
 [themes]
-default = "/etc/fomalhaut/themes/nocturne"
-greeter = "/etc/fomalhaut/themes/nocturne-greeter"
-locker = "/etc/fomalhaut/themes/nocturne-locker"
+default = "nocturne"
+greeter = "custom-greeter"
+locker = "/srv/fomalhaut/themes/custom-locker"
 ```
 
-`greeter` 和 `locker` 都是可选覆盖。主题选择优先级固定为“角色专用 →
-`default` →内嵌 minimal theme”：因此正常部署只需要一个通用主题，同时也
-允许管理员为两个角色分别选择目录。同一目录的 `theme.toml` 仍只有一个
+`greeter` 和 `locker` 都是可选覆盖。字段接受稳定主题 ID 或绝对主题目录；不以 `/` 开头的
+值必须是合法 ID，相对路径仍然无效。主题选择优先级固定为“角色专用 →
+`default` → 内嵌 minimal theme”：因此正常部署只需要一个通用主题，同时也
+允许管理员为两个角色分别选择主题。同一目录的 `theme.toml` 仍只有一个
 `entrypoint`，页面通过 SDK 的 `mode` 分支呈现，不在主题清单中增加两个入口。
 
 `[frontend].path` 兼容期已经结束；`[frontend]` 现在与其他未知顶层字段一样由严格配置解析直接
@@ -1282,10 +1294,28 @@ locker = "/etc/fomalhaut/themes/nocturne-locker"
 
 ```toml
 [theme]
+id = "my-theme"
 name = "My Theme"
 protocol = 1
 entrypoint = "index.html"
 ```
+
+`theme.id` 是配置和发现使用的稳定机器身份，长度为 1–64 字节，只接受小写 ASCII
+kebab-case：一个或多个 `[a-z0-9]+` segment 以单个 `-` 连接。主题发布后不得仅因展示文案、
+品牌或本地化调整修改 ID。`theme.name` 继续是最长 256 字节、无控制字符的展示名称，可以独立
+调整；显示名称不参与来源认证、冲突消解或配置匹配。缺失或非法 ID 的外部主题清单无效。
+
+按 ID 选择时，宿主通过共享发现模块只枚举固定 root-owned 搜索根的直接子目录，不递归扫描，
+也不读取 `$HOME`、XDG 目录、环境变量或网络来源。搜索根和优先级固定为：
+
+1. `/usr/local/share/fomalhaut/themes`，代表管理员的本地/源码安装；
+2. `/usr/share/fomalhaut/themes`，代表 AUR、发行版或其他系统 package 安装。
+
+发现器以每个候选受 16 KiB 限制的 `theme.toml` 中 `theme.id` 做精确匹配。同一搜索根存在多个
+相同 ID 时按直接子目录路径的字节字典序选择；本地根始终优先于系统根。出现多个匹配时宿主必须
+记录脱敏冲突警告和最终绝对路径。候选一旦按上述顺序选中，完整清单、protocol、entrypoint 或
+资源验证失败必须使启动 fail closed，不得静默尝试较低优先级副本。搜索根不存在视为空；存在但
+无法安全枚举则发现失败。绝对路径选择绕过发现优先级但仍执行完全相同的清单和 capability 校验。
 
 主题加载规则：
 
@@ -1297,7 +1327,8 @@ entrypoint = "index.html"
   minimal theme；文件存在但无法读取、解析或
   通过语义验证时明确失败，不静默回退。配置指定外部主题时，缺失/损坏的 `theme.toml`、
   不支持的 protocol 或无效入口同样是启动失败。运行中某个资源消失只返回脱敏的资源错误。
-- 外部主题根必须是绝对目录。host 使用 `cap-std` 打开一次目录 capability；主题清单和所有
+- 发现后的外部主题根必须是绝对目录。host 使用 `cap-std` 打开一次目录 capability；发现阶段
+  同样以搜索根 capability 枚举直接子目录并有界读取清单，主题清单和所有
   资源只通过该句柄的相对路径 API 打开，并直接从打开的文件描述符读取。不得先
   `canonicalize` 再按全局路径读取，避免检查与读取不同文件。
 - URI 只接受 `fomalhaut://theme/` 下由 ASCII 字母、数字、`-`、`_`、`.` 和 `/` 组成的路径；
@@ -1369,12 +1400,13 @@ JavaScript，脚本初始化后通过正式 bridge 发出 `state.get`；资源�
 
 ### 8.1 React 参考主题
 
-仓库在 `themes/nocturne` 维护名为 `Fomalhaut Nocturne` 的官方参考主题。主题源码包使用
+仓库在 `themes/nocturne` 维护 ID 为 `nocturne`、显示名为 `Fomalhaut Nocturne` 的官方参考主题。主题源码包使用
 `@fomalhaut/theme-nocturne` 名称，并始终保持 `private = true`；它属于 Bun workspace 和
 Semifold package 列表，以便参与统一的 changeset、版本与 changelog 管理，但 Semifold 发布阶段
 必须根据 package 的私有标记跳过 npm 发布。`themes/<id>` 是仓库内多主题源码布局，
 `@fomalhaut/theme-<id>` 是同类 H5 主题包的命名约定，面向用户的显示名称则来自各主题
-`theme.toml`；显示名称只是主题自声明元数据，不构成来源或安全认证。该主题用于证明
+`theme.toml`；稳定 ID 参与配置和固定系统目录发现，显示名称只是主题自声明元数据，不构成来源
+或安全认证。该主题用于证明
 `fomalhaut-sdk` 能支持完整的框架前端，并向主题作者提供可构建示例；它不
 嵌入 Rust 二进制、不替代无构建依赖的内置 minimal theme，也不改变用户通过
 `[themes]` 选择通用或角色专用可信静态主题的能力。生产产物是 `dist/` 下的纯静态目录，根目录
@@ -1715,7 +1747,8 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 
 配置大类预计包括：
 
-- 通用主题路径和 greeter/locker 可选覆盖；入口仍属于 `theme.toml`。
+- 通用主题选择和 greeter/locker 可选覆盖；值可以是稳定 ID 或绝对路径，入口仍属于
+  `theme.toml`。
 - session 搜索目录及过滤策略。
 - 是否列出本地用户。
 - 是否保存上次用户或 session。
@@ -1731,14 +1764,15 @@ WebView renderer 内存不保证可验证地清零。提交回答后，示例前
 
 首个配置纵向切片固定读取 `/etc/fomalhaut/config.toml`，不接受前端、主题或普通进程环境变量
 覆盖配置路径。文件缺失使用安全默认值；存在但不可读取或无效时退出。TOML 顶层和各 section
-均拒绝未知字段，语法层只反序列化原始值，语义层再验证绝对路径、空值、数量与跨字段约束。
+均拒绝未知字段，语法层只反序列化原始值，语义层再区分主题 ID/绝对路径并验证 ID、路径、
+空值、数量与跨字段约束。
 初始公开结构为：
 
 ```toml
 [themes]
-default = "/etc/fomalhaut/themes/nocturne"
-greeter = "/etc/fomalhaut/themes/nocturne-greeter"
-locker = "/etc/fomalhaut/themes/nocturne-locker"
+default = "nocturne"
+greeter = "custom-greeter"
+locker = "/srv/fomalhaut/themes/custom-locker"
 
 [sessions]
 wayland_dirs = ["/usr/local/share/wayland-sessions", "/usr/share/wayland-sessions"]
@@ -1760,8 +1794,9 @@ scale.greeter = 1.5
 scale.locker = 1.0
 ```
 
-- `themes` 中的每个字段都是可选绝对主题目录；选择顺序是角色专用、
-  `default`、内嵌 minimal theme。入口和协议版本由目录内必需的 `theme.toml`
+- `themes` 中的每个字段都是可选主题 ID 或绝对主题目录；选择顺序是角色专用、
+  `default`、内嵌 minimal theme。ID 通过第 8 节固定的本地/系统搜索根和稳定冲突顺序解析为
+  绝对目录，绝对路径继续支持开发与非标准 prefix。入口和协议版本由目录内必需的 `theme.toml`
   决定，避免配置与清单出现两个互相冲突的入口来源。已经移除的 `[frontend]` 不再属于配置
   schema，出现时按未知顶层字段拒绝。
 - `sessions` 缺失时沿用固定默认目录。section 存在时，每个缺失字段仍继承对应默认值；显式

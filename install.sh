@@ -727,7 +727,7 @@ else
   log_success "Installed /etc/pam.d/fomalhaut-lock"
 fi
 
-readonly theme_runtime="/etc/fomalhaut/themes/nocturne"
+readonly theme_runtime="$prefix/share/fomalhaut/themes/nocturne"
 theme_path="$(rooted "$theme_runtime")"
 theme_parent="${theme_path%/*}"
 release_base="$theme_parent/.nocturne-releases"
@@ -775,7 +775,11 @@ fi
 
 run_privileged install -d -m 0755 -- "${fomalhaut_config%/*}" "${greetd_config%/*}"
 
-fomalhaut_updates=(themes default string "$theme_runtime")
+theme_selector="$theme_runtime"
+if [[ "$prefix" == "/usr/local" ]]; then
+  theme_selector="nocturne"
+fi
+fomalhaut_updates=(themes default string "$theme_selector")
 if [[ -n "$display_scale" ]]; then
   fomalhaut_updates+=(display scale display-scale-shared "$display_scale")
 elif [[ -n "$greeter_scale" ]]; then

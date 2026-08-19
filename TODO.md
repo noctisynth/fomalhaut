@@ -161,6 +161,16 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 与静态检查、参考主题 34 个测试和生产构建。Semifold CLI 已创建覆盖 `fomalhaut-lock`、
 `fomalhaut-web` 与 `fomalhaut` 的 patch/fix changeset；仍需重新部署并进行真实 suspend/resume 验证。
 
+随后完成稳定主题 ID 与系统级发现：`theme.toml` 新增必需的 kebab-case `id`，配置同时接受 ID
+和绝对路径；共享主题模块只枚举 `/usr/local/share/fomalhaut/themes` 与
+`/usr/share/fomalhaut/themes` 的直接子目录，并按本地、系统 package、路径字典序选择，重复匹配
+会报告最终路径，选中的损坏候选不会静默回退。默认源码安装已迁到 `/usr/local/share` 并写入
+`nocturne`，非默认 prefix 保留绝对路径；卸载器会删除可证明的源码 release，并在主题 AUR
+接管时原子迁移旧 selector。验证通过 workspace 180 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、
+参考主题 37 个测试和生产构建、19 个 AUR resolver fixture、隔离卸载迁移，以及默认/自定义
+prefix 的首次安装与默认 prefix 重复安装幂等检查。真实 greeter/locker 的名称发现与冲突日志仍需
+随下列 WebKitGTK 集成验证一起复测。
+
 ## P0：greeter/locker 产品与 crate 边界
 
 ### Backend-neutral Rust 架构
@@ -491,6 +501,8 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 - [x] 定义拒绝未知字段、限制 64 KiB 的 `/etc/fomalhaut/config.toml` 配置模型。
 - [x] 分离 TOML 语法解析和绝对路径、空值及跨字段约束的语义验证。
 - [x] 支持外部主题目录配置；入口和协议版本由必需的 `theme.toml` 提供。
+- [x] 将主题配置扩展为稳定 ID 或绝对路径 selector；ID 使用 1–64 字节的小写 ASCII
+      kebab-case，角色专用 → default → minimal 的既有选择顺序保持不变。
 - [x] 支持 Wayland/X11 session 目录及 `TryExec` 搜索目录配置，并保持安全默认值。
 - [ ] 支持日志级别和日志目标。
 - [x] 对安全相关配置提供拒绝式默认值：配置缺失使用受限内嵌主题和固定 session 目录，未知
@@ -509,6 +521,9 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
 - [x] 设置严格 CSP。
 - [x] 默认禁止外部 URL、远程脚本和远程字体。
 - [x] 实现最大 16 KiB、拒绝未知字段的主题清单及前端协议版本检查。
+- [x] 为主题清单增加必需且稳定的 `theme.id`，在共享主题模块中仅扫描 `/usr/local/share` 和
+      `/usr/share` 的固定直接子目录，按本地 > 系统 package > 路径字典序发现并报告冲突；选中
+      的高优先级候选损坏时 fail closed，并覆盖缺失 root、非法 ID、重复 ID 和绝对路径兼容测试。
 - [ ] 实现内置最小故障页面。
 
 ### Minimal theme
@@ -775,6 +790,9 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       按 `paru`、`yay`、`sudo pacman` 优先级安装缺失的系统依赖；Rust 与 Bun 工具链由用户
       自行提供；Ubuntu CI 对应安装 `libclang-dev`。
 - [x] 让源码安装器达到内容级幂等：连续相同安装不新增二进制/配置备份或主题 release。
+- [x] 将默认源码主题从 `/etc/fomalhaut/themes` 迁到
+      `/usr/local/share/fomalhaut/themes/nocturne`，默认配置写 `nocturne`、非默认 prefix 写绝对
+      路径；让卸载器删除可证明的 prefix/旧版源码 release，并在主题 AUR 接管时安全迁移配置。
 - [x] 添加兼作 AUR 迁移工具的通用源码卸载器：无 AUR package 时也能卸载，默认保留配置与
       Nocturne 主题；检测到对应 AUR package 时原子迁移 greetd 的 `/usr/local` greeter 路径并
       保留 package 接管的 PAM，删除未接管配置前必须交互确认；隔离 `--system-root` 覆盖纯卸载、

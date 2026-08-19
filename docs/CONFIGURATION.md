@@ -19,7 +19,7 @@ paru -S --removemake greetd-fomalhaut fomalhaut-lock fomalhaut-theme-nocturne
 
 ```toml
 [themes]
-default = "/usr/share/fomalhaut/themes/nocturne"
+default = "nocturne"
 ```
 
 Fomalhaut 是 greetd 的 greeter，不会自动替换当前 display manager。审阅并写好
@@ -35,19 +35,22 @@ sudo systemctl enable greetd.service
 相同提醒，但包本身不会改写配置或启停服务。未创建 Fomalhaut 配置时两个角色仍使用安全默认值和
 内嵌 minimal theme。
 
-如果当前系统曾运行源码安装器，应先安装两个 AUR 包，再从更新后的源码 checkout 执行：
+如果当前系统曾运行源码安装器，应先安装需要的 AUR 应用包和主题包，再从更新后的源码 checkout
+执行：
 
 ```sh
 ./uninstall.sh
 ```
 
 脚本不要求 AUR package 存在，因此也可以作为普通源码安装卸载器。它删除默认 `/usr/local`
-prefix 下的旧二进制、locker user unit 和集成示例，默认保留 Fomalhaut/greetd 配置、配置备份
-以及完整 Nocturne 主题。检测到 `greetd-fomalhaut` 时，保留的
-`[default_session].command` 中旧 greeter 路径会原子迁移为 `/usr/bin/fomalhaut`；没有 AUR
-greeter 时保留原配置并警告其中可能存在失效路径。删除配置和主题前会列出范围并要求显式
-`[y/N]` 确认，非交互调用始终保留。AUR locker 管理的 `/etc/pam.d/fomalhaut-lock` 与可能存在
-的 `.pacnew` 不会删除；没有 AUR locker 时，PAM policy 仅在同一次明确确认后删除。
+prefix 下的旧二进制、locker user unit、集成示例和可证明由源码安装器管理的 Nocturne
+symlink/release，默认保留 Fomalhaut/greetd 配置及其备份。检测到
+`fomalhaut-theme-nocturne` 时，仍精确引用旧源码路径的主题选择会原子迁移为 `nocturne`；检测到
+`greetd-fomalhaut` 时，保留的 `[default_session].command` 中旧 greeter 路径会原子迁移为
+`/usr/bin/fomalhaut`。没有对应 AUR 接管时保留配置并警告其中可能存在失效引用。删除两个 TOML、
+无法证明所有权的旧主题 legacy 和未接管 PAM policy 前会列出范围并要求显式 `[y/N]` 确认，
+非交互调用始终保留。AUR locker 管理的 `/etc/pam.d/fomalhaut-lock` 与可能存在的 `.pacnew`
+不会删除。
 
 卸载器不重启或启用 greetd，也不扫描用户家目录。运行后应检查 niri、swayidle 等用户配置是否
 仍引用 `/usr/local/bin/fomalhaut-lock`，确认 user systemd 已完成 daemon reload，并只在确认可以
@@ -147,7 +150,7 @@ sudo systemctl enable --now greetd.service
 - `/usr/local/share/doc/fomalhaut-lock/niri.kdl`
 - `/usr/local/share/doc/fomalhaut-lock/swayidle.conf`
 - `/etc/pam.d/fomalhaut-lock`
-- `/etc/fomalhaut/themes/nocturne`
+- `/usr/local/share/fomalhaut/themes/nocturne`
 - `/etc/fomalhaut/config.toml`
 - `/etc/greetd/config.toml`
 
@@ -264,7 +267,7 @@ swayidle -w \
 
 ```toml
 [themes]
-default = "/etc/fomalhaut/themes/my-theme"
+default = "my-theme"
 ```
 
 `default` 主题同时供 greeter 和 locker 使用。管理员也可以只覆盖其中一个角色；选择优先级固定为
@@ -272,28 +275,34 @@ default = "/etc/fomalhaut/themes/my-theme"
 
 ```toml
 [themes]
-default = "/etc/fomalhaut/themes/nocturne"
-greeter = "/etc/fomalhaut/themes/custom-greeter"
-locker = "/etc/fomalhaut/themes/custom-locker"
+default = "nocturne"
+greeter = "custom-greeter"
+locker = "/srv/fomalhaut/themes/custom-locker"
 ```
 
-每个字段都必须是绝对路径。每个主题仍只有一个 `theme.toml` entrypoint；同一页面通过 SDK
-提供的运行模式呈现 greeter 或 locker。两个宿主都使用上述主题选择；配置两个角色路径用于
-允许管理员选择两套独立主题。
+每个字段可以是稳定主题 ID 或绝对路径；相对路径无效。ID 按
+`/usr/local/share/fomalhaut/themes`、`/usr/share/fomalhaut/themes` 的顺序发现，同一层级的重复 ID
+按目录路径字典序选择并记录警告。每个主题仍只有一个 `theme.toml` entrypoint；同一页面通过 SDK
+提供的运行模式呈现 greeter 或 locker。两个宿主都使用上述主题选择。
 
 旧 `[frontend].path` 已不再兼容；运行时会把 `[frontend]` 作为未知顶层字段拒绝，源码安装器
 也不会自动迁移或删除它。升级旧安装前，管理员必须手工把 `path` 改为
 `[themes].default`；安装器若在 preflight 发现 `[frontend]`，会在切换二进制、主题或其他已安装
 文件前明确失败。
 
-主题目录必须是绝对路径，并包含 `theme.toml`：
+发现根下的每个主题直接子目录或显式绝对路径必须包含 `theme.toml`：
 
 ```toml
 [theme]
+id = "my-theme"
 name = "My Theme"
 protocol = 1
 entrypoint = "index.html"
 ```
+
+`id` 是 1–64 字节的小写 ASCII kebab-case 稳定身份，发布后不应随展示文案改名；`name` 只用于
+展示。发现不会扫描用户 home、XDG 目录、网络位置或任意递归路径。若高优先级匹配已经选中但其
+清单、protocol 或入口损坏，宿主会拒绝启动，而不会悄悄换用低优先级同名主题。
 
 入口和其他资源都通过 `fomalhaut://theme/` 加载。HTML 中应使用相对 URL，例如：
 

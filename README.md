@@ -63,7 +63,7 @@ build dependencies. Enable it explicitly with:
 
 ```toml
 [themes]
-default = "/usr/share/fomalhaut/themes/nocturne"
+default = "nocturne"
 ```
 
 Fomalhaut is a greeter for greetd; the package does not replace or restart your
@@ -93,10 +93,12 @@ For the recommended migration, install the AUR application packages first
 
 The same script is also the normal source-install uninstaller and can run
 without either AUR package. It removes source-installed files below
-`/usr/local` and keeps the existing Fomalhaut configuration and Nocturne theme
-by default. When an AUR greeter is present it switches the preserved greetd
-command to `/usr/bin/fomalhaut`; when an AUR locker owns the PAM policy it never
-removes that file. Deleting unowned configuration always requires confirmation,
+`/usr/local`, including verified source-managed Nocturne releases, while keeping
+the existing Fomalhaut and greetd configuration by default. When the AUR theme
+is present it migrates exact old source-theme selectors to `nocturne`; an AUR
+greeter switches the preserved greetd command to `/usr/bin/fomalhaut`, and an
+AUR locker-owned PAM policy is never removed. Deleting unowned configuration
+always requires confirmation,
 and a non-interactive run keeps it. The script does not restart greetd, and user
 niri or swayidle configuration that explicitly names
 `/usr/local/bin/fomalhaut-lock` must be updated separately.
@@ -176,7 +178,7 @@ By default, this installs:
 - `/usr/local/share/doc/fomalhaut-lock/niri.kdl`
 - `/usr/local/share/doc/fomalhaut-lock/swayidle.conf`
 - `/etc/pam.d/fomalhaut-lock`
-- `/etc/fomalhaut/themes/nocturne`
+- `/usr/local/share/fomalhaut/themes/nocturne`
 - `/etc/fomalhaut/config.toml`
 - `/etc/greetd/config.toml`
 

@@ -1,4 +1,5 @@
 [theme]
+id = "nocturne"
 name = "Fomalhaut Nocturne"
 protocol = 1
 entrypoint = "index.html"

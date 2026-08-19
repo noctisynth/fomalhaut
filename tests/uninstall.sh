@@ -31,6 +31,7 @@ seed_root() {
     "$root/usr/local/bin" \
     "$root/usr/local/lib/systemd/user" \
     "$root/usr/local/share/doc/fomalhaut-lock" \
+    "$root/usr/local/share/fomalhaut/themes/.nocturne-releases/release-test/assets" \
     "$root/etc/fomalhaut/themes/.nocturne-releases/release-test/assets" \
     "$root/etc/greetd" \
     "$root/etc/pam.d"
@@ -62,6 +63,12 @@ seed_root() {
   install -m 0644 "$root/etc/greetd/config.toml" \
     "$root/etc/greetd/config.toml.bak.existing"
   printf '%s\n' '<!doctype html>' \
+    >"$root/usr/local/share/fomalhaut/themes/.nocturne-releases/release-test/index.html"
+  printf '%s\n' 'asset' \
+    >"$root/usr/local/share/fomalhaut/themes/.nocturne-releases/release-test/assets/theme.css"
+  ln -s '.nocturne-releases/release-test' \
+    "$root/usr/local/share/fomalhaut/themes/nocturne"
+  printf '%s\n' '<!doctype html>' \
     >"$root/etc/fomalhaut/themes/.nocturne-releases/release-test/index.html"
   printf '%s\n' 'asset' \
     >"$root/etc/fomalhaut/themes/.nocturne-releases/release-test/assets/theme.css"
@@ -81,6 +88,19 @@ add_aur_locker() {
   install -Dm644 /dev/null "$root/usr/lib/systemd/user/fomalhaut-lock.service"
 }
 
+add_aur_theme() {
+  local root="$1"
+  install -d "$root/usr/share/fomalhaut/themes/nocturne"
+  printf '%s\n' \
+    '[theme]' \
+    'id = "nocturne"' \
+    'name = "Fomalhaut Nocturne"' \
+    'protocol = 1' \
+    'entrypoint = "index.html"' \
+    >"$root/usr/share/fomalhaut/themes/nocturne/theme.toml"
+  install -m 0644 /dev/null "$root/usr/share/fomalhaut/themes/nocturne/index.html"
+}
+
 test_preserves_and_migrates_configuration() {
   local root="$temporary_directory/preserve"
   local output="$temporary_directory/preserve.output"
@@ -88,6 +108,7 @@ test_preserves_and_migrates_configuration() {
   seed_root "$root"
   add_aur_greeter "$root"
   add_aur_locker "$root"
+  add_aur_theme "$root"
 
   env NO_COLOR=1 "$UNINSTALLER" --system-root "$root" </dev/null >"$output"
 
@@ -105,14 +126,20 @@ test_preserves_and_migrates_configuration() {
   assert_exists "$root/etc/fomalhaut/config.toml.bak.existing"
   assert_exists "$root/etc/greetd/config.toml"
   assert_exists "$root/etc/greetd/config.toml.bak.existing"
-  assert_exists "$root/etc/fomalhaut/themes/nocturne"
+  assert_missing "$root/usr/local/share/fomalhaut/themes/nocturne"
+  assert_missing "$root/usr/local/share/fomalhaut/themes/.nocturne-releases"
+  assert_missing "$root/etc/fomalhaut/themes/nocturne"
+  assert_missing "$root/etc/fomalhaut/themes/.nocturne-releases"
   assert_exists "$root/etc/fomalhaut/themes/nocturne.legacy.test"
+  assert_contains "$root/etc/fomalhaut/config.toml" 'default = "nocturne"'
   assert_contains "$root/etc/greetd/config.toml" '/usr/bin/fomalhaut'
   if grep -Fq -- '/usr/local/bin/fomalhaut' "$root/etc/greetd/config.toml"; then
     fail "preserved greetd configuration still references the source greeter"
   fi
   compgen -G "$root/etc/greetd/config.toml.bak.20*" >/dev/null \
     || fail "greetd migration did not create a backup"
+  compgen -G "$root/etc/fomalhaut/config.toml.bak.20*" >/dev/null \
+    || fail "theme selector migration did not create a backup"
   assert_contains "$output" 'Non-interactive input; preserving configuration'
 
   env NO_COLOR=1 "$UNINSTALLER" --system-root "$root" </dev/null \
@@ -127,6 +154,7 @@ test_purges_only_confirmed_configuration() {
   seed_root "$root"
   add_aur_greeter "$root"
   add_aur_locker "$root"
+  add_aur_theme "$root"
 
   printf 'y\n' | script -qefc \
     "env NO_COLOR=1 '$UNINSTALLER' --system-root '$root'" /dev/null >"$output"
@@ -157,14 +185,19 @@ test_plain_uninstall_preserves_configuration() {
 
   assert_missing "$root/usr/local/bin/fomalhaut"
   assert_missing "$root/usr/local/bin/fomalhaut-lock"
+  assert_missing "$root/usr/local/share/fomalhaut/themes/nocturne"
+  assert_missing "$root/usr/local/share/fomalhaut/themes/.nocturne-releases"
   assert_exists "$root/etc/fomalhaut/config.toml"
   assert_exists "$root/etc/greetd/config.toml"
-  assert_exists "$root/etc/fomalhaut/themes/nocturne"
+  assert_missing "$root/etc/fomalhaut/themes/nocturne"
+  assert_missing "$root/etc/fomalhaut/themes/.nocturne-releases"
+  assert_exists "$root/etc/fomalhaut/themes/nocturne.legacy.test"
   assert_exists "$root/etc/pam.d/fomalhaut-lock"
   assert_exists "$root/etc/pam.d/fomalhaut-lock.pacnew"
   assert_contains "$root/etc/greetd/config.toml" '/usr/local/bin/fomalhaut'
   assert_contains "$output" 'removing the source greeter without a replacement'
   assert_contains "$output" 'may still reference the removed /usr/local/bin/fomalhaut'
+  assert_contains "$output" 'may reference the removed source theme'
 }
 
 test_plain_uninstall_purges_confirmed_configuration() {
@@ -224,6 +257,23 @@ test_missing_aur_replacement_fails_before_removal() {
   assert_contains "$output" 'installed AUR locker replacement is missing'
 }
 
+test_invalid_aur_theme_replacement_fails_before_removal() {
+  local root="$temporary_directory/invalid-theme-replacement"
+  local output="$temporary_directory/invalid-theme-replacement.output"
+  install -d "$root"
+  seed_root "$root"
+  add_aur_theme "$root"
+  printf '%s\n' '[theme]' 'id = "different"' \
+    >"$root/usr/share/fomalhaut/themes/nocturne/theme.toml"
+
+  if env NO_COLOR=1 "$UNINSTALLER" --system-root "$root" </dev/null >"$output" 2>&1; then
+    fail "invalid AUR theme replacement unexpectedly succeeded"
+  fi
+  assert_exists "$root/usr/local/bin/fomalhaut"
+  assert_exists "$root/usr/local/share/fomalhaut/themes/nocturne"
+  assert_contains "$output" 'is not a valid Nocturne theme'
+}
+
 test_invalid_greetd_configuration_fails_before_removal() {
   local root="$temporary_directory/invalid-config"
   local output="$temporary_directory/invalid-config.output"
@@ -246,5 +296,6 @@ test_plain_uninstall_preserves_configuration
 test_plain_uninstall_purges_confirmed_configuration
 test_partial_aur_takeover_is_role_specific
 test_missing_aur_replacement_fails_before_removal
+test_invalid_aur_theme_replacement_fails_before_removal
 test_invalid_greetd_configuration_fails_before_removal
 printf '%s\n' 'source uninstall and AUR migration tests passed'

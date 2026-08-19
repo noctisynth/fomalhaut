@@ -52,6 +52,11 @@ for (const name of requiredFiles) {
   }
 }
 
+const manifest = await readFile(path.join(dist, "theme.toml"), "utf8");
+if (!/^id\s*=\s*"nocturne"\s*$/m.test(manifest)) {
+  failures.push("theme.toml does not declare the stable nocturne ID");
+}
+
 const html = await readFile(path.join(dist, "index.html"), "utf8");
 if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html)) {
   failures.push("index.html contains an inline script");

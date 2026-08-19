@@ -1,6 +1,11 @@
 //! Capability-confined external theme manifests and resources.
 
-use std::{error::Error, fmt, io::Read, path::PathBuf};
+use std::{
+    error::Error,
+    fmt,
+    io::{self, Read},
+    path::{Path, PathBuf},
+};
 
 use cap_std::{ambient_authority, fs::Dir};
 use serde::Deserialize;
@@ -12,6 +17,82 @@ const THEME_MANIFEST: &str = "theme.toml";
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024;
 const MAX_ASSET_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_RESOURCE_PATH_BYTES: usize = 4096;
+const MAX_THEME_ID_BYTES: usize = 64;
+const THEME_SEARCH_ROOTS: [&str; 2] = [
+    "/usr/local/share/fomalhaut/themes",
+    "/usr/share/fomalhaut/themes",
+];
+
+/// One deterministically selected theme directory and any lower-priority matches.
+pub struct DiscoveredTheme {
+    directory: PathBuf,
+    conflicts: Vec<PathBuf>,
+}
+
+impl DiscoveredTheme {
+    /// Returns the selected absolute theme directory.
+    #[must_use]
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    /// Returns lower-priority directories that declared the same stable ID.
+    #[must_use]
+    pub fn conflicts(&self) -> &[PathBuf] {
+        &self.conflicts
+    }
+
+    /// Consumes the discovery result and returns the selected directory.
+    #[must_use]
+    pub fn into_directory(self) -> PathBuf {
+        self.directory
+    }
+}
+
+/// Discovers a stable theme ID in fixed local and system package roots.
+pub fn discover_theme(id: &str) -> Result<DiscoveredTheme, ThemeError> {
+    let roots = THEME_SEARCH_ROOTS.map(PathBuf::from);
+    discover_theme_in(id, &roots)
+}
+
+fn discover_theme_in(id: &str, roots: &[PathBuf]) -> Result<DiscoveredTheme, ThemeError> {
+    validate_theme_id(id)?;
+    let mut matches = Vec::new();
+    for root_path in roots {
+        let root = match Dir::open_ambient_dir(root_path, ambient_authority()) {
+            Ok(root) => root,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(ThemeError::DiscoveryUnavailable),
+        };
+        let entries = root
+            .entries()
+            .map_err(|_| ThemeError::DiscoveryUnavailable)?;
+        let mut candidates = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|_| ThemeError::DiscoveryUnavailable)?;
+            candidates.push(entry.file_name());
+        }
+        candidates.sort();
+        for candidate in candidates {
+            let directory = match root.open_dir(&candidate) {
+                Ok(directory) => directory,
+                Err(_) => continue,
+            };
+            let candidate_id = match read_manifest_id(&directory) {
+                Ok(candidate_id) => candidate_id,
+                Err(_) => continue,
+            };
+            if candidate_id == id {
+                matches.push(root_path.join(candidate));
+            }
+        }
+    }
+    let directory = matches.first().cloned().ok_or(ThemeError::ThemeNotFound)?;
+    Ok(DiscoveredTheme {
+        directory,
+        conflicts: matches.into_iter().skip(1).collect(),
+    })
+}
 
 /// One resource body with a host-selected MIME type.
 pub struct ThemeAsset {
@@ -82,16 +163,8 @@ impl ExternalTheme {
         }
         let directory = Dir::open_ambient_dir(root, ambient_authority())
             .map_err(|_| ThemeError::InvalidRoot)?;
-        let manifest =
-            read_file(&directory, &ThemePath::manifest(), MAX_MANIFEST_BYTES).map_err(|error| {
-                match error {
-                    ThemeError::ResourceTooLarge => ThemeError::ManifestTooLarge,
-                    _ => ThemeError::InvalidManifest,
-                }
-            })?;
-        let manifest = String::from_utf8(manifest).map_err(|_| ThemeError::InvalidManifest)?;
-        let manifest: ManifestDocument =
-            toml::from_str(&manifest).map_err(|_| ThemeError::InvalidManifest)?;
+        let manifest = read_manifest(&directory)?;
+        validate_theme_id(&manifest.theme.id)?;
         validate_theme_name(&manifest.theme.name)?;
         if manifest.theme.protocol != PROTOCOL_VERSION {
             return Err(ThemeError::UnsupportedProtocol);
@@ -165,8 +238,19 @@ struct ManifestDocument {
 }
 
 #[derive(Deserialize)]
+struct ManifestIdDocument {
+    theme: ManifestId,
+}
+
+#[derive(Deserialize)]
+struct ManifestId {
+    id: String,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawTheme {
+    id: String,
     name: String,
     protocol: u16,
     entrypoint: String,
@@ -209,6 +293,9 @@ impl ThemePath {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ThemeError {
     InvalidRoot,
+    InvalidThemeId,
+    ThemeNotFound,
+    DiscoveryUnavailable,
     InvalidManifest,
     ManifestTooLarge,
     UnsupportedProtocol,
@@ -223,6 +310,9 @@ impl fmt::Display for ThemeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::InvalidRoot => "the external theme root is invalid",
+            Self::InvalidThemeId => "the external theme identifier is invalid",
+            Self::ThemeNotFound => "the configured theme identifier was not found",
+            Self::DiscoveryUnavailable => "the system theme roots could not be enumerated",
             Self::InvalidManifest => "the external theme manifest is invalid",
             Self::ManifestTooLarge => "the external theme manifest exceeds 16 KiB",
             Self::UnsupportedProtocol => "the external theme protocol is unsupported",
@@ -246,6 +336,43 @@ fn validate_theme_name(name: &str) -> Result<(), ThemeError> {
         return Err(ThemeError::InvalidManifest);
     }
     Ok(())
+}
+
+fn validate_theme_id(id: &str) -> Result<(), ThemeError> {
+    if id.is_empty()
+        || id.len() > MAX_THEME_ID_BYTES
+        || !id.split('-').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+    {
+        return Err(ThemeError::InvalidThemeId);
+    }
+    Ok(())
+}
+
+fn read_manifest(root: &Dir) -> Result<ManifestDocument, ThemeError> {
+    let manifest = read_manifest_text(root)?;
+    toml::from_str(&manifest).map_err(|_| ThemeError::InvalidManifest)
+}
+
+fn read_manifest_id(root: &Dir) -> Result<String, ThemeError> {
+    let manifest = read_manifest_text(root)?;
+    let manifest: ManifestIdDocument =
+        toml::from_str(&manifest).map_err(|_| ThemeError::InvalidManifest)?;
+    Ok(manifest.theme.id)
+}
+
+fn read_manifest_text(root: &Dir) -> Result<String, ThemeError> {
+    let manifest = read_file(root, &ThemePath::manifest(), MAX_MANIFEST_BYTES).map_err(
+        |error| match error {
+            ThemeError::ResourceTooLarge => ThemeError::ManifestTooLarge,
+            _ => ThemeError::InvalidManifest,
+        },
+    )?;
+    String::from_utf8(manifest).map_err(|_| ThemeError::InvalidManifest)
 }
 
 fn read_file(root: &Dir, path: &ThemePath, limit: u64) -> Result<Vec<u8>, ThemeError> {
@@ -311,7 +438,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use super::{MAX_ASSET_BYTES, MAX_MANIFEST_BYTES, ThemeError, ThemeSource};
+    use super::{MAX_ASSET_BYTES, MAX_MANIFEST_BYTES, ThemeError, ThemeSource, discover_theme_in};
 
     static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -325,7 +452,7 @@ mod tests {
             .expect("external theme fixture directory can be created");
         fs::write(
             root.join("theme.toml"),
-            "[theme]\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
+            "[theme]\nid = \"fixture\"\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
         )
         .expect("external theme manifest can be written");
         fs::write(root.join("index.html"), "<!doctype html>")
@@ -337,6 +464,135 @@ mod tests {
 
     fn cleanup(path: &Path) {
         fs::remove_dir_all(path).expect("external theme fixture can be removed");
+    }
+
+    fn discovery_root(name: &str) -> PathBuf {
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "fomalhaut-theme-discovery-{}-{sequence}-{name}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("theme discovery root can be created");
+        root
+    }
+
+    fn discovery_theme(root: &Path, directory: &str, id: &str, with_entrypoint: bool) -> PathBuf {
+        let theme = root.join(directory);
+        fs::create_dir_all(&theme).expect("discovered theme directory can be created");
+        fs::write(
+            theme.join("theme.toml"),
+            format!(
+                "[theme]\nid = {id:?}\nname = \"Discovery fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n"
+            ),
+        )
+        .expect("discovered theme manifest can be written");
+        if with_entrypoint {
+            fs::write(theme.join("index.html"), "<!doctype html>")
+                .expect("discovered theme entrypoint can be written");
+        }
+        theme
+    }
+
+    #[test]
+    fn discovery_prefers_local_root_then_lexical_directory_order() {
+        let local = discovery_root("local-priority");
+        let system = discovery_root("system-priority");
+        let local_second = discovery_theme(&local, "z-second", "nocturne", true);
+        let system_match = discovery_theme(&system, "a-system", "nocturne", true);
+        let local_first = discovery_theme(&local, "a-first", "nocturne", true);
+
+        let discovered = discover_theme_in("nocturne", &[local.clone(), system.clone()])
+            .expect("a matching theme is discovered");
+
+        assert_eq!(discovered.directory(), local_first);
+        assert_eq!(discovered.conflicts(), &[local_second, system_match]);
+        cleanup(&local);
+        cleanup(&system);
+    }
+
+    #[test]
+    fn discovery_ignores_missing_roots_and_unrelated_invalid_manifests() {
+        let missing = discovery_root("missing");
+        cleanup(&missing);
+        let system = discovery_root("valid-system");
+        fs::create_dir_all(system.join("broken"))
+            .expect("invalid discovery candidate can be created");
+        fs::write(system.join("broken/theme.toml"), "not toml")
+            .expect("invalid discovery manifest can be written");
+        let expected = discovery_theme(&system, "expected", "nocturne", true);
+
+        let discovered = discover_theme_in("nocturne", &[missing, system.clone()])
+            .expect("the existing system root supplies the theme");
+
+        assert_eq!(discovered.directory(), expected);
+        assert!(discovered.conflicts().is_empty());
+        cleanup(&system);
+    }
+
+    #[test]
+    fn discovery_accepts_an_internal_release_symlink() {
+        let root = discovery_root("release-symlink");
+        let releases = root.join(".nocturne-releases");
+        discovery_theme(&releases, "release-1", "nocturne", true);
+        symlink(".nocturne-releases/release-1", root.join("nocturne"))
+            .expect("source installation theme symlink can be created");
+
+        let discovered = discover_theme_in("nocturne", std::slice::from_ref(&root))
+            .expect("the active source release is discovered through its relative symlink");
+
+        assert_eq!(discovered.directory(), root.join("nocturne"));
+        assert!(discovered.conflicts().is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discovery_rejects_invalid_or_missing_ids() {
+        let root = discovery_root("invalid-id");
+        assert_eq!(
+            discover_theme_in("Nocturne", std::slice::from_ref(&root)).err(),
+            Some(ThemeError::InvalidThemeId)
+        );
+        assert_eq!(
+            discover_theme_in("missing", std::slice::from_ref(&root)).err(),
+            Some(ThemeError::ThemeNotFound)
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discovery_rejects_an_existing_non_directory_search_root() {
+        let root = discovery_root("non-directory-root");
+        cleanup(&root);
+        fs::write(&root, "not a directory").expect("non-directory search root can be written");
+
+        assert_eq!(
+            discover_theme_in("nocturne", std::slice::from_ref(&root)).err(),
+            Some(ThemeError::DiscoveryUnavailable)
+        );
+        fs::remove_file(root).expect("non-directory search root can be removed");
+    }
+
+    #[test]
+    fn selected_broken_theme_does_not_fall_back_to_lower_priority_match() {
+        let local = discovery_root("broken-local");
+        let system = discovery_root("valid-system-fallback");
+        let broken = discovery_theme(&local, "broken", "nocturne", false);
+        fs::write(
+            broken.join("theme.toml"),
+            "[theme]\nid = \"nocturne\"\nunknown = true\n",
+        )
+        .expect("high-priority malformed manifest can be written");
+        discovery_theme(&system, "valid", "nocturne", true);
+
+        let discovered = discover_theme_in("nocturne", &[local.clone(), system.clone()])
+            .expect("the higher-priority manifest selects the local theme");
+        assert_eq!(discovered.directory(), broken);
+        assert!(matches!(
+            ThemeSource::external(discovered.into_directory()),
+            Err(ThemeError::InvalidManifest)
+        ));
+        cleanup(&local);
+        cleanup(&system);
     }
 
     #[test]
@@ -438,7 +694,27 @@ mod tests {
         let root = fixture("manifest");
         fs::write(
             root.join("theme.toml"),
-            "[theme]\nname = \"Fixture\"\nprotocol = 2\nentrypoint = \"index.html\"\n",
+            "[theme]\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
+        )
+        .expect("manifest without an ID can be written");
+        assert!(matches!(
+            ThemeSource::external(root.clone()),
+            Err(ThemeError::InvalidManifest)
+        ));
+
+        fs::write(
+            root.join("theme.toml"),
+            "[theme]\nid = \"Invalid ID\"\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
+        )
+        .expect("manifest with an invalid ID can be written");
+        assert!(matches!(
+            ThemeSource::external(root.clone()),
+            Err(ThemeError::InvalidThemeId)
+        ));
+
+        fs::write(
+            root.join("theme.toml"),
+            "[theme]\nid = \"fixture\"\nname = \"Fixture\"\nprotocol = 2\nentrypoint = \"index.html\"\n",
         )
         .expect("unsupported manifest can be written");
         assert!(matches!(
@@ -448,7 +724,7 @@ mod tests {
 
         fs::write(
             root.join("theme.toml"),
-            "[theme]\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"../index.html\"\n",
+            "[theme]\nid = \"fixture\"\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"../index.html\"\n",
         )
         .expect("unsafe manifest can be written");
         assert!(matches!(
@@ -458,7 +734,7 @@ mod tests {
 
         fs::write(
             root.join("theme.toml"),
-            "[theme]\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
+            "[theme]\nid = \"fixture\"\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
         )
         .expect("valid manifest can be restored");
         fs::write(root.join("index.html"), [0xff])
@@ -489,7 +765,7 @@ mod tests {
 
         fs::write(
             root.join("theme.toml"),
-            "[theme]\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
+            "[theme]\nid = \"fixture\"\nname = \"Fixture\"\nprotocol = 1\nentrypoint = \"index.html\"\n",
         )
         .expect("valid manifest can be restored");
         let theme = ThemeSource::external(root.clone()).expect("external theme is valid");

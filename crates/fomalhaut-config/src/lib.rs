@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 const CONFIG_PATH: &str = "/etc/fomalhaut/config.toml";
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
+const MAX_THEME_ID_BYTES: usize = 64;
 const MIN_DISPLAY_SCALE: f64 = 0.5;
 const MAX_DISPLAY_SCALE: f64 = 4.0;
 const DEFAULT_EXECUTABLE_DIRS: [&str; 2] = ["/usr/local/bin", "/usr/bin"];
@@ -42,7 +43,7 @@ impl AppConfig {
     #[must_use]
     pub fn for_greeter(&self) -> GreeterConfig {
         GreeterConfig {
-            theme_directory: self.themes.for_greeter(),
+            theme: self.themes.for_greeter(),
             discovery: self.discovery.clone(),
             users: self.users,
             power: self.power.clone(),
@@ -55,7 +56,7 @@ impl AppConfig {
     #[must_use]
     pub fn for_locker(&self) -> LockerConfig {
         LockerConfig {
-            theme_directory: self.themes.for_locker(),
+            theme: self.themes.for_locker(),
             power: self.power.clone(),
             display: self.display.locker,
             locale: self.locale,
@@ -65,7 +66,7 @@ impl AppConfig {
 
 /// Validated configuration exposed to the greeter host.
 pub struct GreeterConfig {
-    theme_directory: Option<PathBuf>,
+    theme: Option<ThemeSelector>,
     discovery: DiscoveryConfig,
     users: UserDiscoveryConfig,
     power: PowerConfig,
@@ -79,7 +80,7 @@ impl GreeterConfig {
     pub fn into_parts(
         self,
     ) -> (
-        Option<PathBuf>,
+        Option<ThemeSelector>,
         DiscoveryConfig,
         UserDiscoveryConfig,
         PowerConfig,
@@ -87,7 +88,7 @@ impl GreeterConfig {
         UiLocale,
     ) {
         (
-            self.theme_directory,
+            self.theme,
             self.discovery,
             self.users,
             self.power,
@@ -99,17 +100,17 @@ impl GreeterConfig {
 
 /// Validated configuration exposed to the locker host.
 pub struct LockerConfig {
-    theme_directory: Option<PathBuf>,
+    theme: Option<ThemeSelector>,
     power: PowerConfig,
     display: DisplayConfig,
     locale: UiLocale,
 }
 
 impl LockerConfig {
-    /// Returns the selected locker theme directory, or `None` for the embedded theme.
+    /// Returns the selected locker theme, or `None` for the embedded theme.
     #[must_use]
-    pub fn theme_directory(&self) -> Option<&Path> {
-        self.theme_directory.as_deref()
+    pub const fn theme(&self) -> Option<&ThemeSelector> {
+        self.theme.as_ref()
     }
 
     /// Returns the configured power allowlist.
@@ -129,6 +130,15 @@ impl LockerConfig {
     pub const fn locale(&self) -> UiLocale {
         self.locale
     }
+}
+
+/// A validated external-theme identifier or explicit absolute directory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ThemeSelector {
+    /// Discover a theme by its stable manifest identifier.
+    Id(String),
+    /// Open one administrator-selected absolute directory directly.
+    Directory(PathBuf),
 }
 
 /// UI language resolved from strict configuration or the process locale.
@@ -164,17 +174,17 @@ impl UiLocale {
 
 #[derive(Default)]
 struct ThemeConfig {
-    default: Option<PathBuf>,
-    greeter: Option<PathBuf>,
-    locker: Option<PathBuf>,
+    default: Option<ThemeSelector>,
+    greeter: Option<ThemeSelector>,
+    locker: Option<ThemeSelector>,
 }
 
 impl ThemeConfig {
-    fn for_greeter(&self) -> Option<PathBuf> {
+    fn for_greeter(&self) -> Option<ThemeSelector> {
         self.greeter.clone().or_else(|| self.default.clone())
     }
 
-    fn for_locker(&self) -> Option<PathBuf> {
+    fn for_locker(&self) -> Option<ThemeSelector> {
         self.locker.clone().or_else(|| self.default.clone())
     }
 }
@@ -292,9 +302,9 @@ struct RawLocale {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawThemes {
-    default: Option<PathBuf>,
-    greeter: Option<PathBuf>,
-    locker: Option<PathBuf>,
+    default: Option<String>,
+    greeter: Option<String>,
+    locker: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -348,6 +358,8 @@ pub enum ConfigError {
     Parse,
     /// A configured path was relative or contained NUL.
     InvalidPath,
+    /// A configured theme selector was neither a valid ID nor an absolute path.
+    InvalidThemeSelector,
     /// A power action was duplicated or exceeded the fixed action set.
     InvalidPowerPolicy,
     /// Display scale was not finite or outside the supported range.
@@ -361,6 +373,9 @@ impl fmt::Display for ConfigError {
             Self::TooLarge => "the system configuration exceeds 64 KiB",
             Self::Parse => "the system configuration is invalid TOML",
             Self::InvalidPath => "the system configuration contains an invalid path",
+            Self::InvalidThemeSelector => {
+                "the system configuration contains an invalid theme selector"
+            }
             Self::InvalidPowerPolicy => "the system configuration contains an invalid power policy",
             Self::InvalidDisplayScale => {
                 "the system configuration contains an invalid display scale"
@@ -411,15 +426,12 @@ fn validate_with_detected_locale(
 ) -> Result<AppConfig, ConfigError> {
     let themes = match raw.themes {
         Some(themes) => ThemeConfig {
-            default: themes.default,
-            greeter: themes.greeter,
-            locker: themes.locker,
+            default: parse_optional_theme_selector(themes.default)?,
+            greeter: parse_optional_theme_selector(themes.greeter)?,
+            locker: parse_optional_theme_selector(themes.locker)?,
         },
         None => ThemeConfig::default(),
     };
-    validate_optional_path(themes.default.as_deref())?;
-    validate_optional_path(themes.greeter.as_deref())?;
-    validate_optional_path(themes.locker.as_deref())?;
 
     let sessions = raw.sessions.unwrap_or_default();
     let wayland = sessions
@@ -549,8 +561,35 @@ fn paths<const N: usize>(values: &[&str; N]) -> Vec<PathBuf> {
     values.iter().map(PathBuf::from).collect()
 }
 
-fn validate_optional_path(path: Option<&Path>) -> Result<(), ConfigError> {
-    path.map_or(Ok(()), validate_path)
+fn parse_optional_theme_selector(
+    value: Option<String>,
+) -> Result<Option<ThemeSelector>, ConfigError> {
+    value.map(parse_theme_selector).transpose()
+}
+
+fn parse_theme_selector(value: String) -> Result<ThemeSelector, ConfigError> {
+    let path = Path::new(&value);
+    if path.is_absolute() {
+        if path.as_os_str().as_encoded_bytes().contains(&0) {
+            return Err(ConfigError::InvalidPath);
+        }
+        return Ok(ThemeSelector::Directory(path.to_path_buf()));
+    }
+    if !is_valid_theme_id(&value) {
+        return Err(ConfigError::InvalidThemeSelector);
+    }
+    Ok(ThemeSelector::Id(value))
+}
+
+fn is_valid_theme_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_THEME_ID_BYTES
+        && value.split('-').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
 }
 
 fn validate_paths(paths: &[PathBuf]) -> Result<(), ConfigError> {
@@ -569,7 +608,7 @@ mod tests {
     use std::{fs, path::Path};
 
     use super::{
-        ConfigError, PowerAction, RawConfig, UiLocale, UserProvider, load_from_path,
+        ConfigError, PowerAction, RawConfig, ThemeSelector, UiLocale, UserProvider, load_from_path,
         ui_locale_from_candidates, ui_locale_from_posix, validate_with_detected_locale,
     };
 
@@ -592,7 +631,7 @@ mod tests {
         assert!(power.actions().is_empty());
         assert_eq!(display.scale(), 1.0);
         assert!(matches!(locale, UiLocale::En | UiLocale::ZhCn));
-        assert_eq!(locker.theme_directory(), None);
+        assert_eq!(locker.theme(), None);
         assert!(locker.power().actions().is_empty());
         assert_eq!(locker.display().scale(), 1.0);
     }
@@ -602,8 +641,8 @@ mod tests {
         let config = parse(
             r#"
                 [themes]
-                default = "/srv/fomalhaut/default"
-                greeter = "/srv/fomalhaut/greeter"
+                default = "nocturne"
+                greeter = "custom-greeter"
                 locker = "/srv/fomalhaut/locker"
             "#,
         )
@@ -611,29 +650,53 @@ mod tests {
         let (greeter_theme, _, _, _, _, _) = config.for_greeter().into_parts();
 
         assert_eq!(
-            greeter_theme.as_deref(),
-            Some(Path::new("/srv/fomalhaut/greeter"))
+            greeter_theme,
+            Some(ThemeSelector::Id("custom-greeter".into()))
         );
         assert_eq!(
-            config.for_locker().theme_directory(),
-            Some(Path::new("/srv/fomalhaut/locker"))
+            config.for_locker().theme().cloned(),
+            Some(ThemeSelector::Directory("/srv/fomalhaut/locker".into()))
         );
 
         let default_only = parse(
             r#"
                 [themes]
-                default = "/srv/fomalhaut/default"
+                default = "nocturne"
             "#,
         )
         .expect("default theme configuration is valid");
         let (greeter_theme, _, _, _, _, _) = default_only.for_greeter().into_parts();
+        assert_eq!(greeter_theme, Some(ThemeSelector::Id("nocturne".into())));
         assert_eq!(
-            greeter_theme.as_deref(),
-            Some(Path::new("/srv/fomalhaut/default"))
+            default_only.for_locker().theme().cloned(),
+            Some(ThemeSelector::Id("nocturne".into()))
         );
+    }
+
+    #[test]
+    fn theme_selectors_reject_relative_paths_and_invalid_ids() {
+        for selector in [
+            "",
+            "Nocturne",
+            "nocturne_2",
+            "nocturne--blue",
+            "../nocturne",
+            "themes/nocturne",
+            "-nocturne",
+            "nocturne-",
+        ] {
+            let source = format!("[themes]\ndefault = {selector:?}\n");
+            assert_eq!(
+                parse(&source).err(),
+                Some(ConfigError::InvalidThemeSelector),
+                "selector {selector:?} should be rejected"
+            );
+        }
+        let oversized = "a".repeat(65);
+        let source = format!("[themes]\ndefault = {oversized:?}\n");
         assert_eq!(
-            default_only.for_locker().theme_directory(),
-            Some(Path::new("/srv/fomalhaut/default"))
+            parse(&source).err(),
+            Some(ConfigError::InvalidThemeSelector)
         );
     }
 
@@ -666,7 +729,10 @@ mod tests {
         )
         .expect("configuration fixture is semantically valid");
         let (theme, discovery, _, _, _, _) = config.for_greeter().into_parts();
-        assert_eq!(theme.as_deref(), Some(Path::new("/srv/fomalhaut/theme")));
+        assert_eq!(
+            theme,
+            Some(ThemeSelector::Directory("/srv/fomalhaut/theme".into()))
+        );
         assert_eq!(discovery.directories().len(), 2);
         assert_eq!(discovery.directories()[0].path(), Path::new("/opt/first"));
         assert_eq!(discovery.directories()[1].path(), Path::new("/opt/second"));
@@ -838,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fields_and_relative_paths_are_rejected() {
+    fn unknown_fields_and_relative_theme_paths_are_rejected() {
         assert!(toml::from_str::<RawConfig>("network = true").is_err());
         assert_eq!(
             parse(
@@ -848,7 +914,7 @@ mod tests {
                 "#,
             )
             .err(),
-            Some(ConfigError::InvalidPath)
+            Some(ConfigError::InvalidThemeSelector)
         );
     }
 

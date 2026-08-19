@@ -44,7 +44,8 @@ The theme package uses its isolated npm build manifest and lockfile with
 `npm ci`; this avoids relying on Arch's stable Bun for a project developed with
 an incompatible Bun canary. npm and Node.js are build-only dependencies. The
 installed package contains only static files below
-`/usr/share/fomalhaut/themes/nocturne`.
+`/usr/share/fomalhaut/themes/nocturne`; select it in Fomalhaut configuration
+with the stable theme ID `nocturne`.
 
 Use the workflow's manual package, immutable source ref, and `pkgrel` inputs
 for packaging-only revisions. A revision of an existing `pkgver` must increase

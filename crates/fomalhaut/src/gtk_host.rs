@@ -2,7 +2,7 @@
 
 use std::{env, error::Error, fmt, path::PathBuf, rc::Rc};
 
-use fomalhaut_config::{AppConfig, UiLocale as ConfigUiLocale};
+use fomalhaut_config::{AppConfig, ThemeSelector, UiLocale as ConfigUiLocale};
 use fomalhaut_gtk::{ApplicationHandle, ViewCallbacks, build_web_view, run_application};
 use fomalhaut_session::{DiscoveryConfig, SessionKind as CatalogSessionKind, discover};
 use fomalhaut_web::{
@@ -10,7 +10,7 @@ use fomalhaut_web::{
     protocol::{
         MAX_SESSIONS, RuntimeMode, SessionKind as WebSessionKind, SessionSummary, UiLocale,
     },
-    theme::ThemeSource,
+    theme::{ThemeSource, discover_theme},
 };
 use gtk4 as gtk;
 use gtk4::{glib, prelude::*};
@@ -33,8 +33,9 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
 
 fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindow, HostError> {
     let config = AppConfig::load().map_err(|_| HostError::Configuration)?;
-    let (theme_directory, discovery, user_discovery, power, display, locale) =
+    let (theme, discovery, user_discovery, power, display, locale) =
         config.for_greeter().into_parts();
+    let theme_directory = resolve_theme(theme)?;
     let theme = match theme_directory {
         Some(directory) => {
             ThemeSource::external(directory).map_err(|_| HostError::ExternalTheme)?
@@ -94,6 +95,29 @@ fn build_window(application: &ApplicationHandle) -> Result<gtk::ApplicationWindo
 
     view.load_theme();
     Ok(window)
+}
+
+fn resolve_theme(theme: Option<ThemeSelector>) -> Result<Option<PathBuf>, HostError> {
+    match theme {
+        Some(ThemeSelector::Directory(directory)) => Ok(Some(directory)),
+        Some(ThemeSelector::Id(id)) => {
+            let discovered = discover_theme(&id).map_err(|_| HostError::ExternalTheme)?;
+            if !discovered.conflicts().is_empty() {
+                eprintln!(
+                    "Fomalhaut theme ID {id} matched multiple directories; selected {}",
+                    discovered.directory().display()
+                );
+                for conflict in discovered.conflicts() {
+                    eprintln!(
+                        "Fomalhaut ignored lower-priority theme {}",
+                        conflict.display()
+                    );
+                }
+            }
+            Ok(Some(discovered.into_directory()))
+        }
+        None => Ok(None),
+    }
 }
 
 const fn protocol_locale(locale: ConfigUiLocale) -> UiLocale {

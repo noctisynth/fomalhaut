@@ -63,12 +63,13 @@ Options:
   --system-root PATH  Operate on an isolated staging root without sudo or systemctl.
   -h, --help          Show this help.
 
-Source binaries, the old locker user unit, and integration examples are
-removed. Configuration and the Nocturne theme are preserved by default.
-Deleting them always requires an explicit interactive confirmation;
-non-interactive runs keep them. Installed AUR packages are detected per role:
-the greetd command is migrated to an available AUR greeter, and an AUR-managed
-PAM policy is never removed.
+Source binaries, the old locker user unit, integration examples, and verified
+source-managed Nocturne releases are removed. Configuration and unrecognized
+legacy theme directories are preserved by default. Deleting them always
+requires an explicit interactive confirmation; non-interactive runs keep them.
+Installed AUR packages are detected per role: theme selectors and the greetd
+command are migrated to available AUR replacements, and an AUR-managed PAM
+policy is never removed.
 EOF
 }
 
@@ -147,17 +148,21 @@ rooted() {
 aur_greeter="$(rooted /usr/bin/fomalhaut)"
 aur_locker="$(rooted /usr/bin/fomalhaut-lock)"
 aur_locker_unit="$(rooted /usr/lib/systemd/user/fomalhaut-lock.service)"
+aur_theme="$(rooted /usr/share/fomalhaut/themes/nocturne)"
 aur_greeter_installed=false
 aur_locker_installed=false
+aur_theme_installed=false
 if [[ "$system_root" == "/" ]]; then
   pacman -Q greetd-fomalhaut >/dev/null 2>&1 && aur_greeter_installed=true
   pacman -Q fomalhaut-lock >/dev/null 2>&1 && aur_locker_installed=true
+  pacman -Q fomalhaut-theme-nocturne >/dev/null 2>&1 && aur_theme_installed=true
 else
   [[ -e "$aur_greeter" || -L "$aur_greeter" ]] && aur_greeter_installed=true
   if [[ -e "$aur_locker" || -L "$aur_locker" \
     || -e "$aur_locker_unit" || -L "$aur_locker_unit" ]]; then
     aur_locker_installed=true
   fi
+  [[ -f "$aur_theme/theme.toml" ]] && aur_theme_installed=true
 fi
 
 if $aur_greeter_installed; then
@@ -168,7 +173,36 @@ if $aur_locker_installed; then
   [[ -f "$aur_locker_unit" && ! -L "$aur_locker_unit" ]] \
     || die "installed AUR locker unit is missing or unsafe: /usr/lib/systemd/user/fomalhaut-lock.service"
 fi
-if [[ "$prefix" == "/usr" ]] && { $aur_greeter_installed || $aur_locker_installed; }; then
+if $aur_theme_installed; then
+  [[ -f "$aur_theme/theme.toml" && ! -L "$aur_theme/theme.toml" ]] \
+    || die "installed AUR theme replacement is missing or unsafe: /usr/share/fomalhaut/themes/nocturne/theme.toml"
+  python3 - "$aur_theme/theme.toml" <<'PY' \
+    || die "installed AUR theme replacement is not a valid Nocturne theme"
+from pathlib import Path
+import sys
+import tomllib
+
+path = Path(sys.argv[1])
+try:
+    with path.open("rb") as source:
+        manifest = tomllib.load(source)
+except (OSError, tomllib.TOMLDecodeError) as error:
+    raise SystemExit(f"invalid AUR theme manifest: {error}")
+theme = manifest.get("theme")
+if (
+    not isinstance(theme, dict)
+    or theme.get("id") != "nocturne"
+    or theme.get("protocol") != 1
+    or theme.get("entrypoint") != "index.html"
+):
+    raise SystemExit("AUR theme manifest does not describe Nocturne protocol 1")
+entrypoint = path.parent / "index.html"
+if entrypoint.is_symlink() or not entrypoint.is_file():
+    raise SystemExit("AUR theme entrypoint is missing or unsafe")
+PY
+fi
+if [[ "$prefix" == "/usr" ]] \
+  && { $aur_greeter_installed || $aur_locker_installed || $aur_theme_installed; }; then
   die "--prefix /usr overlaps an installed AUR package"
 fi
 
@@ -183,13 +217,18 @@ if $aur_locker_installed; then
 else
   log_note "fomalhaut-lock is not installed; removing the source locker without a replacement."
 fi
+if $aur_theme_installed; then
+  log_success "Detected fomalhaut-theme-nocturne AUR takeover"
+else
+  log_note "fomalhaut-theme-nocturne is not installed; removing the source theme without a replacement."
+fi
 
 purge_config=false
 printf '%s\n' "The following configuration is preserved by default:"
 printf '  %s\n' \
   "/etc/fomalhaut/config.toml and its installer backups" \
   "/etc/greetd/config.toml and its installer backups" \
-  "/etc/fomalhaut/themes/nocturne and its release/legacy trees"
+  "/etc/fomalhaut/themes/nocturne legacy directories not owned by a verified source release"
 if $aur_locker_installed; then
   printf '%s\n' "The AUR-managed /etc/pam.d/fomalhaut-lock is always preserved."
 else
@@ -212,9 +251,13 @@ fi
 fomalhaut_config="$(rooted /etc/fomalhaut/config.toml)"
 greetd_config="$(rooted /etc/greetd/config.toml)"
 pam_config="$(rooted /etc/pam.d/fomalhaut-lock)"
-theme_path="$(rooted /etc/fomalhaut/themes/nocturne)"
-theme_parent="${theme_path%/*}"
-theme_release_base="$theme_parent/.nocturne-releases"
+source_theme_runtime="$prefix/share/fomalhaut/themes/nocturne"
+source_theme_path="$(rooted "$source_theme_runtime")"
+source_theme_parent="${source_theme_path%/*}"
+source_theme_release_base="$source_theme_parent/.nocturne-releases"
+legacy_theme_path="$(rooted /etc/fomalhaut/themes/nocturne)"
+legacy_theme_parent="${legacy_theme_path%/*}"
+legacy_theme_release_base="$legacy_theme_parent/.nocturne-releases"
 
 validate_removable_leaf() {
   local path="$1"
@@ -243,6 +286,110 @@ fi
 
 if [[ "$system_root" == "/" ]]; then
   sudo -v
+fi
+
+if ! $purge_config && $aur_theme_installed; then
+  run_privileged python3 - "$fomalhaut_config" "$source_theme_runtime" \
+    "/etc/fomalhaut/themes/nocturne" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+import tempfile
+import time
+import tomllib
+
+path = Path(sys.argv[1])
+old_selectors = set(sys.argv[2:])
+if not path.exists():
+    print(f"= Preserved absent Fomalhaut configuration: {path}")
+    raise SystemExit(0)
+if path.is_symlink() or not path.is_file():
+    raise SystemExit(f"refusing to migrate non-regular Fomalhaut configuration: {path}")
+
+try:
+    old_text = path.read_text(encoding="utf-8")
+    parsed = tomllib.loads(old_text)
+except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+    raise SystemExit(f"refusing to migrate invalid Fomalhaut configuration at {path}: {error}")
+
+themes = parsed.get("themes")
+if themes is None:
+    print(f"= Preserved Fomalhaut configuration without [themes]: {path}")
+    raise SystemExit(0)
+if not isinstance(themes, dict):
+    raise SystemExit("refusing to migrate invalid [themes] configuration")
+selected_keys = [
+    key
+    for key in ("default", "greeter", "locker")
+    if themes.get(key) in old_selectors
+]
+if not selected_keys:
+    print("= Fomalhaut theme selectors already avoid source installation paths")
+    raise SystemExit(0)
+
+lines = old_text.splitlines()
+table_pattern = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
+tables = [
+    (match.group(1).strip(), index)
+    for index, line in enumerate(lines)
+    if (match := table_pattern.match(line))
+]
+starts = [index for name, index in tables if name == "themes"]
+if len(starts) != 1:
+    raise SystemExit("refusing to migrate duplicate or missing [themes]")
+start = starts[0]
+end = min((index for _, index in tables if index > start), default=len(lines))
+for key in selected_keys:
+    key_pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    matches = [index for index in range(start + 1, end) if key_pattern.match(lines[index])]
+    if len(matches) != 1:
+        raise SystemExit(f"refusing to migrate duplicate or missing [themes].{key}")
+    line_index = matches[0]
+    indentation = lines[line_index][: len(lines[line_index]) - len(lines[line_index].lstrip())]
+    lines[line_index] = f"{indentation}{key} = {json.dumps('nocturne')}"
+
+new_text = "\n".join(lines).rstrip() + "\n"
+try:
+    verified = tomllib.loads(new_text)
+except tomllib.TOMLDecodeError as error:
+    raise SystemExit(f"generated Fomalhaut configuration is invalid: {error}")
+for key in selected_keys:
+    if verified.get("themes", {}).get(key) != "nocturne":
+        raise SystemExit(f"generated configuration did not migrate [themes].{key}")
+
+old_stat = path.stat()
+stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+backup = path.with_name(f"{path.name}.bak.{stamp}.{os.getpid()}")
+shutil.copy2(path, backup)
+os.chown(backup, old_stat.st_uid, old_stat.st_gid)
+
+descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+temporary = Path(temporary_name)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(new_text)
+        output.flush()
+        os.fsync(output.fileno())
+    os.chmod(temporary, old_stat.st_mode & 0o7777)
+    os.chown(temporary, old_stat.st_uid, old_stat.st_gid)
+    os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+finally:
+    if temporary.exists():
+        temporary.unlink()
+
+print(f"✓ Migrated Fomalhaut theme selectors to nocturne; backup: {backup}")
+PY
+elif ! $purge_config && ! $aur_theme_installed \
+  && [[ -e "$fomalhaut_config" || -L "$fomalhaut_config" ]]; then
+  log_warning "Preserved Fomalhaut configuration may reference the removed source theme"
 fi
 
 if ! $purge_config && $aur_greeter_installed; then
@@ -397,32 +544,56 @@ remove_config_tree() {
   log_success "Removed $path"
 }
 
+remove_verified_source_theme() {
+  local path="$1"
+  local release_base="$2"
+  local target=""
+  if [[ -L "$path" ]]; then
+    target="$(run_privileged readlink -- "$path")"
+    if [[ ! "$target" =~ ^\.nocturne-releases/[A-Za-z0-9._-]+$ ]]; then
+      log_warning "Preserved unrecognized theme symlink: $path"
+      return
+    fi
+    remove_config_tree "$path"
+    remove_config_tree "$release_base"
+  elif [[ -e "$path" || -e "$release_base" ]]; then
+    log_warning "Preserved unrecognized source theme layout at $path"
+  fi
+}
+
+remove_verified_source_theme "$source_theme_path" "$source_theme_release_base"
+remove_verified_source_theme "$legacy_theme_path" "$legacy_theme_release_base"
+
 if $purge_config; then
   remove_leaf "$fomalhaut_config"
   remove_backups "$fomalhaut_config"
   remove_leaf "$greetd_config"
   remove_backups "$greetd_config"
-  remove_config_tree "$theme_path"
-  remove_config_tree "$theme_release_base"
+  remove_config_tree "$source_theme_path"
+  remove_config_tree "$source_theme_release_base"
+  remove_config_tree "$legacy_theme_path"
+  remove_config_tree "$legacy_theme_release_base"
   if ! $aur_locker_installed; then
     remove_leaf "$pam_config"
     remove_leaf "$pam_config.pacnew"
   fi
 
   shopt -s nullglob
-  for legacy_theme in "$theme_path.legacy."*; do
+  for legacy_theme in "$source_theme_path.legacy."* "$legacy_theme_path.legacy."*; do
     remove_config_tree "$legacy_theme"
   done
   shopt -u nullglob
 
-  for possibly_empty in "$theme_parent" "${theme_parent%/*}"; do
+  for possibly_empty in \
+    "$source_theme_parent" "${source_theme_parent%/*}" \
+    "$legacy_theme_parent" "${legacy_theme_parent%/*}"; do
     if [[ -d "$possibly_empty" && ! -L "$possibly_empty" ]]; then
       run_privileged rmdir --ignore-fail-on-non-empty -- "$possibly_empty"
     fi
   done
   log_success "Removed confirmed source-install configuration"
 else
-  log_success "Preserved Fomalhaut configuration and Nocturne theme"
+  log_success "Preserved Fomalhaut configuration and unrecognized legacy theme directories"
 fi
 
 if [[ "$system_root" == "/" ]]; then
@@ -437,7 +608,7 @@ if [[ "$system_root" == "/" ]]; then
   fi
 fi
 
-if $aur_greeter_installed || $aur_locker_installed; then
+if $aur_greeter_installed || $aur_locker_installed || $aur_theme_installed; then
   log_success "Source installation uninstall and detected AUR migration complete"
 else
   log_success "Source installation uninstall complete"

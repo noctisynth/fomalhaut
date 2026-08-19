@@ -10,14 +10,14 @@ use std::{
     time::Duration,
 };
 
-use fomalhaut_config::{AppConfig, UiLocale as ConfigUiLocale};
+use fomalhaut_config::{AppConfig, ThemeSelector, UiLocale as ConfigUiLocale};
 use fomalhaut_gtk::{
     ApplicationHandle, HostedView, ViewCallbacks, build_web_view, run_application,
 };
 use fomalhaut_pam::CurrentUserIdentity;
 use fomalhaut_web::{
     protocol::{RuntimeMode, UiLocale},
-    theme::ThemeSource,
+    theme::{ThemeSource, discover_theme},
 };
 use gtk4 as gtk;
 use gtk4::{gdk, gio, glib, prelude::*};
@@ -45,7 +45,7 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
     let application_hold = application.application().hold();
     let config = AppConfig::load().map_err(|_| HostError::Configuration)?;
     let locker = config.for_locker();
-    let theme_directory = locker.theme_directory().map(PathBuf::from);
+    let theme_directory = resolve_theme(locker.theme().cloned())?;
     validate_theme(theme_directory.as_ref())?;
     let identity = CurrentUserIdentity::discover().map_err(|_| HostError::Identity)?;
     let (worker, native) = WorkerHandle::spawn(
@@ -74,6 +74,29 @@ fn activate(application: ApplicationHandle) -> Result<(), HostError> {
     connect_sleep_lifecycle(&state);
     poll_native_events(&state, native);
     Ok(())
+}
+
+fn resolve_theme(theme: Option<ThemeSelector>) -> Result<Option<PathBuf>, HostError> {
+    match theme {
+        Some(ThemeSelector::Directory(directory)) => Ok(Some(directory)),
+        Some(ThemeSelector::Id(id)) => {
+            let discovered = discover_theme(&id).map_err(|_| HostError::ExternalTheme)?;
+            if !discovered.conflicts().is_empty() {
+                eprintln!(
+                    "Fomalhaut theme ID {id} matched multiple directories; selected {}",
+                    discovered.directory().display()
+                );
+                for conflict in discovered.conflicts() {
+                    eprintln!(
+                        "Fomalhaut ignored lower-priority theme {}",
+                        conflict.display()
+                    );
+                }
+            }
+            Ok(Some(discovered.into_directory()))
+        }
+        None => Ok(None),
+    }
 }
 
 const fn protocol_locale(locale: ConfigUiLocale) -> UiLocale {
