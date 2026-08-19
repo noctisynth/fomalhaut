@@ -97,12 +97,7 @@ export function App() {
   }, [i18n, locale]);
 
   return (
-    <main
-      className={cn(
-        "relative min-h-screen overflow-hidden bg-background text-foreground",
-        "selection:bg-primary/30 selection:text-foreground",
-      )}
-    >
+    <main className="relative min-h-screen overflow-hidden bg-background text-foreground">
       <Background />
       <Clock />
 

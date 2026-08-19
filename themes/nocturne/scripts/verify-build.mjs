@@ -5,6 +5,8 @@ const dist = path.join(process.cwd(), "dist");
 const requiredFiles = ["index.html", "theme.toml"];
 const maximumAssetBytes = 8 * 1024 * 1024;
 const failures = [];
+let disablesPageTextSelection = false;
+let enablesEditableTextSelection = false;
 const networkApiPattern =
   /\b(?:fetch|WebSocket|EventSource|XMLHttpRequest)\s*\(|\bnavigator\.sendBeacon\s*\(/;
 const costlyCompositingClassPattern =
@@ -74,6 +76,12 @@ for await (const file of files(dist)) {
   }
   if (entry.endsWith(".css")) {
     const css = await readFile(file, "utf8");
+    disablesPageTextSelection ||=
+      /body\s*\{[^}]*[;{]user-select\s*:\s*none/.test(css);
+    enablesEditableTextSelection ||=
+      /input\s*,\s*textarea\s*,\s*\[contenteditable\]:not\(\[contenteditable=(?:"false"|false)\]\)\s*\{[^}]*[;{]user-select\s*:\s*text/.test(
+        css,
+      );
     if (/url\(["']?https?:/i.test(css)) {
       failures.push(`${entry} contains a remote CSS resource`);
     }
@@ -87,6 +95,13 @@ for await (const file of files(dist)) {
       failures.push(`${entry} contains the development transport`);
     }
   }
+}
+
+if (!disablesPageTextSelection) {
+  failures.push("CSS does not disable selection for ordinary page text");
+}
+if (!enablesEditableTextSelection) {
+  failures.push("CSS does not restore selection for editable text");
 }
 
 if (failures.length > 0) {

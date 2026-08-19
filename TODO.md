@@ -620,6 +620,8 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       启动 PAM；已知用户进入大头像认证页；“其他用户”进入无虚构头像的 Sign in 表单，并以
       shadcn InputGroup 同时呈现用户名与按顺序启用的 prompt；取消成功后才能返回；同时覆盖
       时间日期、可信 session、头像 fallback、任意轮 prompt 和刷新恢复。
+- [x] 禁止 Nocturne 登录/锁屏页面中的普通界面文本被指针拖拽选中，同时保留 input、textarea
+      和启用的 contenteditable 区域选择文本与移动光标的能力，并添加自动化回归验证。
 - [x] 实现仅 Vite DEV 动态加载的 `development-transport.ts`，生产缺少 WebKit bridge 时拒绝；
       源码审计禁止网络 API，构建检查不得包含 demo 标记、远程资源引用、inline script/style
       或越界资源；不对包含 ReactDOM 内部 stylesheet preload 的生产 bundle 使用字符串级

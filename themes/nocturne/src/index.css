@@ -140,7 +140,15 @@
   body {
     min-width: 20rem;
     min-height: 100vh;
+    -webkit-user-select: none;
+    user-select: none;
     color-scheme: dark;
     background: linear-gradient(135deg, #050812, #0a1730 58%, #102a52);
+  }
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]) {
+    -webkit-user-select: text;
+    user-select: text;
   }
 }
