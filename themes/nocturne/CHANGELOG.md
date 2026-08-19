@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.2
+
+### Bug Fixes
+
+- [`045f64d`](https://github.com/noctisynth/fomalhaut/commit/045f64d99d2ba9740a07b48df0f16e8fdac56354): Keep long desktop-session names and their session-kind badges aligned in the Nocturne selector.
+- [`cb357b4`](https://github.com/noctisynth/fomalhaut/commit/cb357b460eade05996e207c960deecc98e238dc4): Disable text selection for ordinary Nocturne login and lock-screen content while preserving selection in editable controls.
+
+### New Features
+
+- [`c7536fc`](https://github.com/noctisynth/fomalhaut/commit/c7536fc13eb968ef578a5700e61613fb36e8ecae): Publish Nocturne as an independent AUR source package with a locked npm build and a fail-closed Semifold private-package trigger.
+
 ## v0.0.1
 
 ### Bug Fixes
