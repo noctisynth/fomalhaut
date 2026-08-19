@@ -451,25 +451,60 @@ describe("SPA authentication UI", () => {
   test("selects a session through the shadcn select popup", async () => {
     const state = snapshot();
     state.sessions = [
-      { id: "wayland", name: "Wayland", kind: "wayland" },
+      {
+        id: "plasma-wayland",
+        name: "Plasma (Wayland)",
+        kind: "wayland",
+      },
+      { id: "niri", name: "Niri", kind: "wayland" },
       { id: "x11", name: "X11", kind: "x11" },
     ];
+    state.selectedSessionId = "plasma-wayland";
     const transport = new MockTransport(state);
     await renderTheme(transport);
     const user = userEvent.setup();
     const trigger = screen.getByRole("combobox", { name: "Session" });
 
-    expect(trigger).toHaveClass("w-52");
-    expect(trigger).toHaveTextContent("Wayland · wayland");
+    expect(trigger).toHaveClass("w-56", "rounded-3xl");
+    expect(trigger).toHaveClass("border-white/10", "bg-[#081426]/90");
+    expect(trigger.querySelector(".lucide-monitor-cog")).not.toBeNull();
+    expect(
+      trigger.querySelector('[data-slot="session-trigger-label"]'),
+    ).toHaveClass("grid-cols-[minmax(0,1fr)_auto]");
+    expect(trigger.querySelector('[data-slot="session-name"]')).toHaveClass(
+      "mx-1",
+    );
+    expect(trigger).toHaveTextContent("Plasma (Wayland), wayland");
+    const triggerBadge = trigger.querySelector('[data-slot="badge"]');
+    expect(triggerBadge).toHaveTextContent("wayland");
+    expect(triggerBadge).toHaveClass("h-5", "rounded-3xl");
+    expect(triggerBadge).toHaveClass("bg-secondary");
 
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     expect(document.querySelector('[data-slot="select-group"]')).not.toBeNull();
-    await user.click(screen.getByRole("option", { name: "X11 · x11" }));
+    expect(document.querySelector('[data-slot="select-content"]')).toHaveClass(
+      "min-w-60",
+    );
+    const plasmaOption = screen.getByRole("option", {
+      name: /Plasma \(Wayland\),\s*wayland/,
+    });
+    const niriOption = screen.getByRole("option", { name: /Niri,\s*wayland/ });
+    expect(
+      plasmaOption.querySelector('[data-slot="session-item-label"]'),
+    ).toHaveClass("grid-cols-[minmax(0,1fr)_auto]");
+    expect(
+      niriOption.querySelector('[data-slot="session-item-label"]'),
+    ).toHaveClass("grid-cols-[minmax(0,1fr)_auto]");
+    const optionBadge = niriOption.querySelector('[data-slot="badge"]');
+    expect(optionBadge).toHaveTextContent("wayland");
+    expect(optionBadge).toHaveClass("h-5", "rounded-3xl");
+    expect(optionBadge).toHaveClass("border-border", "justify-self-end");
+    await user.click(niriOption);
 
     expect(transport.requests.at(-1)).toMatchObject({
       method: "session.select",
-      params: { sessionId: "x11" },
+      params: { sessionId: "niri" },
     });
   });
 });

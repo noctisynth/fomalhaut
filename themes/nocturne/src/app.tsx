@@ -31,6 +31,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -829,11 +830,10 @@ function SessionControl() {
   return (
     <div
       className={cn(
-        "absolute right-6 bottom-6 z-20 flex items-center gap-3",
+        "absolute right-6 bottom-6 z-20",
         "sm:right-10 sm:bottom-9",
       )}
     >
-      <MonitorCog className="size-4 text-muted-foreground" aria-hidden="true" />
       <Label className="sr-only" htmlFor="session">
         {t("session.label")}
       </Label>
@@ -849,27 +849,85 @@ function SessionControl() {
         <SelectTrigger
           id="session"
           className={cn(
-            "w-52 border-white/10 bg-[#081426]/90 text-starlight",
-            "focus-visible:border-primary/60 focus-visible:ring-primary/30",
+            "w-56 border-white/10 bg-[#081426]/90 text-starlight",
+            "*:data-[slot=select-value]:min-w-0",
+            "hover:bg-[#0b1a31]/90 data-[popup-open]:bg-[#0b1a31]/90",
+            "focus-visible:border-primary/50 focus-visible:ring-primary/20",
           )}
         >
+          <MonitorCog
+            className="size-4 text-muted-foreground"
+            aria-hidden="true"
+          />
           <SelectValue placeholder={t("session.choose")}>
-            {selectedSession
-              ? `${selectedSession.name} · ${selectedSession.kind}`
-              : null}
+            {selectedSession ? (
+              <SessionTriggerLabel session={selectedSession} />
+            ) : null}
           </SelectValue>
         </SelectTrigger>
-        <SelectContent side="top" align="end">
+        <SelectContent side="top" align="end" className="min-w-60">
           <SelectGroup>
             {snapshot.sessions.map((session) => (
               <SelectItem key={session.id} value={session.id}>
-                {session.name} · {session.kind}
+                <SessionItemLabel session={session} />
               </SelectItem>
             ))}
           </SelectGroup>
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+type SessionLabelProps = {
+  session: { name: string; kind: "wayland" | "x11" };
+};
+
+function SessionTriggerLabel({ session }: SessionLabelProps) {
+  return (
+    <span
+      data-slot="session-trigger-label"
+      className="grid w-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5"
+    >
+      <span data-slot="session-name" className="mx-1 min-w-0 flex-1 truncate">
+        {session.name}
+      </span>
+      <span className="sr-only">, </span>
+      <SessionKindBadge kind={session.kind} variant="secondary" />
+    </span>
+  );
+}
+
+function SessionItemLabel({ session }: SessionLabelProps) {
+  return (
+    <span
+      data-slot="session-item-label"
+      className="grid w-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2"
+    >
+      <span className="min-w-0 flex-1 truncate">{session.name}</span>
+      <span className="sr-only">, </span>
+      <SessionKindBadge kind={session.kind} />
+    </span>
+  );
+}
+
+function SessionKindBadge({
+  kind,
+  variant = "outline",
+}: {
+  kind: SessionLabelProps["session"]["kind"];
+  variant?: "outline" | "secondary";
+}) {
+  return (
+    <Badge
+      variant={variant}
+      className={cn(
+        "justify-self-end",
+        variant === "outline" && "text-muted-foreground",
+      )}
+    >
+      {kind}
+    </Badge>
   );
 }
 
