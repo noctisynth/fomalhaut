@@ -509,21 +509,23 @@ Fomalhaut 使用 Semifold（CLI：`smif`）管理 monorepo changeset、独立包
 
 ### 4.12 Arch Linux 与 AUR 发布
 
-Arch Linux 按两个一等产品和独立 Semifold 版本发布两个版本化 AUR 源码包，不使用 `-git` 或
+Arch Linux 按两个一等应用和一个独立主题发布三个版本化 AUR 源码包，不使用 `-git` 或
 `-bin` 后缀：
 
 - `greetd-fomalhaut` 的主 package 是 `fomalhaut`，只交付 greeter 及 greetd/Cage 示例；
 - `fomalhaut-lock` 的主 package 是同名 Rust package，只交付 locker、PAM service、systemd
-  user unit 和 compositor/idle 集成示例。
+  user unit 和 compositor/idle 集成示例；
+- `fomalhaut-theme-nocturne` 的主 package 是私有 Node package
+  `@fomalhaut/theme-nocturne`，只交付构建后的可信静态主题。
 
-两个包不得合并为同一个 AUR package 或 split package：它们的必需依赖、安装场景和上游版本
-独立，split package 共享单一 `pkgver` 也无法准确表达 Semifold 的独立版本。需要两种角色的
-用户可以同时安装两包；共享配置路径不由任何 AUR 包静默创建或覆盖。
+三个包不得合并为同一个 AUR package 或 split package：它们的必需依赖、安装场景和上游版本
+独立，split package 共享单一 `pkgver` 也无法准确表达 Semifold 的独立版本。需要两种应用角色
+和参考主题的用户可以同时安装三包；共享配置路径不由任何 AUR 包静默创建或覆盖。
 
 AUR 自动发布直接消费同一次 `semifold ci` 的 `semifold-publish` schema v1 job output，而不扫描
-tag、解析日志或再次请求 crates.io API。只有 apply 模式的 publish output 才能触发；version
-分支 output 不代表 package 已发布。对每个 AUR 包分别维护主 package 与会进入对应二进制的
-Rust 依赖集合：
+tag、解析日志或再次请求 registry API。只有 apply 模式的 publish output 才能触发；version
+分支 output 不代表 package 已发布。对应用 AUR 包分别维护主 package 与会进入对应二进制的
+Rust 依赖集合；主题 AUR 包只跟随其唯一的私有 Node 主 package：
 
 `fomalhaut-logind` 是两个主 package 的共同 Rust 依赖；其 Semifold publish 成功而任一主 package
 未发布时，对应的两个 AUR 包都按各自当前主版本增加 `pkgrel`。AUR resolver 的显式依赖集合必须
@@ -535,11 +537,16 @@ Rust 依赖集合：
 - 主 package 未发布、但至少一个对应依赖 package 已成功发布时，保持 AUR 当前 `pkgver`，以
   同一 Semifold publish commit 的不可变 GitHub source archive 重建，并把当前整数 `pkgrel`
   加一；AUR 尚不存在、版本与当前主 manifest 不一致或状态无法判定时 fail closed；
-- `failed`、`not-started`、private/missing-changelog skip 和未知 schema/status 不触发 AUR；
+- `@fomalhaut/theme-nocturne` 是 private Node package，不会发布到 npm；仅对这个精确 package ID，
+  `skipped` 且 `skip-reason=private` 表示 Semifold 已确认其版本事务，可以同步主题 AUR 的
+  `pkgver` 并重置 `pkgrel=1`。resolver 还必须从同一不可变提交解析
+  `themes/nocturne/package.json`，要求名称匹配、`private=true` 且版本与 publish output 一致；
+- `failed`、`not-started`、missing-changelog skip、其他 package 的 private skip 和未知
+  schema/status 不触发 AUR；
 - 仅修复打包时仍允许手动选择目标 AUR 包、不可变 source ref 和更高 `pkgrel`，但不修改 Cargo
   package version，也不在本地执行 Semifold version/publish。
 
-自动与手动 AUR workflow 必须共享一个不取消运行中任务的 concurrency group，使两个仓库的
+自动与手动 AUR workflow 必须共享一个不取消运行中任务的 concurrency group，使三个仓库的
 版本读取、构建审批和推送事务不会并发争用。每次真正开始的 run 都重新读取 AUR 当前版本后再
 决定 `pkgrel`；不能按 source SHA、触发方式或目标包拆分 concurrency group，否则两个 run 可能
 从相同旧版本计算出相同的下一 `pkgrel`。
@@ -549,7 +556,11 @@ compositor，而当前受支持且已经端到端验证的启动命令固定使�
 都是必需运行时依赖。标准命令直接调用 `dbus-run-session`，所以 `dbus` 同样是必需依赖。包还
 依赖 GTK4/WebKitGTK 6.0 及直接链接的 GLib、glibc、libgcc 和 libsoup3；AccountsService 只提供
 显示名和头像增强，声明为 `optdepends`。包安装 `/usr/bin/fomalhaut`、许可证、配置文档和
-greetd/Cage 示例，但不覆盖 `/etc/greetd/config.toml` 或 `/etc/fomalhaut/config.toml`。
+greetd/Cage 示例，但不覆盖 `/etc/greetd/config.toml` 或 `/etc/fomalhaut/config.toml`。AUR 示例
+使用 `dbus-run-session`、`cage` 和 `fomalhaut` 的命令名，由 greetd 的受控 PATH 解析，不固化
+`/usr/bin`。pacman 安装与升级提示必须要求管理员先审阅并手工应用
+`/usr/share/doc/greetd-fomalhaut/greetd-config.toml`，确认配置后停用已有 display manager 并启用
+`greetd.service`；包本身不得自动改写配置、切换 display manager、启停服务或结束当前图形会话。
 
 `fomalhaut-lock` 不依赖 greetd 或 Cage；它依赖 PAM、GTK4/WebKitGTK 6.0、提供 session-lock
 binding 的 `gtk4-layer-shell`，以及直接链接的 GLib、glibc、libgcc 和 libsoup3。构建
@@ -557,7 +568,18 @@ binding 的 `gtk4-layer-shell`，以及直接链接的 GLib、glibc、libgcc 和
 `/etc/pam.d/fomalhaut-lock`、systemd user unit、许可证、配置文档、niri KDL 与通用 swayidle
 示例；PAM service 进入 pacman `backup`，升级必须保留管理员修改。
 
-两包的直接 ABI 依赖应根据干净 Arch 构建、ELF `NEEDED` 和 `namcap` 结果滚动维护，不得依赖
+`fomalhaut-theme-nocturne` 是 `arch=('any')` 的纯静态资产包，安装到
+`/usr/share/fomalhaut/themes/nocturne`，运行时不依赖 Node.js、Bun、greetd 或 locker；后两者只
+作为 `optdepends` 提示可消费该主题。包不创建或修改 `/etc/fomalhaut/config.toml`，管理员通过
+`[themes].default = "/usr/share/fomalhaut/themes/nocturne"` 或角色覆盖显式启用。项目开发工具链
+跟随不承诺向下兼容的 Bun canary，而 Arch 官方 `bun` 是较旧稳定版，因此 AUR 不得用发行版 Bun
+冒充受支持构建环境。主题 AUR 改用 Arch `npm`（及其 Node.js 依赖）作为 `makedepends`，通过只在
+`packaging/aur/fomalhaut-theme-nocturne` 维护的最小 npm build manifest 与锁文件运行 `npm ci`；
+该 manifest 精确镜像 SDK/主题所需外部依赖，但不加入根 Bun workspace，也不替代根
+`bun.lock`。npm 安装后先构建本地 SDK，再运行主题的检查、测试和生产构建；主题构建审计脚本
+必须只使用 Node/Bun 都支持的标准 API，不能依赖 Bun global。npm/Node 不进入安装后的运行时依赖。
+
+两个应用包的直接 ABI 依赖应根据干净 Arch 构建、ELF `NEEDED` 和 `namcap` 结果滚动维护，不得依赖
 偶然的传递依赖。
 
 许可证边界分为两层：Fomalhaut 源码和安装后的软件继续使用 `AGPL-3.0-only`，AUR
@@ -572,16 +594,18 @@ AUR 发布由可被 `Semifold CI` 调用、也可手动调度的 reusable GitHub
   JSON 与 `github.sha` 传给本地 reusable AUR workflow。`workflow_run` 事件不携带上游 job
   outputs，不得继续用它跨 workflow 猜测结果。
 - reusable workflow 严格验证 schema、dry-run、package/status/version、当前 manifest 与 AUR
-  RPC 结果，形成至多两个明确 package matrix entry。外部 HTTP 请求使用项目 User-Agent；
+  RPC 结果，形成至多三个明确 package matrix entry。外部 HTTP 请求使用项目 User-Agent；
   Semifold publish output 已是 registry 结果权威，不再用易受限流/403 影响的 crates.io API
   curl 作为二次发布探针。
 - 发布前使用调用 commit 上的最新打包模板，在干净 Arch Linux 环境分别渲染具体 `PKGBUILD`，
-  生成 `.SRCINFO`，使用锁文件和 `--frozen` 构建、运行目标 package 测试，并用 `namcap` 检查
+  生成 `.SRCINFO`，应用包使用 Cargo lockfile、主题包使用 `bun.lock` 执行 frozen 构建和目标
+  package 测试，并用 `namcap` 检查
   recipe 与产物。实际源码来自已经解析为 commit SHA 的不可变 archive，必须计算 SHA-256，
   不允许 `SKIP`；模板修复与被打包源码因此仍是两个显式输入。
 - 验证产物通过 artifact 传递给发布 job。发布 job 必须绑定受保护的
   `aur-production` GitHub Environment，在人工批准后才使用专用 AUR SSH key 克隆并推送
-  对应的 `greetd-fomalhaut.git` 或 `fomalhaut-lock.git`；AUR 仓库不作为主仓库 subtree 管理。
+  对应的 `greetd-fomalhaut.git`、`fomalhaut-lock.git` 或
+  `fomalhaut-theme-nocturne.git`；AUR 仓库不作为主仓库 subtree 管理。
 - AUR maintainer 名称和邮箱使用 GitHub Environment/Repository variables 提供，专用 SSH
   私钥使用 Environment secret 提供。`aur.archlinux.org` 的官方 Ed25519 主机密钥指纹固定在
   受代码审查的 workflow 中；运行时可以用 `ssh-keyscan` 自动取得完整公钥，但必须先计算
@@ -1143,18 +1167,23 @@ SDK 的主收敛机制固定为泛型 `FomalhautClient<M extends RuntimeMode>`�
 实例上收敛为 `undefined`，不能调用。factory 设置 snapshot watermark 后才向订阅者发布更新
 事件，并拒绝 bootstrap 前或 mode 不匹配的状态结果。
 
-Node/TypeScript 工具链统一使用 Bun，不维护 npm、pnpm 或 Yarn lockfile。根 `package.json`
+Node/TypeScript 开发工具链统一使用 Bun，不在根目录或产品 workspace 维护 npm、pnpm 或 Yarn
+lockfile。根 `package.json`
 以 `workspaces = ["packages/*", "themes/*"]` 分别发现通用 package 与主题 package，根 package
 必须为 private；`bun install` 产生
-并提交文本格式的 `bun.lock`，CI 使用 `bun install --frozen-lockfile`，禁止隐式迁移或同时提交
-其他包管理器 lockfile。
+并提交文本格式的 `bun.lock`，CI 使用 `bun install --frozen-lockfile`，禁止隐式迁移或在根目录、
+`packages`、`themes` 中同时提交其他包管理器 lockfile。
 
-包管理器约束对发布事务保留一个窄例外：Semifold CI 可使用其 Node.js resolver 默认生成的
+包管理器约束保留两个有边界的发行例外。第一，Semifold CI 可使用其 Node.js resolver 默认生成的
 `npm publish --provenance --access public`，以支持 npm trusted publishing/OIDC provenance。
-npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockfile 生成，本地与 Agent 也不得
-执行 publish；该命令只能由 GitHub Actions 中的 `semifold ci` 间接调用。根 private package
+除第二项 AUR 构建例外外，npm 不参与依赖安装、workspace 解析、脚本、测试、构建或 lockfile
+生成；本地与 Agent 也不得执行 publish，该命令只能由 GitHub Actions 中的 `semifold ci`
+间接调用。根 private package
 不登记为 Semifold package；Node.js resolver 同步可发布的 `packages/fomalhaut-sdk` 与各私有
 H5 主题，后者由 Semifold 管理 changeset、版本和 changelog，但发布时依据 `private` 标记跳过。
+第二，Nocturne AUR 源码包按 4.12 的隔离 build manifest 与 lockfile 使用 `npm ci`，解决 Arch
+稳定 Bun 与项目 canary 不兼容的问题。这个例外只存在于 `packaging/aur`，不得生成根
+`package-lock.json`、改变开发 workspace 解析或扩大为普通本地构建路径。
 
 `fomalhaut-sdk` 首次发布已经完成，后续 npm 发布仅使用 trusted publishing/OIDC：workflow
 保留 `id-token: write`，并通过 `actions/setup-node@v6` 提供支持 OIDC 的 Node.js 24/npm
@@ -1349,14 +1378,18 @@ Semifold package 列表，以便参与统一的 changeset、版本与 changelog 
 `fomalhaut-sdk` 能支持完整的框架前端，并向主题作者提供可构建示例；它不
 嵌入 Rust 二进制、不替代无构建依赖的内置 minimal theme，也不改变用户通过
 `[themes]` 选择通用或角色专用可信静态主题的能力。生产产物是 `dist/` 下的纯静态目录，根目录
-包含 `theme.toml` 与 `index.html`，管理员可以直接让配置指向该绝对路径。
+包含 `theme.toml` 与 `index.html`，管理员可以直接让配置指向该绝对路径。正式 Arch 用户也可
+通过独立的 `fomalhaut-theme-nocturne` AUR 源码包构建并安装相同产物；该分发路径不改变主题
+Node package 的 private 状态，也不构成 npm 发布。
 
 参考主题当前已在同一 `index.html` 中使用 SDK `mode` 支持两种角色：greeter 保留用户/session 选择，
 locker 只展示当前 identity、公共多轮认证和 lock lifecycle，不显示或调用用户/
 session 切换。管理员仍可用 `[themes].greeter`/`locker` 选择两个不同目录。
 
 参考主题固定采用 React、TypeScript、Vite、Tailwind CSS v4、shadcn/ui Luma style 与
-Zustand。依赖和脚本继续只由 Bun canary 管理；Vite 使用官方 React 与 Tailwind Vite plugin，
+Zustand。主题源码 manifest、workspace 依赖和开发脚本继续只由 Bun canary 管理；4.12 的 AUR
+npm manifest 是经测试同步的隔离打包镜像，不参与主题 workspace。Vite 使用官方 React 与
+Tailwind Vite plugin，
 并设置 `base = "./"`，确保所有构建资源相对于 `fomalhaut://theme/` 加载。项目不引入 router、
 SSR、服务端数据获取、CSS Modules、Sass、CSS-in-JS、远程字体或网络资源。shadcn 组件使用
 CSS variables 和 Luma 的圆角、柔和层级与宽松布局基础。session 选择使用 shadcn/ui Luma
@@ -1453,6 +1486,7 @@ Nocturne 的电源操作列表使用 shadcn/ui `DropdownMenu`，危险操作确�
 用户集合、已知用户与其他用户分支、身份未知的活动认证恢复、session 选择、secret/visible
 多轮 prompt、回答在异步请求完成前已从 DOM 清空、busy 背压、取消失败不离开认证页、头像
 fallback、文件命名和生产构建契约。CI 通过 Bun 运行 Biome、TypeScript、Vitest 和 Vite build；
+生产构建审计脚本本身保持 Node/Bun 双运行时兼容，使 AUR 可以复用同一安全检查而不依赖 Bun；
 最终还必须在 WebKitGTK 自定义 scheme 中验证 module script、CSS 与分块资源加载。
 
 ## 9. WebView 运行环境

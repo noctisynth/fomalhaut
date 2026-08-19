@@ -19,13 +19,16 @@ HTTP_USER_AGENT = "Fomalhaut-AUR-CI/1 (+https://github.com/noctisynth/fomalhaut)
 MAX_HTTP_BYTES = 1024 * 1024
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[+-][0-9A-Za-z.-]+)?$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
-AVAILABLE_SKIP_REASON = "registry-version-exists"
+REGISTRY_AVAILABLE_SKIP_REASON = "registry-version-exists"
+PRIVATE_AVAILABLE_SKIP_REASON = "private"
 VALID_STATUSES = {"succeeded", "skipped", "failed", "not-started"}
 
 PACKAGE_SPECS = {
     "greetd-fomalhaut": {
         "main": "fomalhaut",
         "manifest": "crates/fomalhaut/Cargo.toml",
+        "manifest_type": "cargo",
+        "availability": "registry",
         "dependencies": {
             "fomalhaut-config",
             "fomalhaut-core",
@@ -40,6 +43,8 @@ PACKAGE_SPECS = {
     "fomalhaut-lock": {
         "main": "fomalhaut-lock",
         "manifest": "crates/fomalhaut-lock/Cargo.toml",
+        "manifest_type": "cargo",
+        "availability": "registry",
         "dependencies": {
             "fomalhaut-config",
             "fomalhaut-core",
@@ -49,6 +54,13 @@ PACKAGE_SPECS = {
             "fomalhaut-user",
             "fomalhaut-web",
         },
+    },
+    "fomalhaut-theme-nocturne": {
+        "main": "@fomalhaut/theme-nocturne",
+        "manifest": "themes/nocturne/package.json",
+        "manifest_type": "node",
+        "availability": "private",
+        "dependencies": set(),
     },
 }
 
@@ -94,12 +106,16 @@ def parse_publish_output(payload: str) -> dict:
     return output
 
 
-def is_main_available(record: dict | None) -> bool:
+def is_main_available(record: dict | None, availability: str) -> bool:
     if record is None:
         return False
+    if availability == "private":
+        return record["status"] == "skipped" and (
+            record.get("skip-reason") == PRIVATE_AVAILABLE_SKIP_REASON
+        )
     return record["status"] == "succeeded" or (
         record["status"] == "skipped"
-        and record.get("skip-reason") == AVAILABLE_SKIP_REASON
+        and record.get("skip-reason") == REGISTRY_AVAILABLE_SKIP_REASON
     )
 
 
@@ -147,7 +163,7 @@ def resolve_automatic(
     for aur_package, spec in PACKAGE_SPECS.items():
         main_package = spec["main"]
         main_record = records.get(main_package)
-        main_available = is_main_available(main_record)
+        main_available = is_main_available(main_record, spec["availability"])
         dependency_published = any(
             is_published(records.get(dependency)) for dependency in spec["dependencies"]
         )
@@ -196,7 +212,7 @@ def affected_aur_packages(payload: str) -> list[str]:
     return [
         aur_package
         for aur_package, spec in PACKAGE_SPECS.items()
-        if is_main_available(records.get(spec["main"]))
+        if is_main_available(records.get(spec["main"]), spec["availability"])
         or any(
             is_published(records.get(dependency))
             for dependency in spec["dependencies"]
@@ -248,8 +264,28 @@ def resolve_commit(repository: Path, reference: str) -> str:
     return commit
 
 
-def manifest_version(repository: Path, commit: str, manifest: str) -> str:
-    content = git(repository, "show", f"{commit}:{manifest}")
+def node_manifest_version(content: str, expected_package: str) -> str:
+    try:
+        manifest = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise ResolutionError("Node package manifest is not valid JSON") from error
+    if not isinstance(manifest, dict):
+        raise ResolutionError("Node package manifest must be an object")
+    if manifest.get("name") != expected_package:
+        raise ResolutionError(f"Node package manifest name does not match {expected_package}")
+    if manifest.get("private") is not True:
+        raise ResolutionError(f"Node package must remain private: {expected_package}")
+    version = manifest.get("version")
+    if not isinstance(version, str) or not SEMVER.fullmatch(version):
+        raise ResolutionError(f"Node package has an invalid version: {expected_package}")
+    return version
+
+
+def manifest_version(repository: Path, commit: str, spec: dict) -> str:
+    manifest_path = spec["manifest"]
+    content = git(repository, "show", f"{commit}:{manifest_path}")
+    if spec["manifest_type"] == "node":
+        return node_manifest_version(content, spec["main"])
     for line in content.splitlines():
         match = re.fullmatch(r'version = "([^"]+)"', line)
         if match:
@@ -257,7 +293,7 @@ def manifest_version(repository: Path, commit: str, manifest: str) -> str:
             if SEMVER.fullmatch(version):
                 return version
             break
-    raise ResolutionError(f"manifest has no supported package version: {manifest}")
+    raise ResolutionError(f"manifest has no supported package version: {manifest_path}")
 
 
 def fetch_aur_version(package: str) -> str | None:
@@ -293,10 +329,14 @@ def fetch_aur_version(package: str) -> str | None:
     return version
 
 
-def collect_manifest_versions(repository: Path, commit: str) -> dict[str, str]:
+def collect_manifest_versions(
+    repository: Path, commit: str, aur_packages: list[str]
+) -> dict[str, str]:
     return {
-        spec["main"]: manifest_version(repository, commit, spec["manifest"])
-        for spec in PACKAGE_SPECS.values()
+        PACKAGE_SPECS[aur_package]["main"]: manifest_version(
+            repository, commit, PACKAGE_SPECS[aur_package]
+        )
+        for aur_package in aur_packages
     }
 
 
@@ -330,21 +370,20 @@ def main() -> int:
             source_ref = resolve_commit(repository, arguments.source_sha)
             if source_ref != arguments.source_sha:
                 raise ResolutionError("Semifold source SHA did not resolve exactly")
+            affected_packages = affected_aur_packages(arguments.publish_json)
             matrix = resolve_automatic(
                 arguments.publish_json,
                 source_ref,
-                collect_manifest_versions(repository, source_ref),
+                collect_manifest_versions(repository, source_ref, affected_packages),
                 collect_aur_versions(
                     fetch_aur_version,
-                    affected_aur_packages(arguments.publish_json),
+                    affected_packages,
                 ),
             )
         else:
             source_ref = resolve_commit(repository, arguments.source_ref)
             spec = PACKAGE_SPECS[arguments.package]
-            upstream_version = manifest_version(
-                repository, source_ref, spec["manifest"]
-            )
+            upstream_version = manifest_version(repository, source_ref, spec)
             matrix = resolve_manual(
                 arguments.package,
                 upstream_version,

@@ -20,6 +20,7 @@ on:
         options:
           - greetd-fomalhaut
           - fomalhaut-lock
+          - fomalhaut-theme-nocturne
       source_ref:
         description: Immutable Git commit or tag to package
         required: true
@@ -105,10 +106,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          common=(cargo curl git glib2 gtk4 libgcc libsoup3 namcap openssh webkitgtk-6.0)
-          if [[ "${AUR_PACKAGE}" == greetd-fomalhaut ]]; then
+          if [[ "${AUR_PACKAGE}" == fomalhaut-theme-nocturne ]]; then
+            pacman -Syu --noconfirm --needed curl namcap npm
+          elif [[ "${AUR_PACKAGE}" == greetd-fomalhaut ]]; then
+            common=(cargo curl git glib2 gtk4 libgcc libsoup3 namcap openssh webkitgtk-6.0)
             pacman -Syu --noconfirm --needed "${common[@]}" cage dbus greetd
           else
+            common=(cargo curl git glib2 gtk4 libgcc libsoup3 namcap openssh webkitgtk-6.0)
             pacman -Syu --noconfirm --needed \
               "${common[@]}" clang gtk4-layer-shell pam
           fi
@@ -158,6 +162,7 @@ jobs:
             target/aur/${{ matrix.aur_package }}/PKGBUILD
             target/aur/${{ matrix.aur_package }}/.SRCINFO
             target/aur/${{ matrix.aur_package }}/*.toml
+            target/aur/${{ matrix.aur_package }}/*.install
             target/aur/${{ matrix.aur_package }}/LICENSE
           if-no-files-found: error
           include-hidden-files: true
@@ -232,6 +237,10 @@ jobs:
             install -m 644 aur-metadata/greetd-fomalhaut.toml \
               aur-repository/greetd-fomalhaut.toml
           fi
+          if [[ -f aur-metadata/greetd-fomalhaut.install ]]; then
+            install -m 644 aur-metadata/greetd-fomalhaut.install \
+              aur-repository/greetd-fomalhaut.install
+          fi
 
           cd aur-repository
           git config user.name "${AUR_MAINTAINER_NAME}"
@@ -239,6 +248,9 @@ jobs:
           git add PKGBUILD .SRCINFO LICENSE
           if [[ -f greetd-fomalhaut.toml ]]; then
             git add greetd-fomalhaut.toml
+          fi
+          if [[ -f greetd-fomalhaut.install ]]; then
+            git add greetd-fomalhaut.install
           fi
           if git diff --cached --quiet; then
             echo "AUR repository already contains the rendered metadata."

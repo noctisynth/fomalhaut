@@ -803,6 +803,13 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       ABI 提供者。
 - [x] 让两个 AUR 包分别安装自己的二进制、许可证、配置文档与角色集成资产；打包元数据使用
       0BSD，并明确其不重新许可上游软件。
+- [x] 新增独立的 `fomalhaut-theme-nocturne` AUR 源码包：以隔离的 npm build manifest/lockfile
+      和 `npm ci` 构建 private package，避开 Arch 稳定 Bun 与项目 canary 的兼容风险，把纯静态
+      产物安装到 `/usr/share/fomalhaut/themes/nocturne`，且不修改系统配置或引入运行时
+      JavaScript 工具链；隔离 npm 安装、SDK/主题编译、检查、37 个测试、生产构建和产物审计已通过。
+- [x] 为 `greetd-fomalhaut` 增加 pacman 安装/升级提示，要求管理员手工审阅 greetd 示例、停用
+      已有 display manager 并启用 `greetd.service`；示例使用 PATH 中的命令名，包不得自动切换
+      display manager、改写 `/etc/greetd/config.toml` 或启停服务。
 - [x] 将 `semifold ci` step/job 接入 schema v1 `semifold-version`/`semifold-publish` output；
       AUR 自动流程只消费 publish output，不再扫描 tag 或 curl crates.io API。
 - [x] 实现并用 11 个 fixture 与真实 AUR RPC 验证 AUR 版本决策：主 package 发布时同步
@@ -812,12 +819,16 @@ workspace 170 个 Rust 测试、严格 Clippy/rustfmt/rustdoc、SDK 生成一致
       fail closed。
 - [x] 将共享 `fomalhaut-logind` 加入两个 AUR 包的显式 Semifold dependency set，并扩展 resolver
       fixture，验证仅该 dependency 发布时两个包各自增加 `pkgrel`。
+- [x] 扩展 AUR resolver、renderer 和 workflow：仅将 `@fomalhaut/theme-nocturne` 的
+      `skipped/private` 结果映射为主题发布，并从不可变提交校验 package 名称、版本和
+      `private=true`；其他 private/missing-changelog 结果继续 fail closed。19 个 resolver/manifest
+      fixture、三个渲染后的有效 `.SRCINFO` 和无警告 `namcap PKGBUILD` 已通过。
 - [x] 让自动与手动 AUR run 共享单一非取消 concurrency group，在每次实际执行时重新读取当前
       AUR 版本，避免两个 run 并发计算并推送相同 `pkgrel`。
-- [ ] 在干净 Arch 环境分别完成不可变 source archive 校验、frozen 构建、目标测试、`.SRCINFO`
-      和 `namcap`，并保留严格递增的手动打包修订入口。
+- [ ] 在干净 Arch 环境为三个包分别完成不可变 source archive 校验、frozen 构建、目标测试、
+      `.SRCINFO` 和 `namcap`，并保留严格递增的手动打包修订入口。
 - [ ] 使用受保护的 `aur-production` Environment、人工审批和专用 SSH key 分别推送
-      `greetd-fomalhaut` 与 `fomalhaut-lock` AUR Git 仓库。
+      `greetd-fomalhaut`、`fomalhaut-lock` 与 `fomalhaut-theme-nocturne` AUR Git 仓库。
 - [ ] 在 GitHub 配置 AUR maintainer variables、`AUR_SSH_PRIVATE_KEY` secret 和
       `aur-production` 审批规则；最终应用标签产生后完成首次 clean Arch build、`namcap`、
       自动扫描并核验固定的 AUR Ed25519 主机指纹、人工审批和 AUR 推送验证。

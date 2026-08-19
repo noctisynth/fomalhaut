@@ -25,6 +25,7 @@ depends=(
 )
 optdepends=('accountsservice: user display names and avatars')
 makedepends=('cargo')
+install='greetd-fomalhaut.install'
 source=(
   "${_upstream_name}-${_source_ref}.tar.gz::${url}/archive/${_source_ref}.tar.gz"
   'greetd-fomalhaut.toml'

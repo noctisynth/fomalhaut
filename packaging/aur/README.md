@@ -4,10 +4,11 @@
 <!-- SPDX-License-Identifier: 0BSD -->
 
 This directory is the source for the independently maintained
-`greetd-fomalhaut` and `fomalhaut-lock` AUR repositories. Each repository
-receives its rendered `PKGBUILD`, `.SRCINFO`, and packaging `LICENSE`;
-`greetd-fomalhaut` also receives the example greetd configuration. The
-templates, renderer, and this README remain in the upstream repository.
+`greetd-fomalhaut`, `fomalhaut-lock`, and `fomalhaut-theme-nocturne` AUR
+repositories. Each repository receives its rendered `PKGBUILD`, `.SRCINFO`,
+and packaging `LICENSE`; `greetd-fomalhaut` also receives the example greetd
+configuration and pacman install message. The templates, renderer, and this
+README remain in the upstream repository.
 
 The packaging metadata is licensed under 0BSD so it can follow Arch packaging
 policy. Fomalhaut itself remains AGPL-3.0-only, and the generated `PKGBUILD`
@@ -34,8 +35,16 @@ Configure required reviewers on `aur-production`. Automatic runs consume the
 schema-v1 `semifold-publish` output from the calling Semifold CI workflow. A
 main package release synchronizes the corresponding AUR `pkgver`; a release of
 only a binary dependency rebuilds the same `pkgver` with the next integer
-`pkgrel`. The source archive is pinned to the Semifold publish commit, and the
-workflow no longer probes crates.io or infers releases from tags.
+`pkgrel`. The exact private-package skip for `@fomalhaut/theme-nocturne`
+synchronizes the theme AUR version without publishing the theme to npm. The
+source archive is pinned to the Semifold publish commit, and the workflow no
+longer probes registries or infers releases from tags.
+
+The theme package uses its isolated npm build manifest and lockfile with
+`npm ci`; this avoids relying on Arch's stable Bun for a project developed with
+an incompatible Bun canary. npm and Node.js are build-only dependencies. The
+installed package contains only static files below
+`/usr/share/fomalhaut/themes/nocturne`.
 
 Use the workflow's manual package, immutable source ref, and `pkgrel` inputs
 for packaging-only revisions. A revision of an existing `pkgver` must increase

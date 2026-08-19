@@ -1,24 +1,12 @@
 {
-  "name": "@fomalhaut/theme-nocturne",
+  "name": "fomalhaut-theme-nocturne-aur-build",
   "private": true,
-  "version": "0.0.1",
-  "type": "module",
-  "license": "AGPL-3.0-only",
-  "scripts": {
-    "dev": "vite --config vite-config.ts",
-    "build": "tsc -b && vite build --config vite-config.ts && bun run verify-build",
-    "check": "biome check . && tsc -b --pretty false && bun run check-file-names",
-    "check-file-names": "bun run scripts/check-file-names.mjs",
-    "test": "vitest run --config vite-config.ts",
-    "verify-build": "bun run scripts/verify-build.mjs",
-    "preview": "vite preview --config vite-config.ts"
-  },
+  "license": "0BSD",
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@fontsource-variable/inter": "^5.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "fomalhaut-sdk": "workspace:*",
     "i18next": "^26.3.6",
     "lucide-react": "^1.28.0",
     "react": "19.2.8",

@@ -23,7 +23,7 @@ maintainer_email=$7
 output_dir=$8
 
 case ${aur_package} in
-  greetd-fomalhaut | fomalhaut-lock) ;;
+  greetd-fomalhaut | fomalhaut-lock | fomalhaut-theme-nocturne) ;;
   *)
     echo "unsupported AUR package: ${aur_package}" >&2
     exit 2
@@ -104,5 +104,6 @@ fi
 
 if [[ ${aur_package} == greetd-fomalhaut ]]; then
   install -m 644 "${script_dir}/greetd-fomalhaut.toml" "${output_dir}/greetd-fomalhaut.toml"
+  install -m 644 "${script_dir}/greetd-fomalhaut.install" "${output_dir}/greetd-fomalhaut.install"
 fi
 install -m 644 "${script_dir}/LICENSE" "${output_dir}/LICENSE"

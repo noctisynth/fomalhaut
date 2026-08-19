@@ -9,6 +9,9 @@ bun run build:theme:nocturne
 
 The deployable theme is written to `themes/nocturne/dist`. Point
 `[themes].default` in `/etc/fomalhaut/config.toml` at that absolute directory.
+Arch users can instead install `fomalhaut-theme-nocturne` from the AUR and use
+`/usr/share/fomalhaut/themes/nocturne`; the AUR build uses npm so it does not
+depend on the project's Bun canary toolchain.
 
 During `bun run dev`, a development-only transport presents the user-selection
 screen and simulates PAM prompts in an ordinary browser. Use `fomalhaut` as the

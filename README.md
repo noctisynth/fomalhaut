@@ -43,11 +43,11 @@ from sources you trust and have reviewed.
 
 ## Installation
 
-On Arch Linux, install the independently versioned greeter and locker packages
-from the AUR:
+On Arch Linux, install the independently versioned greeter, locker, and
+Nocturne theme packages from the AUR:
 
 ```sh
-paru -S --removemake greetd-fomalhaut fomalhaut-lock
+paru -S --removemake greetd-fomalhaut fomalhaut-lock fomalhaut-theme-nocturne
 ```
 
 This is the recommended installation command. `--removemake` removes temporary
@@ -57,13 +57,35 @@ succeeds; runtime dependencies remain installed. `yay` can be used in place of
 dependencies, PAM policy, locker user unit, and integration examples. They
 intentionally do not overwrite `/etc/fomalhaut/config.toml` or
 `/etc/greetd/config.toml`; without a Fomalhaut configuration the applications
-use safe defaults and the embedded minimal theme. The greetd example is
-installed at `/usr/share/doc/greetd-fomalhaut/greetd-config.toml`.
+use safe defaults and the embedded minimal theme. The AUR theme contains only
+static runtime assets; npm and Node.js are removed with the other temporary
+build dependencies. Enable it explicitly with:
+
+```toml
+[themes]
+default = "/usr/share/fomalhaut/themes/nocturne"
+```
+
+Fomalhaut is a greeter for greetd; the package does not replace or restart your
+display manager. Review and merge the example installed at
+`/usr/share/doc/greetd-fomalhaut/greetd-config.toml` into
+`/etc/greetd/config.toml`, then disable the existing display manager before
+enabling greetd:
+
+```sh
+sudo systemctl disable <current-display-manager>.service
+sudo systemctl enable greetd.service
+```
+
+Do not enable two display managers at once. Reboot after configuring the
+services, or start greetd only when it is safe to end the current graphical
+session. pacman repeats this reminder after greeter installation and upgrades,
+but never changes the services itself.
 
 ### Migrating a source installation to AUR
 
-For the recommended migration, install both AUR packages first, update the
-existing checkout, and then run:
+For the recommended migration, install the AUR application packages first
+(and the theme package if desired), update the existing checkout, and then run:
 
 ```sh
 ./uninstall.sh

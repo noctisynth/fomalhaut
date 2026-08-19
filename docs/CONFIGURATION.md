@@ -5,16 +5,35 @@ session 默认目录；文件存在但无法读取、包含未知字段或验证
 
 ## 从 AUR 安装、源码卸载与迁移
 
-Arch Linux 用户可以同时安装两个独立 AUR 包：
+Arch Linux 用户可以同时安装三个独立 AUR 包：
 
 ```sh
-paru -S greetd-fomalhaut fomalhaut-lock
+paru -S --removemake greetd-fomalhaut fomalhaut-lock fomalhaut-theme-nocturne
 ```
 
-包管理器会安装运行依赖、两个 `/usr/bin` 二进制、locker PAM/systemd 资产和集成示例，但不会
+包管理器会安装运行依赖、两个 `/usr/bin` 二进制、locker PAM/systemd 资产、Nocturne 静态主题
+和集成示例，但不会
 覆盖 `/etc/fomalhaut/config.toml` 或 `/etc/greetd/config.toml`。全新安装可从
-`/usr/share/doc/greetd-fomalhaut/greetd-config.toml` 合并 greetd/Cage 示例；未创建 Fomalhaut
-配置时两个角色使用安全默认值和内嵌 minimal theme。
+`/usr/share/doc/greetd-fomalhaut/greetd-config.toml` 手工合并 greetd/Cage 示例。该示例通过 PATH
+调用 `dbus-run-session`、`cage` 和 `fomalhaut`，不固定 `/usr/bin`。如需启用 AUR 主题，显式写入：
+
+```toml
+[themes]
+default = "/usr/share/fomalhaut/themes/nocturne"
+```
+
+Fomalhaut 是 greetd 的 greeter，不会自动替换当前 display manager。审阅并写好
+`/etc/greetd/config.toml` 后，应先停用已有 display manager，再启用 greetd；不要同时启用两个
+display manager：
+
+```sh
+sudo systemctl disable <已有-display-manager>.service
+sudo systemctl enable greetd.service
+```
+
+之后重启系统，或只在确认可以结束当前图形会话时手工启动 greetd。pacman 安装和升级时也会显示
+相同提醒，但包本身不会改写配置或启停服务。未创建 Fomalhaut 配置时两个角色仍使用安全默认值和
+内嵌 minimal theme。
 
 如果当前系统曾运行源码安装器，应先安装两个 AUR 包，再从更新后的源码 checkout 执行：
 

@@ -1,19 +1,41 @@
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 const dist = path.join(process.cwd(), "dist");
 const requiredFiles = ["index.html", "theme.toml"];
 const maximumAssetBytes = 8 * 1024 * 1024;
-const failures: string[] = [];
+const failures = [];
 const networkApiPattern =
   /\b(?:fetch|WebSocket|EventSource|XMLHttpRequest)\s*\(|\bnavigator\.sendBeacon\s*\(/;
 const costlyCompositingClassPattern =
   /\b(?:backdrop-blur(?:-[a-z0-9-]+)?|blur-(?:2xl|3xl))\b/;
 
-for await (const entry of new Bun.Glob("**/*.{ts,tsx}").scan({
-  cwd: path.join(process.cwd(), "src"),
-  onlyFiles: true,
-})) {
-  const source = await Bun.file(path.join(process.cwd(), "src", entry)).text();
+async function* files(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      yield* files(absolute);
+    } else if (entry.isFile()) {
+      yield absolute;
+    }
+  }
+}
+
+async function isFile(file) {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+const sourceRoot = path.join(process.cwd(), "src");
+for await (const file of files(sourceRoot)) {
+  if (!/\.tsx?$/.test(file)) {
+    continue;
+  }
+  const entry = path.relative(sourceRoot, file);
+  const source = await readFile(file, "utf8");
   if (networkApiPattern.test(source)) {
     failures.push(`src/${entry} calls a network API`);
   }
@@ -23,12 +45,12 @@ for await (const entry of new Bun.Glob("**/*.{ts,tsx}").scan({
 }
 
 for (const name of requiredFiles) {
-  if (!(await Bun.file(path.join(dist, name)).exists())) {
+  if (!(await isFile(path.join(dist, name)))) {
     failures.push(`missing ${name}`);
   }
 }
 
-const html = await Bun.file(path.join(dist, "index.html")).text();
+const html = await readFile(path.join(dist, "index.html"), "utf8");
 if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html)) {
   failures.push("index.html contains an inline script");
 }
@@ -45,16 +67,13 @@ if (/<form[^>]+\baction=/i.test(html)) {
   failures.push("index.html enables form navigation");
 }
 
-for await (const entry of new Bun.Glob("**/*").scan({
-  cwd: dist,
-  onlyFiles: true,
-})) {
-  const file = Bun.file(path.join(dist, entry));
-  if (file.size > maximumAssetBytes) {
+for await (const file of files(dist)) {
+  const entry = path.relative(dist, file);
+  if ((await stat(file)).size > maximumAssetBytes) {
     failures.push(`${entry} exceeds the host asset limit`);
   }
   if (entry.endsWith(".css")) {
-    const css = await file.text();
+    const css = await readFile(file, "utf8");
     if (/url\(["']?https?:/i.test(css)) {
       failures.push(`${entry} contains a remote CSS resource`);
     }
@@ -63,7 +82,7 @@ for await (const entry of new Bun.Glob("**/*").scan({
     }
   }
   if (entry.endsWith(".js")) {
-    const javascript = await file.text();
+    const javascript = await readFile(file, "utf8");
     if (javascript.includes("FOMALHAUT_DEVELOPMENT_TRANSPORT")) {
       failures.push(`${entry} contains the development transport`);
     }

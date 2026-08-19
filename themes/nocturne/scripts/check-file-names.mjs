@@ -13,9 +13,9 @@ const fixedNames = new Set([
   "tsconfig.json",
 ]);
 const kebabCaseName = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+)*$/;
-const failures: string[] = [];
+const failures = [];
 
-async function inspect(directory: string): Promise<void> {
+async function inspect(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
     const name = entry.name;
