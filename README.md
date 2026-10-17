@@ -192,7 +192,7 @@ uses greetd; it restarts the service but does not enable it:
 
 Use `./install.sh --help` to see shared and per-role scale, UI language, cursor
 size, greeter account, installation prefix, and staging options. See the
-[configuration and installation guide](docs/CONFIGURATION.md) for the complete
+[configuration and installation guide](docs/CONFIGURATION.en.md) for the complete
 setup and upgrade behavior.
 
 ## Using Fomalhaut
@@ -202,11 +202,17 @@ sign-in, select an available desktop session, and answer the prompts supplied
 by your system's PAM configuration. Fomalhaut hands the authenticated session
 back to greetd and exits once the desktop starts.
 
+If applications prompt to unlock the login keyring after switching to greetd,
+configure the keyring service used by your desktop in greetd's PAM stack. See
+[login keyring setup and troubleshooting](docs/CONFIGURATION.en.md#automatically-unlocking-the-login-keyring-at-login)
+for common keyring services, an Arch Linux configuration example, and checks
+for repeated prompts.
+
 System configuration lives at `/etc/fomalhaut/config.toml`. It controls the
 theme, UI locale override, display scale, account provider, session search
 paths, and optional power actions. The format, greetd/Cage example, and external
 theme setup are documented
-in the [configuration guide](docs/CONFIGURATION.md).
+in the [configuration guide](docs/CONFIGURATION.en.md).
 
 Inside a supported Wayland session, reload the installed user unit and start a
 lock with verifiable readiness:
@@ -219,7 +225,7 @@ systemctl --user start fomalhaut-lock.service
 The command returns only after the compositor confirms the session lock. The
 niri shortcut, compositor-neutral swayidle command, PAM policy, compatibility
 limits, and upgrade behavior are in the
-[configuration guide](docs/CONFIGURATION.md).
+[configuration guide](docs/CONFIGURATION.en.md).
 
 ## Workspace
 

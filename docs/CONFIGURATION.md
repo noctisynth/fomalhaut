@@ -1,5 +1,7 @@
 # Fomalhaut 配置与外部主题
 
+[English](CONFIGURATION.en.md)
+
 Fomalhaut 固定读取 `/etc/fomalhaut/config.toml`。文件不存在时使用内嵌 minimal theme 和系统
 session 默认目录；文件存在但无法读取、包含未知字段或验证失败时，Fomalhaut 以非零状态退出。
 
@@ -183,6 +185,89 @@ AccountsService 是可选的用户资料增强，不会被强制安装。`--syst
 
 使用非默认安装前缀时传入绝对 `--prefix`。`--system-root /tmp/fomalhaut-root` 只用于在隔离目录
 验证安装结果，不调用 `sudo`，也不允许 `--restart`。完整参数见 `./install.sh --help`。
+
+## 登录时自动解锁密钥环
+
+从 SDDM、GDM 等显示管理器切换到 greetd 后，如果首次打开需要已保存凭据的应用时出现
+“解锁登录密钥环”或“您登录计算机时，您的登录密钥环未被解锁”，请检查 greetd 的 PAM
+配置。密钥环服务由用户使用的桌面和会话决定，Fomalhaut 不依赖或限定具体实现。原显示管理
+器的密钥环配置不会自动应用到 greetd；自动解锁由所选密钥环的 PAM 模块负责，当前安装器和
+AUR 包不会为管理员改写 `/etc/pam.d/greetd`。
+
+### 常见密钥环实现
+
+先确认桌面会话实际使用的密钥环服务，再按对应文档配置：
+
+| 密钥环 | 常见环境 | ArchWiki |
+| --- | --- | --- |
+| GNOME Keyring | GNOME 及使用 Secret Service API 的应用 | [GNOME/Keyring](https://wiki.archlinux.org/title/GNOME/Keyring) |
+| KDE Wallet | KDE Plasma | [KDE Wallet](https://wiki.archlinux.org/title/KDE_Wallet) |
+
+KDE Wallet 使用不同的 PAM 模块；例如 Plasma 6 的实现与配置参数可能随版本变化，不应把下文
+GNOME Keyring 的模块行直接套用到 KWallet。请以 ArchWiki、发行版文档和实际 PAM 配置为准。
+
+### GNOME Keyring 配置示例（Arch Linux）
+
+以下步骤适用于使用密码登录、希望自动解锁 GNOME Keyring 的系统。先确认已经安装
+`gnome-keyring`，并且名为 `login` 的登录密钥环密码与用户登录密码一致。需要更改密钥环
+密码时，可在 Seahorse（Passwords and Keys）中操作；不要通过删除密钥环文件来消除提示，
+其中可能保存了应用凭据。自动登录、指纹或安全密钥认证通常不会向 PAM 提供可用于解密的
+登录密码，因此仅添加以下模块不能实现这些登录方式下的自动解锁。
+
+先备份现有配置，再编辑：
+
+```sh
+sudo cp -a /etc/pam.d/greetd "/etc/pam.d/greetd.bak.$(date +%Y%m%d%H%M%S)"
+sudoedit /etc/pam.d/greetd
+```
+
+保留发行版和管理员已有的认证规则。在获取登录密码的 `auth` 规则之后加入
+`pam_gnome_keyring.so` 的 `auth` 行，在已有 `session` 规则之后加入对应的 `session` 行。
+如果当前文件或它引用的 PAM 配置已经包含等效规则，不要重复添加。对于使用
+`system-local-login` 的 Arch 默认配置，合并后示例如下：
+
+```text
+#%PAM-1.0
+
+auth       required     pam_securetty.so
+auth       requisite    pam_nologin.so
+auth       include      system-local-login
+-auth      optional     pam_gnome_keyring.so
+account    include      system-local-login
+session    include      system-local-login
+-session   optional     pam_gnome_keyring.so auto_start
+```
+
+这里的 `optional` 表示密钥环模块失败本身不会拒绝正常登录；模块类型前的 `-` 表示模块
+缺失时不记录加载错误。这两行不能替代原有的密码认证与会话规则。其他发行版的 PAM 栈可能
+不同，应按发行版文档合并，不能直接用整个示例覆盖配置。
+
+保存后无需重启 greetd。保存工作，正常注销，再通过 Fomalhaut 输入登录密码登录；已有桌面
+会话不会因编辑配置而自动解锁密钥环。登录后打开此前触发提示的应用，确认不再要求解锁。
+如需回滚，用上一步生成的实际备份文件恢复 `/etc/pam.d/greetd`。修改 PAM 时保留一个可用的
+管理员终端，直到新登录验证通过。
+
+### GNOME Keyring 登录后仍反复要求解锁
+
+自动解锁配置解决的是登录时的密码传递。如果同一桌面会话中已经成功解锁，却再次出现
+提示，还应检查密钥环服务是否异常退出、重启或被重新锁定：
+
+```sh
+systemctl --user show gnome-keyring-daemon.service -p ActiveState -p NRestarts
+journalctl --user -b -u gnome-keyring-daemon.service
+```
+
+这些命令适用于通过 systemd 用户服务运行 GNOME Keyring 的系统。`NRestarts` 表示该服务的
+自动重启次数，不包含所有可能的手工重启或其他启动方式。服务崩溃重启后，原进程内存中的
+解锁状态会丢失，后续凭据请求可能再次触发提示。仅补充 PAM 配置不能修复这种崩溃；应结合
+日志检查 GNOME Keyring 及其依赖、会话启动方式和请求凭据的应用。仅凭弹窗不能认定是
+Fomalhaut 的认证故障，也不能认定密钥环文件损坏。
+
+上述配置针对 greetd 登录使用的 `/etc/pam.d/greetd`；`/etc/pam.d/fomalhaut-lock` 用于
+当前用户的锁屏重新认证，修改它不能替代登录配置。
+
+参考：[GNOME Keyring PAM 模块源码](https://gitlab.gnome.org/GNOME/gnome-keyring/-/tree/main/pam)、
+[ArchWiki GNOME/Keyring](https://wiki.archlinux.org/title/GNOME/Keyring)。
 
 ## Wayland locker、PAM 与 readiness
 
